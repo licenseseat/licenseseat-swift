@@ -1,4 +1,5 @@
 import XCTest
+import Foundation
 #if canImport(CryptoKit)
 import CryptoKit
 #elseif canImport(Crypto)
@@ -9,8 +10,8 @@ import Combine
 
 @MainActor
 final class LicenseSeatSDKTests: XCTestCase {
-    private var sdk: LicenseSeat!
-    private var cancellables: Set<AnyCancellable> = []
+    private var sdk: LicenseSeat?
+    private var cancellables = Set<AnyCancellable>()
     
     override func setUp() {
         super.setUp()
@@ -28,11 +29,11 @@ final class LicenseSeatSDKTests: XCTestCase {
         urlConf.protocolClasses = [MockURLProtocol.self]
         let session = URLSession(configuration: urlConf)
         sdk = LicenseSeat(config: cfg, urlSession: session)
-        sdk.cache.clear() // clean slate
+        sdk?.cache.clear() // clean slate
     }
     
     override func tearDown() {
-        sdk.cache.clear()
+        sdk?.cache.clear()
         URLProtocol.unregisterClass(MockURLProtocol.self)
         cancellables.removeAll()
         super.tearDown()
@@ -51,24 +52,35 @@ final class LicenseSeatSDKTests: XCTestCase {
             "reason_code": NSNull(),
             "active_entitlements": []
         ]
-        var requestSequence: [String] = []
+        var requestSequence = [String]()
         
         MockURLProtocol.requestHandler = { request in
-            requestSequence.append(request.url!.path)
-            switch request.url!.path {
+            guard let url = request.url else {
+                throw URLError(.badURL)
+            }
+            requestSequence.append(url.path)
+            switch url.path {
             case "/activations/activate":
                 let data = try JSONSerialization.data(withJSONObject: activationJSON)
-                let resp = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: ["Content-Type":"application/json"])!;
+                guard let resp = HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: ["Content-Type":"application/json"]) else {
+                    throw URLError(.badServerResponse)
+                }
                 return (resp, data)
             case "/licenses/validate":
                 let data = try JSONSerialization.data(withJSONObject: validationJSON)
-                let resp = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: ["Content-Type":"application/json"])!;
+                guard let resp = HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: ["Content-Type":"application/json"]) else {
+                    throw URLError(.badServerResponse)
+                }
                 return (resp, data)
             case "/activations/deactivate":
-                let resp = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: ["Content-Type":"application/json"])!;
+                guard let resp = HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: ["Content-Type":"application/json"]) else {
+                    throw URLError(.badServerResponse)
+                }
                 return (resp, Data("{}".utf8))
             default:
-                let resp = HTTPURLResponse(url: request.url!, statusCode: 404, httpVersion: nil, headerFields: nil)!;
+                guard let resp = HTTPURLResponse(url: url, statusCode: 404, httpVersion: nil, headerFields: nil) else {
+                    throw URLError(.badServerResponse)
+                }
                 return (resp, Data())
             }
         }
@@ -78,30 +90,30 @@ final class LicenseSeatSDKTests: XCTestCase {
         let validationExp = expectation(description: "validation")
         let deactivationExp = expectation(description: "deactivation")
         
-        sdk.on("activation:success") { _ in activationExp.fulfill() }.store(in: &cancellables)
-        sdk.on("validation:success") { _ in validationExp.fulfill() }.store(in: &cancellables)
-        sdk.on("deactivation:success") { _ in deactivationExp.fulfill() }.store(in: &cancellables)
+        sdk?.on("activation:success") { _ in activationExp.fulfill() }.store(in: &cancellables)
+        sdk?.on("validation:success") { _ in validationExp.fulfill() }.store(in: &cancellables)
+        sdk?.on("deactivation:success") { _ in deactivationExp.fulfill() }.store(in: &cancellables)
         
         // 1. Activate
-        let license = try await sdk.activate(licenseKey: "TEST-KEY")
-        XCTAssertEqual(license.licenseKey, "TEST-KEY")
-        XCTAssertNotNil(sdk.currentLicense())
+        let license = try await sdk?.activate(licenseKey: "TEST-KEY")
+        XCTAssertEqual(license?.licenseKey, "TEST-KEY")
+        XCTAssertNotNil(sdk?.currentLicense())
         
         // 2. Validate
-        let validation = try await sdk.validate(licenseKey: "TEST-KEY")
-        XCTAssertTrue(validation.valid)
+        let validation = try await sdk?.validate(licenseKey: "TEST-KEY")
+        XCTAssertTrue(validation?.valid ?? false)
         
         // 3. Deactivate
-        try await sdk.deactivate()
-        XCTAssertNil(sdk.currentLicense())
+        try await sdk?.deactivate()
+        XCTAssertNil(sdk?.currentLicense())
         
         // Wait for events
         await fulfillment(of: [activationExp, validationExp, deactivationExp], timeout: 5)
         
         // Ensure correct endpoints called in order (ignore any extra calls)
         XCTAssertGreaterThanOrEqual(requestSequence.count, 3)
-        XCTAssertEqual(requestSequence[0], "/activations/activate")
-        XCTAssertEqual(requestSequence[1], "/licenses/validate")
+        XCTAssertEqual(requestSequence.first, "/activations/activate")
+        XCTAssertEqual(requestSequence.dropFirst().first, "/licenses/validate")
         XCTAssertEqual(requestSequence.last, "/activations/deactivate")
     }
 }

@@ -10,8 +10,8 @@ import XCTest
 
 @MainActor
 final class EntitlementTests: XCTestCase {
-    var sdk: LicenseSeat!
-    var cache: LicenseCache!
+    var sdk: LicenseSeat?
+    var cache: LicenseCache?
     
     override func setUp() {
         super.setUp()
@@ -21,7 +21,7 @@ final class EntitlementTests: XCTestCase {
     }
     
     override func tearDown() {
-        cache.clear()
+        cache?.clear()
         super.tearDown()
     }
     
@@ -53,9 +53,13 @@ final class EntitlementTests: XCTestCase {
             validation: validation
         )
         
-        cache.setLicense(license)
+        cache?.setLicense(license)
         
         // When
+        guard let sdk = sdk else {
+            XCTFail("SDK not initialized")
+            return
+        }
         let status = sdk.checkEntitlement("premium-features")
         
         // Then
@@ -91,9 +95,13 @@ final class EntitlementTests: XCTestCase {
             validation: validation
         )
         
-        cache.setLicense(license)
+        cache?.setLicense(license)
         
         // When
+        guard let sdk = sdk else {
+            XCTFail("SDK not initialized")
+            return
+        }
         let status = sdk.checkEntitlement("trial-access")
         
         // Then
@@ -128,9 +136,13 @@ final class EntitlementTests: XCTestCase {
             validation: validation
         )
         
-        cache.setLicense(license)
+        cache?.setLicense(license)
         
         // When
+        guard let sdk = sdk else {
+            XCTFail("SDK not initialized")
+            return
+        }
         let status = sdk.checkEntitlement("premium-features")
         
         // Then
@@ -143,6 +155,10 @@ final class EntitlementTests: XCTestCase {
         // Given: No cached license
         
         // When
+        guard let sdk = sdk else {
+            XCTFail("SDK not initialized")
+            return
+        }
         let status = sdk.checkEntitlement("any-feature")
         
         // Then
@@ -177,9 +193,13 @@ final class EntitlementTests: XCTestCase {
             validation: validation
         )
         
-        cache.setLicense(license)
+        cache?.setLicense(license)
         
         // When
+        guard let sdk = sdk else {
+            XCTFail("SDK not initialized")
+            return
+        }
         let status = sdk.checkEntitlement("lifetime-access")
         
         // Then

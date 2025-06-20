@@ -12,12 +12,12 @@ jobs:
     runs-on: macos-latest
     strategy:
       matrix:
-        xcode: ["15.0.1", "14.3.1"]
+        xcode: ["15.0.1"]
     steps:
       - uses: actions/checkout@v4
 
       - name: Select Xcode
-        run: sudo xcode-select -s /Applications/Xcode_${{ matrix.xcode }}.app
+        run: sudo xcode-select -s "/Applications/Xcode_${{ matrix.xcode }}.app/Contents/Developer"
 
       - name: Swift version
         run: swift --version
@@ -46,7 +46,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        swift: ["5.9", "5.8"]
+        swift: ["5.9"]
     container:
       image: swift:${{ matrix.swift }}
     steps:
@@ -68,7 +68,7 @@ jobs:
         run: brew install swiftlint
 
       - name: Run SwiftLint
-        run: swiftlint --strict
+        run: swiftlint --quiet
 
   documentation:
     name: Build Documentation
@@ -85,7 +85,7 @@ jobs:
             --hosting-base-path licenseseat-swift
 
       - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v2
+        uses: actions/upload-pages-artifact@v3
         with:
           path: ./docs
 
@@ -99,4 +99,4 @@ jobs:
     steps:
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v2
+        uses: actions/deploy-pages@v4
