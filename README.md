@@ -213,6 +213,43 @@ swift test
 swift test --enable-code-coverage
 ```
 
+## Example CLI (Interactive Test App)
+
+Explore the SDK without writing any code by running the bundled command-line application.
+
+```bash
+# From the repository root
+swift run --package-path Examples/LicenseSeatExample
+
+# Or, if you prefer to change directories first
+cd Examples/LicenseSeatExample
+swift run
+```
+
+The program presents a menu that lets you:
+
+1. Activate a license
+2. Validate it (online / offline)
+3. Check entitlements
+4. Show current cached status
+5. Deactivate
+6. Test API-key authentication
+7. Reset all persisted data
+
+Each action prints its result, then waits for you to press **Enter** before clearing the screen so the next menu is always clean.
+
+### Pointing the CLI at a local server
+
+Running your own LicenseSeat backend on `http://localhost:3000`?  Export two environment variables before launching:
+
+```bash
+export LICENSESEAT_API_URL=http://localhost:3000   # Base URL for all API calls
+export LICENSESEAT_API_KEY=sk_test_123             # Only if your endpoints require it
+swift run --package-path Examples/LicenseSeatExample
+```
+
+All SDK network requests will now hit your local instance instead of the public cloud API.
+
 ## Documentation
 
 Full API documentation is available at [https://licenseseat.github.io/licenseseat-swift](https://licenseseat.github.io/licenseseat-swift/documentation/licenseseatsdk/)

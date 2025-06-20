@@ -55,10 +55,17 @@ struct LicenseSeatExample {
             }
             .store(in: &cancellables)
         
+        // Helper to clear terminal for clarity
+        func clearScreen() {
+            // ANSI escape codes: clear & move cursor to home
+            print("\u{001B}[2J\u{001B}[H", terminator: "")
+        }
+        
         // Example menu
         var shouldExit = false
         
         while !shouldExit {
+            clearScreen()
             print("\n📋 LicenseSeat SDK Example Menu")
             print("1. Activate License")
             print("2. Validate License")
@@ -78,9 +85,9 @@ struct LicenseSeatExample {
             case "2":
                 await validateLicense(sdk: sdk)
             case "3":
-                checkEntitlement(sdk: sdk)
+                await checkEntitlement(sdk: sdk)
             case "4":
-                showStatus(sdk: sdk)
+                await showStatus(sdk: sdk)
             case "5":
                 await deactivateLicense(sdk: sdk)
             case "6":
@@ -92,6 +99,12 @@ struct LicenseSeatExample {
                 shouldExit = true
             default:
                 print("❌ Invalid choice")
+            }
+            
+            // Wait for user to acknowledge before clearing
+            if !shouldExit {
+                print("\n↩️  Press Enter to continue...", terminator: "")
+                _ = readLine()
             }
         }
         
@@ -127,7 +140,7 @@ struct LicenseSeatExample {
     }
     
     static func validateLicense(sdk: LicenseSeat) async {
-        guard let license = sdk.currentLicense() else {
+        guard let license = await sdk.currentLicense() else {
             print("❌ No active license to validate")
             return
         }
@@ -153,14 +166,14 @@ struct LicenseSeatExample {
         }
     }
     
-    static func checkEntitlement(sdk: LicenseSeat) {
+    static func checkEntitlement(sdk: LicenseSeat) async {
         print("\nEnter entitlement key: ", terminator: "")
         guard let key = readLine(), !key.isEmpty else {
             print("❌ Invalid entitlement key")
             return
         }
         
-        let status = sdk.checkEntitlement(key)
+        let status = await sdk.checkEntitlement(key)
         
         print("\n🎯 Entitlement '\(key)':")
         print("   Active: \(status.active)")
@@ -176,8 +189,8 @@ struct LicenseSeatExample {
         }
     }
     
-    static func showStatus(sdk: LicenseSeat) {
-        let status = sdk.getStatus()
+    static func showStatus(sdk: LicenseSeat) async {
+        let status = await sdk.getStatus()
         
         print("\n📊 Current Status:")
         switch status {
@@ -208,7 +221,7 @@ struct LicenseSeatExample {
     }
     
     static func deactivateLicense(sdk: LicenseSeat) async {
-        guard sdk.currentLicense() != nil else {
+        guard await sdk.currentLicense() != nil else {
             print("❌ No active license to deactivate")
             return
         }

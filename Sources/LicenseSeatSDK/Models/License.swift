@@ -96,6 +96,28 @@ public struct LicenseValidationResult: Codable, Equatable {
         self.optimistic = optimistic
         self.activeEntitlements = activeEntitlements
     }
+    
+    // Custom decoding to provide a default value for `offline`
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.valid = try container.decode(Bool.self, forKey: .valid)
+        self.reason = try container.decodeIfPresent(String.self, forKey: .reason)
+        // Default to `false` when key is absent to be backwards-compatible with older servers
+        self.offline = try container.decodeIfPresent(Bool.self, forKey: .offline) ?? false
+        self.reasonCode = try container.decodeIfPresent(String.self, forKey: .reasonCode)
+        self.optimistic = try container.decodeIfPresent(Bool.self, forKey: .optimistic)
+        self.activeEntitlements = try container.decodeIfPresent([Entitlement].self, forKey: .activeEntitlements)
+    }
+    
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(valid, forKey: .valid)
+        try container.encodeIfPresent(reason, forKey: .reason)
+        try container.encode(offline, forKey: .offline)
+        try container.encodeIfPresent(reasonCode, forKey: .reasonCode)
+        try container.encodeIfPresent(optimistic, forKey: .optimistic)
+        try container.encodeIfPresent(activeEntitlements, forKey: .activeEntitlements)
+    }
 }
 
 /// Represents an entitlement
