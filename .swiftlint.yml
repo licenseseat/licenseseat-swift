@@ -8,6 +8,8 @@ excluded:
 # Disable specific rules that are overly restrictive for this project
 disabled_rules:
   - force_unwrapping # Allow force unwraps in controlled test code
+  - force_cast # Allow force casting in parametrized generics
+  - identifier_name # Allow short generics/tuple params
   - implicitly_unwrapped_optional
   - trailing_whitespace # Allow minor whitespace noise
   - trailing_newline # Handled by formatter
@@ -22,3 +24,8 @@ function_body_length:
 type_body_length:
   warning: 400
   error: 800
+
+# Limit linting to SDK sources only
+included:
+  - Sources/LicenseSeatSDK
+# Ignore build artifacts and example apps

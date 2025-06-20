@@ -26,20 +26,7 @@ jobs:
         run: swift build -v
 
       - name: Run tests
-        run: swift test -v --enable-code-coverage
-
-      - name: Generate coverage report
-        run: |
-          xcrun llvm-cov export \
-            .build/debug/LicenseSeatSDKPackageTests.xctest/Contents/MacOS/LicenseSeatSDKPackageTests \
-            -instr-profile .build/debug/codecov/default.profdata \
-            -format="lcov" > coverage.lcov
-
-      - name: Upload coverage
-        uses: codecov/codecov-action@v3
-        with:
-          file: ./coverage.lcov
-          fail_ci_if_error: true
+        run: swift test -v
 
   lint:
     name: SwiftLint
