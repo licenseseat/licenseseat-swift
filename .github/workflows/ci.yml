@@ -54,6 +54,22 @@ jobs:
             --transform-for-static-hosting \
             --hosting-base-path licenseseat-swift
 
+      - name: Add landing page redirect
+        run: |
+          cat > ./docs/index.html <<'EOF'
+          <!DOCTYPE html>
+          <html lang="en">
+            <head>
+              <meta charset="utf-8"/>
+              <title>LicenseSeat SDK Documentation</title>
+              <meta http-equiv="refresh" content="0; url=./documentation/licenseseatsdk"/>
+            </head>
+            <body>
+              <p>Redirecting to documentation...</p>
+            </body>
+          </html>
+          EOF
+
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
