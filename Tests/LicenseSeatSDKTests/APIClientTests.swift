@@ -11,6 +11,9 @@ import CryptoKit
 #elseif canImport(Crypto)
 import Crypto
 #endif
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 @testable import LicenseSeatSDK
 
 final class APIClientTests: XCTestCase {

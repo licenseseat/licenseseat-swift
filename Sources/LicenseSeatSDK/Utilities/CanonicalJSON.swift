@@ -64,9 +64,17 @@ enum CanonicalJSON {
     /// Normalize number representation
     private static func normalizeNumber(_ number: NSNumber) -> Any {
         // Check if it's a boolean disguised as NSNumber
+#if canImport(CoreFoundation)
         if CFBooleanGetTypeID() == CFGetTypeID(number) {
             return number.boolValue
         }
+#else
+        // On platforms without CoreFoundation, fall back to inspecting the ObjC type.
+        // A boolean NSNumber uses the "c" (char) objCType and only ever stores 0/1.
+        if let cString = String(validatingUTF8: number.objCType), cString == "c" {
+            return number.boolValue
+        }
+#endif
         
         // Check if it's an integer
         let double = number.doubleValue

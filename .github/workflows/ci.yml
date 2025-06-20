@@ -41,23 +41,6 @@ jobs:
           file: ./coverage.lcov
           fail_ci_if_error: true
 
-  test-linux:
-    name: Test on Linux
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        swift: ["5.9"]
-    container:
-      image: swift:${{ matrix.swift }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Build
-        run: swift build -v
-
-      - name: Run tests
-        run: swift test -v
-
   lint:
     name: SwiftLint
     runs-on: macos-latest

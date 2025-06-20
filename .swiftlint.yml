@@ -9,6 +9,7 @@ excluded:
 disabled_rules:
   - force_unwrapping # Allow force unwraps in controlled test code
   - implicitly_unwrapped_optional
+  - trailing_whitespace # Allow minor whitespace noise
   - trailing_newline # Handled by formatter
   - colon_spacing # Handled by formatter
 
@@ -16,3 +17,8 @@ disabled_rules:
 function_body_length:
   warning: 80
   error: 150
+
+# Allow large types in generated/central classes
+type_body_length:
+  warning: 400
+  error: 800

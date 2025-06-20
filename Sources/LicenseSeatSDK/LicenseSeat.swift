@@ -6,6 +6,9 @@
 //  Copyright © 2025 LicenseSeat. All rights reserved.
 //
 
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 import Foundation
 #if canImport(Combine)
 import Combine
@@ -69,6 +72,7 @@ import Network
 ///
 /// All public methods are safe to call from any thread. UI updates from event handlers
 /// and publishers should be dispatched to the main queue when necessary.
+// MARK: - LicenseSeat Main Class
 @MainActor
 public final class LicenseSeat: ObservableObject {
     
