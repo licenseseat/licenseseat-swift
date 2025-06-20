@@ -7,6 +7,7 @@
 //
 
 import Foundation
+#if canImport(Combine)
 import Combine
 
 // MARK: - Combine Publishers
@@ -175,4 +176,6 @@ extension LicenseSeat.Event {
     public var dictionary: [String: Any]? {
         data as? [String: Any]
     }
-} 
+}
+
+#endif // canImport(Combine) 

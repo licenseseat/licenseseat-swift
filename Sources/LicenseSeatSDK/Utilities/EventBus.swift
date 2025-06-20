@@ -7,7 +7,36 @@
 //
 
 import Foundation
+
+#if canImport(Combine)
 import Combine
+#else
+/// Minimal Combine-compatible cancellable type for platforms without Combine.
+public struct AnyCancellable: Hashable {
+    private static var counter: UInt = 0
+    private let id: UInt
+    private let cancelHandler: () -> Void
+
+    public init(_ cancel: @escaping () -> Void = {}) {
+        Self.counter &+= 1
+        self.id = Self.counter
+        self.cancelHandler = cancel
+    }
+
+    public func cancel() {
+        cancelHandler()
+    }
+
+    // Hashable
+    public static func == (lhs: AnyCancellable, rhs: AnyCancellable) -> Bool {
+        lhs.id == rhs.id
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+    }
+}
+#endif
 
 /// Event bus for SDK events
 final class EventBus: @unchecked Sendable {

@@ -7,7 +7,9 @@
 //
 
 import Foundation
+#if canImport(Combine)
 import Combine
+#endif
 #if canImport(UIKit)
 import UIKit
 #elseif canImport(AppKit)
@@ -562,14 +564,17 @@ public final class LicenseSeat: ObservableObject {
         #if canImport(Network)
         networkMonitor = NWPathMonitor()
         networkMonitor?.pathUpdateHandler = { [weak self] path in
-            Task { @MainActor in
-                let wasOnline = self?.isOnline ?? true
-                self?.isOnline = path.status == .satisfied
-                
-                if !wasOnline && self?.isOnline == true {
-                    self?.handleNetworkReconnection()
-                } else if wasOnline && self?.isOnline == false {
-                    self?.handleNetworkDisconnection()
+            // Hop onto the main actor to update state and emit events safely.
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+
+                let wasOnline = self.isOnline
+                self.isOnline = path.status == .satisfied
+
+                if !wasOnline && self.isOnline {
+                    self.handleNetworkReconnection()
+                } else if wasOnline && !self.isOnline {
+                    self.handleNetworkDisconnection()
                 }
             }
         }

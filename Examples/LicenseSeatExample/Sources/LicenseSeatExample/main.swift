@@ -1,6 +1,8 @@
 import Foundation
 import LicenseSeatSDK
+#if canImport(Combine)
 import Combine
+#endif
 
 // Example app demonstrating LicenseSeatSDK usage
 @main
