@@ -37,4 +37,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Clock skew detection (±5 minutes default)
 - Secure storage with platform-appropriate mechanisms
 
-[1.0.0]: https://github.com/yourusername/licenseseat-swift/releases/tag/v1.0.0 
+[1.0.0]: https://github.com/licenseseat/licenseseat-swift/releases/tag/v1.0.0 
