@@ -15,6 +15,8 @@ struct LicenseSeatExample {
         let config = LicenseSeatConfig(
             apiBaseUrl: ProcessInfo.processInfo.environment["LICENSESEAT_API_URL"] ?? "https://api.licenseseat.com",
             apiKey: ProcessInfo.processInfo.environment["LICENSESEAT_API_KEY"],
+            autoValidateInterval: 5, // 5-second auto-validation while online
+            networkRecheckInterval: 2, // 2-second heartbeat while offline
             debug: true,
             offlineFallbackEnabled: true
         )
@@ -57,17 +59,49 @@ struct LicenseSeatExample {
             }
             .store(in: &cancellables)
         
-        // Helper to clear terminal for clarity
-        func clearScreen() {
-            // ANSI escape codes: clear & move cursor to home
-            print("\u{001B}[2J\u{001B}[H", terminator: "")
+        // Monitor auto-validation events specifically
+        sdk.on("autovalidation:cycle") { data in
+            print("\n⏰ AUTO-VALIDATION CYCLE:", data)
+            print("Enter choice: ", terminator: "")
+            fflush(stdout)
+        }.store(in: &cancellables)
+        
+        sdk.on("validation:success") { data in
+            print("\n✅ AUTO-VALIDATION SUCCESS")
+            print("Enter choice: ", terminator: "")
+            fflush(stdout)
+        }.store(in: &cancellables)
+        
+        sdk.on("validation:auto-failed") { data in
+            print("\n❌ AUTO-VALIDATION FAILED:", data)
+            print("Enter choice: ", terminator: "")
+            fflush(stdout)
+        }.store(in: &cancellables)
+        
+        // Give SDK a moment to initialize and check for cached license
+        try? await Task.sleep(nanoseconds: 100_000_000) // 0.1 seconds
+        
+        // Check current status
+        let currentStatus = sdk.getStatus()
+        print("📊 Initial SDK Status: \(currentStatus)")
+        
+        if let license = sdk.currentLicense() {
+            print("📄 Found cached license: \(license.licenseKey)")
+            print("   Device: \(license.deviceIdentifier)")
+            print("   Activated: \(license.activatedAt)")
+        } else {
+            print("❌ No cached license found - activate one to start auto-validation")
         }
         
-        // Example menu
-        var shouldExit = false
-        
-        while !shouldExit {
-            clearScreen()
+        // Run interactive menu directly (blocking). This keeps the process
+        // alive until the user chooses to exit.
+        await interactiveMenu(sdk: sdk)
+    }
+    
+    // MARK: - Interactive Menu (runs on main actor)
+
+    private static func interactiveMenu(sdk: LicenseSeat) async {
+        func menu() {
             print("\n📋 LicenseSeat SDK Example Menu")
             print("1. Activate License")
             print("2. Validate License")
@@ -78,9 +112,11 @@ struct LicenseSeatExample {
             print("7. Reset SDK")
             print("8. Exit")
             print("\nEnter choice: ", terminator: "")
-            
+            fflush(stdout)
+        }
+        while true {
+            menu()
             guard let choice = readLine() else { continue }
-            
             switch choice {
             case "1":
                 await activateLicense(sdk: sdk)
@@ -95,22 +131,15 @@ struct LicenseSeatExample {
             case "6":
                 await testAuth(sdk: sdk)
             case "7":
-                sdk.reset()
+                await MainActor.run { sdk.reset() }
                 print("✅ SDK reset complete")
             case "8":
-                shouldExit = true
+                print("👋 Goodbye!")
+                return
             default:
                 print("❌ Invalid choice")
             }
-            
-            // Wait for user to acknowledge before clearing
-            if !shouldExit {
-                print("\n↩️  Press Enter to continue...", terminator: "")
-                _ = readLine()
-            }
         }
-        
-        print("\n👋 Goodbye!")
     }
     
     static func activateLicense(sdk: LicenseSeat) async {

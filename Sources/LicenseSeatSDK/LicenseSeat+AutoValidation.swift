@@ -13,28 +13,49 @@ extension LicenseSeat {
     /// Start automatic license validation
     /// - Parameter licenseKey: License key to validate periodically
     func startAutoValidation(licenseKey: String) {
+        // Cancel any existing timer/task
         stopAutoValidation()
         
         currentAutoLicenseKey = licenseKey
         let interval = config.autoValidateInterval
         
-        // Schedule validation timer
-        validationTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                await self?.performAutoValidation(licenseKey: licenseKey)
+        // Schedule validation using a detached Task so we are not tied to a RunLoop.
+        validationTask = Task.detached { [weak self] in
+            guard let self else { return }
+            // Emit first cycle information immediately so the UI can show when the next run will be.
+            await MainActor.run {
+                self.eventBus.emit("autovalidation:cycle", [
+                    "nextRunAt": Date().addingTimeInterval(interval)
+                ])
+            }
+            
+            // Continuous loop until cancelled.
+            while !Task.isCancelled {
+                do {
+                    try await Task.sleep(nanoseconds: UInt64(interval * 1_000_000_000))
+                } catch {
+                    // Task was likely cancelled – exit loop
+                    break
+                }
+                
+                await MainActor.run {
+                    Task { @MainActor [weak self] in
+                        guard let self else { return }
+                        await self.performAutoValidation(licenseKey: licenseKey)
+                    }
+                }
             }
         }
-        
-        // Announce next scheduled run
-        eventBus.emit("autovalidation:cycle", [
-            "nextRunAt": Date().addingTimeInterval(interval)
-        ])
     }
     
     /// Stop automatic validation
     func stopAutoValidation() {
+        // Invalidate legacy timer (if any)
         validationTimer?.invalidate()
         validationTimer = nil
+        // Cancel concurrency task
+        validationTask?.cancel()
+        validationTask = nil
         eventBus.emit("autovalidation:stopped", [:])
     }
     
@@ -51,7 +72,7 @@ extension LicenseSeat {
         }
         
         // Announce next scheduled run
-        if validationTimer != nil {
+        if validationTask != nil {
             eventBus.emit("autovalidation:cycle", [
                 "nextRunAt": Date().addingTimeInterval(config.autoValidateInterval)
             ])

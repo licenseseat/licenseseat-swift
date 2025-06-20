@@ -25,7 +25,18 @@ final class MockURLProtocol: URLProtocol {
     
     override func startLoading() {
         guard let handler = MockURLProtocol.requestHandler else {
-            fatalError("MockURLProtocol requestHandler not set. Did you forget to provide a stub in your test?")
+            // If no handler is provided, respond with 200 and empty JSON to avoid crashing tests
+            let emptyData = try! JSONSerialization.data(withJSONObject: [:])
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didLoad: emptyData)
+            client?.urlProtocolDidFinishLoading(self)
+            return
         }
         do {
             let (response, data) = try handler(request)

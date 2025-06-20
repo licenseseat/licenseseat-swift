@@ -102,6 +102,9 @@ public final class LicenseSeat: ObservableObject {
     /// Timer for automatic validation
     internal var validationTimer: Timer?
     
+    /// Concurrency task for automatic validation (run-loop independent)
+    internal var validationTask: Task<Void, Never>?
+    
     /// Timer for connectivity polling (fallback when NWPathMonitor unavailable)
     internal var connectivityTimer: Timer?
     
@@ -604,7 +607,7 @@ public final class LicenseSeat: ObservableObject {
         eventBus.emit("network:online", [:])
         stopConnectivityPolling()
         
-        if let licenseKey = currentAutoLicenseKey, validationTimer == nil {
+        if let licenseKey = currentAutoLicenseKey, validationTimer == nil && validationTask == nil {
             startAutoValidation(licenseKey: licenseKey)
         }
         
@@ -616,9 +619,8 @@ public final class LicenseSeat: ObservableObject {
     private func handleNetworkDisconnection() {
         eventBus.emit("network:offline", [:])
         stopAutoValidation()
-        #if !canImport(Network)
+        // Start heartbeat polling to detect server availability even when Network framework says we're online.
         startConnectivityPolling()
-        #endif
     }
     
     private func shouldFallbackToOffline(error: Error) -> Bool {
@@ -646,6 +648,7 @@ public final class LicenseSeat: ObservableObject {
         validationTimer?.invalidate()
         connectivityTimer?.invalidate()
         offlineRefreshTimer?.invalidate()
+        validationTask?.cancel()
         #if canImport(Network)
         networkMonitor?.cancel()
         #endif
