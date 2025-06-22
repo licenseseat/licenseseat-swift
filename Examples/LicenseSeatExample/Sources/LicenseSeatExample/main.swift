@@ -15,7 +15,7 @@ struct LicenseSeatExample {
         let config = LicenseSeatConfig(
             apiBaseUrl: ProcessInfo.processInfo.environment["LICENSESEAT_API_URL"] ?? "https://api.licenseseat.com",
             apiKey: ProcessInfo.processInfo.environment["LICENSESEAT_API_KEY"],
-            autoValidateInterval: 5, // 5-second auto-validation while online
+            autoValidateInterval: 60, // 5-second auto-validation while online
             networkRecheckInterval: 2, // 2-second heartbeat while offline
             debug: true,
             offlineFallbackEnabled: true

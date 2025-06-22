@@ -138,10 +138,16 @@ extension LicenseSeat {
             // Update last seen timestamp
             cache.setLastSeenTimestamp(now.timeIntervalSince1970)
             
+            // Extract active entitlements (if any)
+            let activeEntitlements = parseActiveEntitlements(from: payload)
+            
             return LicenseValidationResult(
                 valid: true,
                 reason: nil,
-                offline: true
+                offline: true,
+                reasonCode: nil,
+                optimistic: nil,
+                activeEntitlements: activeEntitlements.isEmpty ? nil : activeEntitlements
             )
             
         } catch {
@@ -172,7 +178,9 @@ extension LicenseSeat {
                 valid: isValid,
                 reason: nil,
                 offline: true,
-                reasonCode: isValid ? nil : "signature_invalid"
+                reasonCode: isValid ? nil : "signature_invalid",
+                optimistic: nil,
+                activeEntitlements: (isValid ? parseActiveEntitlements(from: signedLicense.payload ?? [:]) : nil)
             )
         } catch {
             return LicenseValidationResult(
@@ -240,5 +248,39 @@ extension LicenseSeat {
         }
         
         return result == 0
+    }
+    
+    // MARK: - Entitlement Parsing
+    /// Build an array of `Entitlement` models from the offline license payload.
+    /// - Parameter payload: Raw payload dictionary extracted from the signed offline license.
+    /// - Returns: Array of entitlements (empty if none present).
+    private func parseActiveEntitlements(from payload: [String: Any]) -> [Entitlement] {
+        // Support both `active_ents` (short) and `active_entitlements` (long) keys
+        let rawEntitlements = (payload["active_ents"] as? [[String: Any]]) ??
+                              (payload["active_entitlements"] as? [[String: Any]]) ?? []
+        guard !rawEntitlements.isEmpty else { return [] }
+        
+        let isoFormatter = ISO8601DateFormatter()
+        
+        return rawEntitlements.compactMap { item in
+            guard let key = item["key"] as? String else { return nil }
+            let name = item["name"] as? String
+            let description = item["description"] as? String
+            var expiresAt: Date? = nil
+            if let expiresStr = item["expires_at"] as? String {
+                expiresAt = isoFormatter.date(from: expiresStr)
+            }
+            var metadata: [String: AnyCodable]? = nil
+            if let metaDict = item["metadata"] as? [String: Any] {
+                metadata = metaDict.mapValues { AnyCodable($0) }
+            }
+            return Entitlement(
+                key: key,
+                name: name,
+                description: description,
+                expiresAt: expiresAt,
+                metadata: metadata
+            )
+        }
     }
 } 

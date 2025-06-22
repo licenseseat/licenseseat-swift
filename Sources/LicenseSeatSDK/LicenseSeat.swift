@@ -315,10 +315,26 @@ public final class LicenseSeat: ObservableObject {
                 body["product_slug"] = productSlug
             }
             
-            let result: LicenseValidationResult = try await apiClient.post(
+            var result: LicenseValidationResult = try await apiClient.post(
                 path: "/licenses/validate",
                 body: body
             )
+            
+            // If the server response doesn't include entitlements, merge
+            // any previously-cached list so we don't lose track after an
+            // optimistic/offline cycle.
+            if (result.activeEntitlements?.isEmpty ?? true),
+               let cachedEnts = cache.getLicense()?.validation?.activeEntitlements,
+               !cachedEnts.isEmpty {
+                result = LicenseValidationResult(
+                    valid: result.valid,
+                    reason: result.reason,
+                    offline: result.offline,
+                    reasonCode: result.reasonCode,
+                    optimistic: result.optimistic,
+                    activeEntitlements: cachedEnts
+                )
+            }
             
             // Update cache
             if let cachedLicense = cache.getLicense(),

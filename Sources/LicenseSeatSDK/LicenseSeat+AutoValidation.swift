@@ -145,6 +145,18 @@ extension LicenseSeat {
                 "exp_at": offlineLicense.payload?["exp_at"] as Any
             ])
             
+            // Immediately verify offline license locally so that
+            // active entitlements (and other validation fields) are
+            // cached and available even when we are online.
+            if let offlineResult = await quickVerifyCachedOfflineLocal() {
+                cache.updateValidation(offlineResult)
+                if offlineResult.valid {
+                    eventBus.emit("validation:offline-success", offlineResult)
+                } else {
+                    eventBus.emit("validation:offline-failed", offlineResult)
+                }
+            }
+            
         } catch {
             log("Failed to sync offline assets:", error)
         }

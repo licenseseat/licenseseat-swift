@@ -106,7 +106,41 @@ public struct LicenseValidationResult: Codable, Equatable {
         self.offline = try container.decodeIfPresent(Bool.self, forKey: .offline) ?? false
         self.reasonCode = try container.decodeIfPresent(String.self, forKey: .reasonCode)
         self.optimistic = try container.decodeIfPresent(Bool.self, forKey: .optimistic)
-        self.activeEntitlements = try container.decodeIfPresent([Entitlement].self, forKey: .activeEntitlements)
+
+        // Decode active entitlements (long key)
+        var decodedEntitlements = try container.decodeIfPresent([Entitlement].self, forKey: .activeEntitlements)
+        
+        // Fallback to abbreviated key used by offline payloads / legacy APIs
+        if decodedEntitlements == nil {
+            struct DynamicKey: CodingKey {
+                var stringValue: String
+                init?(stringValue: String) { self.stringValue = stringValue }
+                var intValue: Int?
+                init?(intValue: Int) { return nil }
+            }
+            let dynContainer = try decoder.container(keyedBy: DynamicKey.self)
+            if let activeEntsKey = DynamicKey(stringValue: "active_ents"),
+               let rawEnts = try dynContainer.decodeIfPresent([[String: AnyCodable]].self, forKey: activeEntsKey) {
+                let isoFormatter = ISO8601DateFormatter()
+                decodedEntitlements = rawEnts.compactMap { dict -> Entitlement? in
+                    guard let keyVal = dict["key"]?.value as? String else { return nil }
+                    let name = dict["name"]?.value as? String
+                    let description = dict["description"]?.value as? String
+                    let expiresStr = dict["expires_at"]?.value as? String
+                    let expiresAt = expiresStr.flatMap { isoFormatter.date(from: $0) }
+                    let metaAny = dict["metadata"]?.value as? [String: Any]
+                    let metadata = metaAny?.mapValues { AnyCodable($0) }
+                    return Entitlement(
+                        key: keyVal,
+                        name: name,
+                        description: description,
+                        expiresAt: expiresAt,
+                        metadata: metadata
+                    )
+                }
+            }
+        }
+        self.activeEntitlements = decodedEntitlements
     }
     
     public func encode(to encoder: Encoder) throws {
