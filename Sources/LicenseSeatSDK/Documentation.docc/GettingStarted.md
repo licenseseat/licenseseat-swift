@@ -4,7 +4,9 @@ Learn how to integrate LicenseSeatSDK into your Swift application.
 
 ## Overview
 
-This guide walks you through the initial setup and basic usage of LicenseSeatSDK. You'll learn how to configure the SDK, activate a license, and check entitlements.
+If you are starting a **new SwiftUI project** or prefer an ultra-simple integration, jump straight to <doc:LicenseSeatStore> for a three-line setup.
+
+This page focuses on the **low-level `LicenseSeat` client**, giving you fine-grained control and a deeper understanding of the underlying primitives.
 
 ## Installation
 

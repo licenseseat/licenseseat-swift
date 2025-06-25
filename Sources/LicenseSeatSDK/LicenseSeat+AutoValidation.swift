@@ -19,6 +19,12 @@ extension LicenseSeat {
         currentAutoLicenseKey = licenseKey
         let interval = config.autoValidateInterval
         
+        // Don't start auto-validation if interval is 0 or negative
+        guard interval > 0 else {
+            log("Auto-validation disabled (interval: \(interval))")
+            return
+        }
+        
         // Schedule validation using a detached Task so we are not tied to a RunLoop.
         validationTask = Task.detached { [weak self] in
             guard let self else { return }

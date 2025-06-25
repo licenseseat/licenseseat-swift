@@ -37,36 +37,74 @@ Or in Xcode:
 
 ## Quick Start
 
+### 🪄 *Magic* Integration (Recommended)
+
+Add licensing to a brand-new SwiftUI app in **three lines**:
+
 ```swift
 import LicenseSeatSDK
 
-// 1. Configure the SDK
+// 1️⃣ Configure once at launch
+LicenseSeatStore.shared.configure(apiKey: "YOUR_API_KEY")
+
+// 2️⃣ Activate (e.g. after user enters their license)
+try await LicenseSeatStore.shared.activate("USER-LICENSE-KEY")
+
+// 3️⃣ Observe anywhere in SwiftUI
+struct ContentView: View {
+    @LicenseState private var status               // instantly reactive ✨
+    @EntitlementState("pro-features") private var hasPro   // feature flags
+
+    var body: some View {
+        switch status {
+        case .active:        
+            MainAppView(showProFeatures: hasPro)
+        case .pending:       
+            ProgressView("Validating…")
+        case .inactive:      
+            ActivationView()
+        case .invalid:       
+            ErrorView()
+        case .offlineValid:  
+            MainAppView(showProFeatures: hasPro)   // Grace-period
+        case .offlineInvalid:
+            ErrorView()
+        }
+    }
+}
+```
+
+The `LicenseSeatStore` singleton handles:
+
+* Secure persistence & keychain storage
+* Background auto-validation based on `autoValidateInterval`
+* Offline license refresh & public-key syncing
+* Reactive `@Published` properties for SwiftUI / Combine
+
+### Low-Level API (Power Users)
+
+Prefer full control or a UIKit / CLI environment? You can still use the original `LicenseSeat` client directly:
+
+```swift
+import LicenseSeatSDK
+
 let config = LicenseSeatConfig(
     apiBaseUrl: "https://api.licenseseat.com",
-    apiKey: "your-api-key"
+    apiKey: "YOUR_API_KEY"
 )
 
 let licenseSeat = LicenseSeat(config: config)
 
-// 2. Activate a license
-let license = try await licenseSeat.activate(
-    licenseKey: "USER-LICENSE-KEY"
-)
+// Activate
+let license = try await licenseSeat.activate(licenseKey: "USER-LICENSE-KEY")
 
-// 3. Check entitlements
-let hasFeature = licenseSeat.checkEntitlement("premium-features").active
+// Validate on demand
+let result = try await licenseSeat.validate(licenseKey: "USER-LICENSE-KEY")
 
-// 4. Monitor status changes (SwiftUI)
-struct LicenseView: View {
-    @State private var status: LicenseStatus = .inactive(message: "")
-    
-    var body: some View {
-        Text("License: \(status.description)")
-            .onReceive(licenseSeat.statusPublisher) { newStatus in
-                status = newStatus
-            }
-    }
-}
+// Real-time status via Combine
+licenseSeat.statusPublisher
+    .sink { print("Status changed: \($0)") }
+    .store(in: &cancellables)
 ```
 
 ## Core Concepts

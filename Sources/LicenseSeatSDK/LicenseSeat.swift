@@ -270,13 +270,15 @@ public final class LicenseSeat: ObservableObject {
             // Start auto-validation
             startAutoValidation(licenseKey: licenseKey)
             
-            // Sync offline assets
-            Task {
-                await syncOfflineAssets()
+            // Sync offline assets if offline fallback is enabled
+            if config.offlineFallbackEnabled {
+                Task {
+                    await syncOfflineAssets()
+                }
+                
+                // Schedule offline refresh only when offline support is desired
+                scheduleOfflineRefresh()
             }
-            
-            // Schedule offline refresh
-            scheduleOfflineRefresh()
             
             eventBus.emit("activation:success", license)
             return license
