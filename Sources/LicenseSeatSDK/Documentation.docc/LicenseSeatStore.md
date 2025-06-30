@@ -1,15 +1,21 @@
-# LicenseSeatStore – Batteries-Included Facade
+# LicenseSeatStore – Legacy SwiftUI Integration
 
-> *Progressive disclosure*: trivial task, trivial code – advanced task, still possible.
+> **Note**: This is the legacy integration pattern. For new projects, use the static `LicenseSeat` methods shown in <doc:GettingStarted>.
 
 ## Overview
-`LicenseSeatStore` is a high-level, opinionated façade around ``LicenseSeat`` that delivers a **zero-boiler-plate** integration path:
 
-1. Configure once at app launch.
-2. Activate a seat.
-3. Observe `@Published` properties from SwiftUI, Combine, or `Observable`.
+`LicenseSeatStore` is a convenience singleton that predates the current static API design. It remains available for backwards compatibility and provides some SwiftUI-specific conveniences.
 
-Under the hood the store spins all the same secure machinery as the low-level client—automatic validation timers, offline fallback, clock-skew detection—while exposing a Swifty API tailored for modern SwiftUI codebases.
+**For new projects, we recommend:**
+```swift
+// Modern approach - use static methods
+LicenseSeat.configure(apiKey: "YOUR_API_KEY")
+try await LicenseSeat.activate("LICENSE-KEY")
+```
+
+## Legacy Store Pattern
+
+The store pattern wraps the core `LicenseSeat` instance:
 
 ```swift
 import LicenseSeat
@@ -17,14 +23,14 @@ import LicenseSeat
 @main
 struct MyApp: App {
     init() {
-        // One-liner configuration 🚀
+        // Legacy configuration
         LicenseSeatStore.shared.configure(apiKey: Environment.licensingKey)
     }
 
     var body: some Scene {
         WindowGroup {
             ContentView()
-                .licenseSeat()   // Inject store into the environment
+                .licenseSeat()   // Inject store into environment
         }
     }
 }
@@ -32,22 +38,22 @@ struct MyApp: App {
 
 ## Property Wrappers
 
-### @LicenseState
+The store provides SwiftUI property wrappers that work with both the legacy store and modern API:
 
-`@LicenseState` gives any view direct access to the current ``LicenseStatus``:
+### @LicenseState
 
 ```swift
 struct ContentView: View {
-    @LicenseState private var status
-
+    @LicenseState private var status  // Works with either approach
+    
     var body: some View {
         switch status {
-        case .active:        MainAppView()
-        case .inactive:      ActivationView()
-        case .pending:       ProgressView("Validating…")
-        case .invalid:       ErrorView()
-        case .offlineValid:  MainAppView()        // Grace-period
-        case .offlineInvalid:ErrorView()
+        case .active:         MainAppView()
+        case .inactive:       ActivationView()
+        case .pending:        ProgressView("Validating…")
+        case .invalid:        ErrorView()
+        case .offlineValid:   MainAppView()
+        case .offlineInvalid: ErrorView()
         }
     }
 }
@@ -55,82 +61,89 @@ struct ContentView: View {
 
 ### @EntitlementState
 
-`@EntitlementState` provides reactive access to individual feature flags:
-
 ```swift
 struct FeatureView: View {
-    @EntitlementState("export-pdf") private var canExportPDF
-    @EntitlementState("team-collaboration") private var hasTeamFeatures
+    @EntitlementState("premium") private var hasPremium
     
     var body: some View {
-        VStack {
-            if canExportPDF {
-                Button("Export PDF") { exportDocument() }
-            }
-            
-            if $hasTeamFeatures.active {  // Use projected value for full status
-                TeamPanel()
-            } else if $hasTeamFeatures.reason == .expired {
-                RenewalPrompt()
-            }
+        if hasPremium {
+            PremiumFeatures()
+        } else {
+            UpgradePrompt()
         }
     }
 }
 ```
 
-Both wrappers are powered by Combine under the hood and automatically stay on the main actor.
+## Modern Alternative
 
-## Background Validation
-
-The store subscribes to the `"autovalidation:cycle"` event emitted by the core SDK and surfaces the next scheduled run via ``LicenseSeatStore/nextAutoValidationAt``. Use it to display subtle UI like *"Next check in 59 s"*:
+Instead of using the store, you can achieve the same results with the static API:
 
 ```swift
-Text(timerString(from: store.nextAutoValidationAt))
-    .font(.caption)
-    .foregroundStyle(.secondary)
+// Configure once
+LicenseSeat.configure(apiKey: "YOUR_API_KEY")
+
+// Use anywhere
+class LicenseViewModel: ObservableObject {
+    @Published var status: LicenseStatus = .inactive(message: "")
+    
+    init() {
+        // Subscribe to status changes
+        LicenseSeat.statusPublisher
+            .receive(on: DispatchQueue.main)
+            .assign(to: &$status)
+    }
+    
+    func activate(_ key: String) async throws {
+        try await LicenseSeat.activate(key)
+    }
+}
 ```
 
-## Pass-Through API
+## API Comparison
 
-Need more control? The store forwards the most common operations directly to the underlying seat:
+| Feature | Modern (Recommended) | Legacy Store |
+|---------|---------------------|--------------|
+| Configure | `LicenseSeat.configure(apiKey:)` | `LicenseSeatStore.shared.configure(apiKey:)` |
+| Activate | `LicenseSeat.activate(_:)` | `LicenseSeatStore.shared.activate(_:)` |
+| Check Status | `LicenseSeat.shared.getStatus()` | `LicenseSeatStore.shared.status` |
+| Entitlements | `LicenseSeat.shared.checkEntitlement(_:)` | `LicenseSeatStore.shared.entitlement(_:)` |
+| Property Wrappers | ✅ Work with both | ✅ Work with both |
+
+## Should You Use the Store?
+
+**Use the modern static API if:**
+- Starting a new project
+- Want consistency with other Swift SDKs
+- Prefer explicit over implicit
+
+**Keep using the store if:**
+- You have existing code using it
+- You prefer the singleton pattern
+- You want the convenience methods
+
+Both approaches are fully supported and will continue to work. The property wrappers (`@LicenseState`, `@EntitlementState`) work seamlessly with either approach.
+
+## Migration Path
+
+To migrate from store to static API:
 
 ```swift
-try await LicenseSeatStore.shared.deactivate()
-let entitlement = LicenseSeatStore.shared.entitlement("pro-export")
+// Old
+LicenseSeatStore.shared.configure(apiKey: key)
+try await LicenseSeatStore.shared.activate(licenseKey)
+let status = LicenseSeatStore.shared.status
 
-// Generate support ticket info
-let diagnostics = LicenseSeatStore.shared.debugReport()
-print(diagnostics) // Redacted data safe to send
+// New
+LicenseSeat.configure(apiKey: key)
+try await LicenseSeat.activate(licenseKey)
+let status = LicenseSeat.shared.getStatus()
 ```
 
-And, because the `seat` property is `internal`, power users can still keep a reference to the original ``LicenseSeat`` instance if they need advanced APIs like `validate()` with custom options.
-
-## Comparison Table
-
-|                        | LicenseSeatStore | LicenseSeat |
-|------------------------|-----------------|-------------|
-| Zero-config singleton  | ✅              | ➖          |
-| SwiftUI property wrappers | ✅          | ➖          |
-| Background validation  | ✅ (auto)       | manual      |
-| Offline asset refresh  | ✅ (auto)       | manual      |
-| Combine publishers     | ✅             | ✅          |
-| Full customisation     | limited        | ✅          |
-
-## Migration from v1
-
-1. Replace manual instantiation:
-   ```swift
-   let licenseSeat = LicenseSeat(config: cfg)
-   ```
-   with a one-liner:
-   ```swift
-   LicenseSeatStore.shared.configure(apiKey:"…")
-   ```
-2. Swap `seat.statusPublisher` with `@LicenseState` where appropriate.
-3. All low-level APIs remain valid and are **not** deprecated until v3.
+The functionality is identical - only the calling convention changes.
 
 ## Further Reading
 
-* <doc:GettingStarted> – original low-level tutorial
-* <doc:ReactiveIntegration> – Combine patterns that apply equally to the store
-* ``LicenseSeatStore`` – full symbol reference 
+- <doc:GettingStarted> - Modern integration guide
+- <doc:ReactiveIntegration> - SwiftUI patterns
+- ``LicenseSeat`` - Core API reference 
