@@ -425,6 +425,38 @@ public final class LicenseSeat: ObservableObject {
         
         eventBus.emit("deactivation:start", license)
         
+        // Helper that performs the local teardown that always accompanies a successful
+        // (or pragmatically successful) deactivation.
+        func completeLocalDeactivation() {
+            cache.clearLicense()
+            cache.clearOfflineLicense()
+            stopAutoValidation()
+            stopOfflineRefresh()
+        }
+        
+        // Determines whether a particular API error should be treated as a *successful*
+        // deactivation because the server no longer considers the activation valid.
+        func shouldTreatAsSuccess(_ error: Error) -> Bool {
+            guard let apiError = error as? APIError else { return false }
+            switch apiError.status {
+            case 404, 410:
+                // License or activation not found / already gone.
+                return true
+            case 422:
+                // Unprocessable – often means license revoked or already disabled.
+                if let data = apiError.data as? [String: Any],
+                   let code = data["code"] as? String {
+                    return ["revoked", "already_deactivated", "not_active", "not_found", "suspended", "expired"].contains(code)
+                }
+                // Fallback to string heuristics on the message – keeps us resilient to
+                // minor backend wording changes without depending on undocumented keys.
+                let msg = apiError.message.lowercased()
+                return msg.contains("revoked") || msg.contains("not found") || msg.contains("already") || msg.contains("suspended") || msg.contains("expired")
+            default:
+                return false
+            }
+        }
+        
         do {
             let _: EmptyResponse = try await apiClient.post(
                 path: "/activations/deactivate",
@@ -433,16 +465,18 @@ public final class LicenseSeat: ObservableObject {
                     "device_identifier": license.deviceIdentifier
                 ]
             )
-            
-            // Clear everything
-            cache.clearLicense()
-            cache.clearOfflineLicense()
-            stopAutoValidation()
-            stopOfflineRefresh()
-            
+            // Server acknowledged deactivation – clear state.
+            completeLocalDeactivation()
             eventBus.emit("deactivation:success", EmptyResponse())
-            
         } catch {
+            if shouldTreatAsSuccess(error) {
+                // The server says the activation no longer exists / is invalid, so from the
+                // client's perspective we are also deactivated. Treat it as success.
+                completeLocalDeactivation()
+                eventBus.emit("deactivation:success", EmptyResponse())
+                return
+            }
+            // Genuine failure – bubble up.
             eventBus.emit("deactivation:error", ["error": error, "license": license])
             throw error
         }
