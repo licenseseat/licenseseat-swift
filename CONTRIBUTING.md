@@ -1,6 +1,6 @@
-# Contributing to LicenseSeatSDK
+# Contributing to LicenseSeat
 
-Thank you for your interest in contributing to LicenseSeatSDK! We value all contributions, whether they're bug reports, feature requests, documentation improvements, or code changes.
+Thank you for your interest in contributing to LicenseSeat! We value all contributions, whether they're bug reports, feature requests, documentation improvements, or code changes.
 
 ## Code of Conduct
 
@@ -110,7 +110,7 @@ public func validate(
 
 ## Recognition
 
-Contributors will be recognized in our README and release notes. Thank you for helping make LicenseSeatSDK better!
+Contributors will be recognized in our README and release notes. Thank you for helping make LicenseSeat better!
 
 ## License
 

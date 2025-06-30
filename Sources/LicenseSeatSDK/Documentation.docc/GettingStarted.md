@@ -1,6 +1,6 @@
-# Getting Started with LicenseSeatSDK
+# Getting Started with LicenseSeat
 
-Learn how to integrate LicenseSeatSDK into your Swift application.
+Learn how to integrate LicenseSeat into your Swift application.
 
 ## Overview
 
@@ -12,7 +12,7 @@ This page focuses on the **low-level `LicenseSeat` client**, giving you fine-gra
 
 ### Swift Package Manager
 
-Add LicenseSeatSDK to your `Package.swift`:
+Add LicenseSeat to your `Package.swift`:
 
 ```swift
 dependencies: [
@@ -30,7 +30,7 @@ Or add it through Xcode:
 ### Step 1: Configure the SDK
 
 ```swift
-import LicenseSeatSDK
+import LicenseSeat
 
 // Create configuration
 let config = LicenseSeatConfig(

@@ -4,7 +4,7 @@ Build reactive UIs with Combine publishers and SwiftUI integration.
 
 ## Overview
 
-LicenseSeatSDK provides first-class Combine support with built-in publishers for all major events. This enables reactive programming patterns, seamless SwiftUI integration, and declarative UI updates based on license state changes.
+LicenseSeat provides first-class Combine support with built-in publishers for all major events. This enables reactive programming patterns, seamless SwiftUI integration, and declarative UI updates based on license state changes.
 
 ## Core Publishers
 

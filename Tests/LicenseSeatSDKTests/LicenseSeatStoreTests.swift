@@ -3,7 +3,7 @@ import Foundation
 #if canImport(Combine)
 import Combine
 #endif
-@testable import LicenseSeatSDK
+@testable import LicenseSeat
 #if canImport(SwiftUI)
 import SwiftUI
 #endif

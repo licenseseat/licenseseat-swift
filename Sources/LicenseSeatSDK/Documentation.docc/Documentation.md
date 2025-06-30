@@ -1,10 +1,10 @@
-# ``LicenseSeatSDK``
+# ``LicenseSeat``
 
 A comprehensive Swift SDK for managing software licenses with the LicenseSeat licensing system.
 
 ## Overview
 
-LicenseSeatSDK provides a complete solution for integrating license management into your macOS and iOS applications. With support for online validation, offline verification, automatic re-validation, and entitlement checking, it offers everything you need for robust license management.
+LicenseSeat provides a complete solution for integrating license management into your macOS and iOS applications. With support for online validation, offline verification, automatic re-validation, and entitlement checking, it offers everything you need for robust license management.
 
 ### Key Features
 

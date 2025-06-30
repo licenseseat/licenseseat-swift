@@ -1,6 +1,6 @@
 import XCTest
 import Combine
-@testable import LicenseSeatSDK
+@testable import LicenseSeat
 
 // swiftlint:disable implicitly_unwrapped_optional
 final class AutoValidationTests: XCTestCase {

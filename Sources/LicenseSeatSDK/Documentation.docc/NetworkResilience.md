@@ -4,7 +4,7 @@ Build robust applications that handle network failures gracefully.
 
 ## Overview
 
-LicenseSeatSDK is designed to work reliably in challenging network conditions. With automatic retry logic, exponential backoff, offline fallback, and intelligent connection monitoring, your application remains functional even when connectivity is intermittent or unavailable.
+LicenseSeat is designed to work reliably in challenging network conditions. With automatic retry logic, exponential backoff, offline fallback, and intelligent connection monitoring, your application remains functional even when connectivity is intermittent or unavailable.
 
 ## Retry Logic
 

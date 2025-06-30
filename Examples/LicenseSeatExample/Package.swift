@@ -18,7 +18,7 @@ let package = Package(
         .executableTarget(
             name: "LicenseSeatExample",
             dependencies: [
-                .product(name: "LicenseSeatSDK", package: "licenseseat-swift")
+                .product(name: "LicenseSeat", package: "licenseseat-swift")
             ]
         )
     ]

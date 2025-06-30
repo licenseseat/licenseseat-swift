@@ -11,7 +11,7 @@ import CryptoKit
 #elseif canImport(Crypto)
 import Crypto
 #endif
-@testable import LicenseSeatSDK
+@testable import LicenseSeat
 
 @MainActor
 final class OfflineValidationTests: XCTestCase {

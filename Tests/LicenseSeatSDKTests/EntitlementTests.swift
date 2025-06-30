@@ -6,7 +6,7 @@
 //
 
 import XCTest
-@testable import LicenseSeatSDK
+@testable import LicenseSeat
 
 @MainActor
 final class EntitlementTests: XCTestCase {

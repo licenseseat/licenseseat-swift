@@ -4,7 +4,7 @@ Master offline license validation for air-gapped environments and network resili
 
 ## Overview
 
-LicenseSeatSDK provides cryptographically secure offline validation using Ed25519 signatures. This enables your application to validate licenses without network connectivity, perfect for air-gapped environments, temporary network outages, or performance-critical scenarios.
+LicenseSeat provides cryptographically secure offline validation using Ed25519 signatures. This enables your application to validate licenses without network connectivity, perfect for air-gapped environments, temporary network outages, or performance-critical scenarios.
 
 ## How Offline Validation Works
 

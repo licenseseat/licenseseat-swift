@@ -12,7 +12,7 @@
 Under the hood the store spins all the same secure machinery as the low-level client—automatic validation timers, offline fallback, clock-skew detection—while exposing a Swifty API tailored for modern SwiftUI codebases.
 
 ```swift
-import LicenseSeatSDK
+import LicenseSeat
 
 @main
 struct MyApp: App {

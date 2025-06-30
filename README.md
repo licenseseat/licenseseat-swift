@@ -1,10 +1,10 @@
-# LicenseSeatSDK for Swift
+# LicenseSeat for Swift
 
 [![Swift](https://img.shields.io/badge/Swift-5.8+-orange.svg)](https://swift.org)
 [![Platforms](https://img.shields.io/badge/Platforms-macOS%20|%20iOS%20|%20tvOS%20|%20watchOS%20|%20Linux-blue.svg)](https://swift.org)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE.txt)
 [![CI](https://github.com/licenseseat/licenseseat-swift/actions/workflows/ci.yml/badge.svg)](https://github.com/licenseseat/licenseseat-swift/actions/workflows/ci.yml)
-[![Documentation](https://img.shields.io/badge/docs-DocC-blue.svg)](https://licenseseat.github.io/licenseseat-swift/documentation/licenseseatsdk/)
+[![Documentation](https://img.shields.io/badge/docs-DocC-blue.svg)](https://licenseseat.github.io/licenseseat-swift/documentation/licenseseat/)
 
 A comprehensive Swift SDK for managing software licenses with the [LicenseSeat](https://licenseseat.com) licensing system.
 
@@ -42,15 +42,12 @@ Or in Xcode:
 Add licensing to a brand-new SwiftUI app in **three lines**:
 
 ```swift
-import LicenseSeatSDK
+import LicenseSeat
 
-// 1️⃣ Configure once at launch
-LicenseSeatStore.shared.configure(apiKey: "YOUR_API_KEY")
+// 1️⃣ Activate (e.g. after user enters their license)
+try await LicenseSeat.shared.activate(licenseKey: "USER-LICENSE-KEY")
 
-// 2️⃣ Activate (e.g. after user enters their license)
-try await LicenseSeatStore.shared.activate("USER-LICENSE-KEY")
-
-// 3️⃣ Observe anywhere in SwiftUI
+// 2️⃣ Observe anywhere in SwiftUI
 struct ContentView: View {
     @LicenseState private var status               // instantly reactive ✨
     @EntitlementState("pro-features") private var hasPro   // feature flags
@@ -86,7 +83,7 @@ The `LicenseSeatStore` singleton handles:
 Prefer full control or a UIKit / CLI environment? You can still use the original `LicenseSeat` client directly:
 
 ```swift
-import LicenseSeatSDK
+import LicenseSeat
 
 let config = LicenseSeatConfig(
     apiBaseUrl: "https://api.licenseseat.com",
@@ -290,7 +287,7 @@ All SDK network requests will now hit your local instance instead of the public 
 
 ## Documentation
 
-Full API documentation is available at [https://licenseseat.github.io/licenseseat-swift](https://licenseseat.github.io/licenseseat-swift/documentation/licenseseatsdk/)
+Full API documentation is available at [https://licenseseat.github.io/licenseseat-swift](https://licenseseat.github.io/licenseseat-swift/documentation/licenseseat/)
 
 Or build locally:
 ```bash
@@ -303,7 +300,7 @@ This Swift SDK provides 100% feature parity with the official JavaScript SDK. Th
 
 | JavaScript | Swift |
 |------------|-------|
-| `new LicenseSeatSDK(config)` | `LicenseSeat(config:)` |
+| `new LicenseSeat(config)` | `LicenseSeat(config:)` |
 | `sdk.activate(key, options)` | `sdk.activate(licenseKey:options:)` |
 | `sdk.on('event', callback)` | `sdk.on("event") { }` or publishers |
 | `sdk.getStatus()` | `sdk.getStatus()` returns enum |

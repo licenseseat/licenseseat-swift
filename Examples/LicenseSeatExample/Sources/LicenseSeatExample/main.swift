@@ -1,14 +1,14 @@
 import Foundation
-import LicenseSeatSDK
+import LicenseSeat
 #if canImport(Combine)
 import Combine
 #endif
 
-// Example app demonstrating LicenseSeatSDK usage
+// Example app demonstrating LicenseSeat usage
 @main
 struct LicenseSeatExample {
     static func main() async {
-        print("🚀 LicenseSeat SDK Example")
+        print("🚀 LicenseSeat Example")
         print("=======================\n")
         
         // Configure SDK
@@ -102,7 +102,7 @@ struct LicenseSeatExample {
 
     private static func interactiveMenu(sdk: LicenseSeat) async {
         func menu() {
-            print("\n📋 LicenseSeat SDK Example Menu")
+            print("\n📋 LicenseSeat Example Menu")
             print("1. Activate License")
             print("2. Validate License")
             print("3. Check Entitlement")

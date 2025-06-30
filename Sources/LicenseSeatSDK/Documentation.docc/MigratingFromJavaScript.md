@@ -12,7 +12,7 @@ The Swift SDK maintains full feature parity with the JavaScript SDK while embrac
 
 **JavaScript:**
 ```javascript
-const sdk = new LicenseSeatSDK({
+const sdk = new LicenseSeat({
     apiBaseUrl: "https://api.licenseseat.com",
     apiKey: "your-key",
     autoValidateInterval: 3600000,

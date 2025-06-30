@@ -6,7 +6,7 @@ import CryptoKit
 import Crypto
 #endif
 import Combine
-@testable import LicenseSeatSDK
+@testable import LicenseSeat
 
 @MainActor
 final class LicenseSeatSDKTests: XCTestCase {

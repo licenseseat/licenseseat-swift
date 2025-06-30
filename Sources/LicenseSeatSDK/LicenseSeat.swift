@@ -78,8 +78,15 @@ public final class LicenseSeat: ObservableObject {
     
     // MARK: - Properties
     
-    /// Shared singleton instance
-    public static let shared = LicenseSeat()
+    /// Canonical singleton instance used by the convenience static APIs.
+    ///
+    /// The instance can be re-created by calling ``configure(apiKey:apiBaseURL:options:)`` **before**
+    /// any other call is made.  Subsequent calls to ``configure`` are ignored unless you pass
+    /// `force: true` so background services and Combine subscriptions aren't accidentally reset.
+    private static var _shared: LicenseSeat = LicenseSeat()
+    
+    /// Thread-safe accessor for the shared instance.
+    public static var shared: LicenseSeat { _shared }
     
     /// Current configuration
     public let config: LicenseSeatConfig
@@ -713,4 +720,51 @@ struct EmptyResponse: Codable {}
 public struct AuthTestResponse: Codable {
     public let success: Bool
     public let message: String?
+}
+
+// MARK: - Global Lifecycle Helpers (Static Convenience)
+
+public extension LicenseSeat {
+    /// Creates (or recreates) the shared instance with a custom configuration.
+    /// Calling this early at application start-up gives you a one-liner setup that mirrors popular
+    /// libraries such as `SentrySDK.start(...)` or `Amplitude(configuration:)`.
+    /// - Parameters:
+    ///   - apiKey:       Your LicenseSeat API key.
+    ///   - apiBaseURL:   Base URL for the LicenseSeat backend. Defaults to production.
+    ///   - force:        Recreate the singleton even if it was already configured.
+    ///   - customize:    Optional closure to tweak the default ``LicenseSeatConfig``.
+    @MainActor
+    static func configure(apiKey: String,
+                          apiBaseURL: URL = URL(string: "https://api.licenseseat.com")!,
+                          force: Bool = false,
+                          options customize: (inout LicenseSeatConfig) -> Void = { _ in }) {
+        if _shared.config.apiKey != nil && !force { return }
+        var cfg = LicenseSeatConfig.default
+        cfg.apiKey = apiKey
+        cfg.apiBaseUrl = apiBaseURL.absoluteString
+        customize(&cfg)
+        _shared = LicenseSeat(config: cfg)
+    }
+
+    /// Activate a license through the shared instance.
+    @discardableResult
+    static func activate(_ key: String,
+                         options: ActivationOptions = ActivationOptions()) async throws -> License {
+        try await shared.activate(licenseKey: key, options: options)
+    }
+
+    /// Deactivate the current license through the shared instance.
+    static func deactivate() async throws {
+        try await shared.deactivate()
+    }
+
+    /// Check the status of a single entitlement.
+    static func entitlement(_ id: String) -> EntitlementStatus {
+        shared.checkEntitlement(id)
+    }
+
+    /// Publisher mirroring ``statusPublisher`` on the shared instance for quick subscriptions.
+    static var statusPublisher: AnyPublisher<LicenseStatus, Never> {
+        shared.statusPublisher
+    }
 } 

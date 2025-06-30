@@ -14,7 +14,7 @@ import Crypto
 #if canImport(FoundationNetworking)
 import FoundationNetworking
 #endif
-@testable import LicenseSeatSDK
+@testable import LicenseSeat
 
 final class APIClientTests: XCTestCase {
     private var config: LicenseSeatConfig!

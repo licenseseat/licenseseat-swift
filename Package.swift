@@ -4,7 +4,7 @@
 import PackageDescription
 
 let package = Package(
-    name: "LicenseSeatSDK",
+    name: "LicenseSeat",
     defaultLocalization: "en",
     platforms: [
         .macOS(.v12), .iOS(.v13), .tvOS(.v13), .watchOS(.v8)
@@ -12,8 +12,8 @@ let package = Package(
     products: [
         // Products define the executables and libraries a package produces, making them visible to other packages.
         .library(
-            name: "LicenseSeatSDK",
-            targets: ["LicenseSeatSDK"]),
+            name: "LicenseSeat",
+            targets: ["LicenseSeat"]),
     ],
     dependencies: [
         // Documentation Plugin (command plugin; no runtime impact)
@@ -26,17 +26,19 @@ let package = Package(
         // Targets are the basic building blocks of a package, defining a module or a test suite.
         // Targets can depend on other targets in this package and products from dependencies.
         .target(
-            name: "LicenseSeatSDK",
+            name: "LicenseSeat",
             dependencies: [
                 .product(name: "Crypto", package: "swift-crypto")
             ],
+            path: "Sources/LicenseSeatSDK",
             resources: [
                 // Place bundled assets or JSON fixtures here, if needed.
             ]
         ),
         .testTarget(
-            name: "LicenseSeatSDKTests",
-            dependencies: ["LicenseSeatSDK"]
+            name: "LicenseSeatTests",
+            dependencies: ["LicenseSeat"],
+            path: "Tests/LicenseSeatSDKTests"
         ),
     ]
 )

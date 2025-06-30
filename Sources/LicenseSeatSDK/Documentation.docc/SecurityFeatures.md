@@ -1,10 +1,10 @@
 # Security Features
 
-In-depth guide to LicenseSeatSDK's security mechanisms and best practices.
+In-depth guide to LicenseSeat's security mechanisms and best practices.
 
 ## Overview
 
-LicenseSeatSDK implements multiple layers of security to protect your software licenses from tampering, piracy, and unauthorized use. This guide covers the security features and how to maximize protection.
+LicenseSeat implements multiple layers of security to protect your software licenses from tampering, piracy, and unauthorized use. This guide covers the security features and how to maximize protection.
 
 ## Cryptographic Verification
 

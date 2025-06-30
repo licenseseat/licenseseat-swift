@@ -1,5 +1,5 @@
 import XCTest
-@testable import LicenseSeatSDK
+@testable import LicenseSeat
 
 final class CanonicalJSONTests: XCTestCase {
     func testCanonicalizationSortsKeysRecursively() throws {
