@@ -66,6 +66,7 @@ extension LicenseSeat {
                 case "activation:success", "activation:error",
                      "validation:success", "validation:failed",
                      "validation:offline-success", "validation:offline-failed",
+                     "license:revoked",
                      "deactivation:success":
                     return self.getStatus()
                 default:
@@ -139,7 +140,8 @@ private final class EventSubscription<S: Subscriber>: Subscription where S.Input
                 "offlineLicense:fetchError", "offlineLicense:ready",
                 "offlineLicense:verified", "offlineLicense:verificationFailed",
                 "auth_test:start", "auth_test:success", "auth_test:error",
-                "sdk:error", "sdk:reset"
+                "sdk:error", "sdk:reset",
+                "license:revoked"
             ]
             
             for event in allEvents {

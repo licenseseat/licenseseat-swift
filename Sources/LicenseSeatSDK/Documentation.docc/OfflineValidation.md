@@ -18,8 +18,8 @@ LicenseSeat provides cryptographically secure offline validation using Ed25519 s
 
 ```swift
 let config = LicenseSeatConfig(
-    // Enable offline fallback
-    offlineFallbackEnabled: true,
+    // Enable strict offline fallback (network-only)
+    strictOfflineFallback: true,
     
     // Refresh offline license every 72 hours
     offlineLicenseRefreshInterval: 259200,

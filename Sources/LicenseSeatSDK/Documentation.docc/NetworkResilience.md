@@ -158,7 +158,7 @@ class CustomRetryHandler {
 
 ```swift
 let config = LicenseSeatConfig(
-    offlineFallbackEnabled: true  // Default, but be explicit
+    strictOfflineFallback: true  // Default is strict, but be explicit
 )
 ```
 

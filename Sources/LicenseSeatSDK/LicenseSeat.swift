@@ -160,8 +160,11 @@ public final class LicenseSeat: ObservableObject {
         if let cachedLicense = cache.getLicense() {
             eventBus.emit("license:loaded", cachedLicense)
             
-            // Quick offline verification for instant UX
-            if config.offlineFallbackEnabled {
+            // Quick offline verification for instant UX.  This runs irrespective
+            // of `offlineFallbackMode`: the local cryptographic check is cheap
+            // and provides immediate status information even when we expect to
+            // be online shortly after.
+            do {
                 Task {
                     if let offlineResult = await quickVerifyCachedOfflineLocal() {
                         cache.updateValidation(offlineResult)
@@ -277,15 +280,13 @@ public final class LicenseSeat: ObservableObject {
             // Start auto-validation
             startAutoValidation(licenseKey: licenseKey)
             
-            // Sync offline assets if offline fallback is enabled
-            if config.offlineFallbackEnabled {
-                Task {
-                    await syncOfflineAssets()
-                }
-                
-                // Schedule offline refresh only when offline support is desired
-                scheduleOfflineRefresh()
+            // Sync offline assets & schedule refresh regardless of the selected
+            // fallback strategy – the files are necessary for any kind of
+            // offline validation.
+            Task {
+                await syncOfflineAssets()
             }
+            scheduleOfflineRefresh()
             
             eventBus.emit("activation:success", license)
             return license
@@ -365,16 +366,37 @@ public final class LicenseSeat: ObservableObject {
         } catch {
             eventBus.emit("validation:error", ["licenseKey": licenseKey, "error": error])
             
-            // Check if we should fall back to offline
+            // First, inspect *semantic* failures coming from the backend to see
+            // if we must invalidate the local cache immediately.
+            if let apiError = error as? APIError,
+               (400...499).contains(apiError.status),
+               apiError.status != 401, apiError.status != 429 {
+                // Purge any cached data – the server is authoritative.
+                cache.clear()
+                stopAutoValidation()
+                currentAutoLicenseKey = nil
+                lastOfflineValidation = nil
+
+                let reason = (apiError.data as? [String: Any])?["reason"] as? String ?? apiError.message
+                let invalidResult = LicenseValidationResult(valid: false, reason: reason, offline: false)
+                eventBus.emit("validation:failed", invalidResult)
+                eventBus.emit("license:revoked", [
+                    "code": apiError.status,
+                    "message": apiError.message
+                ])
+
+                // Surface invalid result to caller.
+                return invalidResult
+            }
+
+            // For transport errors we may attempt an offline fallback.
             if shouldFallbackToOffline(error: error) {
                 let offlineResult = await verifyCachedOffline()
-                
-                // Update cache
                 if let cachedLicense = cache.getLicense(),
                    cachedLicense.licenseKey == licenseKey {
                     cache.updateValidation(offlineResult)
                 }
-                
+
                 if offlineResult.valid {
                     if lastOfflineValidation?.valid != true {
                         eventBus.emit("validation:offline-success", offlineResult)
@@ -385,29 +407,11 @@ public final class LicenseSeat: ObservableObject {
                     eventBus.emit("validation:offline-failed", offlineResult)
                     stopAutoValidation()
                     currentAutoLicenseKey = nil
+                    return offlineResult
                 }
             }
-            
-            // Persist invalid status from API error
-            if let apiError = error as? APIError,
-               let data = apiError.data as? [String: Any],
-               let cachedLicense = cache.getLicense(),
-               cachedLicense.licenseKey == licenseKey {
-                
-                let invalidValidation = LicenseValidationResult(
-                    valid: false,
-                    reason: data["reason"] as? String,
-                    offline: false
-                )
-                cache.updateValidation(invalidValidation)
-                
-                // Stop auto-validation for non-transient errors
-                if ![0, 408, 429].contains(apiError.status) {
-                    stopAutoValidation()
-                    currentAutoLicenseKey = nil
-                }
-            }
-            
+
+            // No fallback possible – bubble up.
             throw error
         }
     }
@@ -604,6 +608,20 @@ public final class LicenseSeat: ObservableObject {
         eventBus.emit("sdk:reset", [:])
     }
     
+    /// Purge any cached license and related offline assets.
+    ///
+    /// Useful when you want to force the SDK back to an unauthenticated state
+    /// without hitting the backend (e.g. after detecting an account logout
+    /// event or when responding to a *license:revoked* notification).
+    public func purgeCachedLicense() {
+        cache.clear()
+        stopAutoValidation()
+        stopOfflineRefresh()
+        currentAutoLicenseKey = nil
+        lastOfflineValidation = nil
+        eventBus.emit("sdk:reset", [:])
+    }
+    
     // MARK: - Event Handling
     
     /// Subscribe to SDK events
@@ -683,18 +701,23 @@ public final class LicenseSeat: ObservableObject {
     }
     
     private func shouldFallbackToOffline(error: Error) -> Bool {
-        guard config.offlineFallbackEnabled else { return false }
-        
-        if error is URLError {
+        switch config.offlineFallbackMode {
+        case .always:
             return true
+        case .networkOnly:
+            // Transport-level issues
+            if error is URLError { return true }
+            if let apiError = error as? APIError {
+                // `0` is often used by the API layer when the request never
+                // reached the server (e.g. DNS failure / no connection).
+                if apiError.status == 0 { return true }
+                // 408 Request Timeout also indicates network/transient
+                if apiError.status == 408 { return true }
+                // 5xx → server-side fault
+                if (500...599).contains(apiError.status) { return true }
+            }
+            return false
         }
-        
-        if let apiError = error as? APIError,
-           [0, 408].contains(apiError.status) {
-            return true
-        }
-        
-        return false
     }
     
     internal func log(_ items: Any...) {

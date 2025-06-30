@@ -27,7 +27,7 @@ Add to your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/licenseseat/licenseseat-swift.git", from: "1.0.0")
+    .package(url: "https://github.com/licenseseat/licenseseat-swift.git", from: "0.1.0")
 ]
 ```
 
@@ -195,7 +195,8 @@ let config = LicenseSeatConfig(
     apiBaseUrl: "https://api.licenseseat.com",
     apiKey: "YOUR_API_KEY",
     autoValidateInterval: 3600,        // Validate every hour
-    offlineFallbackEnabled: true,      // Enable offline validation
+    // Strict offline fallback (network errors only; default)
+    strictOfflineFallback: true,      // Enable offline validation with server-authoritative revocation
     maxOfflineDays: 7                  // 7-day grace period
 )
 
@@ -332,7 +333,7 @@ The SDK provides seamless offline support with cryptographic validation:
 ```swift
 // Configure with offline support
 LicenseSeat.configure(apiKey: "YOUR_API_KEY") { config in
-    config.offlineFallbackEnabled = true
+    config.strictOfflineFallback = true
     config.maxOfflineDays = 7              // 7-day grace period
     config.offlineLicenseRefreshInterval = 259200  // Refresh every 72 hours
 }
@@ -348,17 +349,18 @@ LicenseSeat.shared.networkStatusPublisher
     }
     .store(in: &cancellables)
 
-// Listen for offline validation events
-LicenseSeat.shared.on("validation:offline-success") { result in
+// Listen for key events
+LicenseSeat.shared.on("validation:offline-success") { _ in
     print("Validated offline - valid until next online check")
 }
 
-LicenseSeat.shared.on("validation:offline-failed") { result in
-    print("Offline validation failed - license may be expired")
+LicenseSeat.shared.on("license:revoked") { _ in
+    // Immediately lock UI
+    lockFeatures()
 }
 
-// Force offline license sync
-try await LicenseSeat.shared.syncOfflineAssets()
+// Manual reset helper if needed
+try await LicenseSeat.shared.purgeCachedLicense()
 ```
 
 ### Event System
@@ -388,6 +390,10 @@ LicenseSeat.shared.eventPublisher
             }
         case "validation:offline-success":
             showOfflineModeBanner()
+        case "validation:offline-failed":
+            showValidationError("License revoked")
+        case "license:revoked":
+            showRevokedLicenseBanner()
         default:
             break
         }
@@ -434,7 +440,7 @@ LicenseSeat.configure(
     config.retryDelay = 1                       // Base delay (exponential backoff)
     
     // Offline support
-    config.offlineFallbackEnabled = true        // Enable offline validation
+    config.strictOfflineFallback = true        // Enable offline validation
     config.offlineLicenseRefreshInterval = 259200  // Refresh keys every 72 hours
     config.maxOfflineDays = 7                   // Allow 7 days offline
     config.maxClockSkewMs = 300000              // 5 minutes clock tolerance
@@ -472,7 +478,7 @@ struct LicenseConfiguration {
         LicenseSeat.configure(apiKey: apiKey, apiBaseURL: apiURL) { config in
             config.debug = false
             config.autoValidateInterval = 3600
-            config.offlineFallbackEnabled = true
+            config.strictOfflineFallback = true
             config.maxOfflineDays = 14  // Two weeks for production
         }
         #endif

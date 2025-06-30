@@ -181,7 +181,7 @@ LicenseSeat.configure(
     apiBaseURL: URL(string: "https://api.licenseseat.com")!
 ) { config in
     config.autoValidateInterval = 3600          // Validate every hour
-    config.offlineFallbackEnabled = true        // Enable offline mode
+    config.strictOfflineFallback = true        // Enable offline mode (network-only fallback)
     config.maxOfflineDays = 7                   // 7-day grace period
     config.debug = true                         // Enable debug logging
 }
@@ -231,6 +231,7 @@ LicenseSeat.shared.on("validation:offline-success") { _ in
 // - activation:start/success/error
 // - validation:start/success/failed/error
 // - validation:offline-success/offline-failed
+// - license:revoked        // Server revoked or suspended licence
 // - deactivation:start/success/error
 // - network:online/offline
 // - license:loaded
@@ -285,7 +286,7 @@ func updateUI(for status: LicenseStatus) {
 
 ```swift
 LicenseSeat.configure(apiKey: apiKey) { config in
-    config.offlineFallbackEnabled = true
+    config.strictOfflineFallback = true
     config.maxOfflineDays = 14  // Two weeks grace period
 }
 
@@ -334,7 +335,7 @@ LicenseSeat.configure(apiKey: apiKey) { config in
 
 1. **"No API key configured"** - Ensure you call `LicenseSeat.configure()` before any other SDK methods
 
-2. **Offline validation failing** - Check that `offlineFallbackEnabled` is true and public keys are synced
+2. **Offline validation failing** - Check that **strictOfflineFallback** is true (or `offlineFallbackMode == .networkOnly`) and public keys are synced
 
 3. **Device limit reached** - The user needs to deactivate on another device or upgrade their license
 
@@ -361,7 +362,7 @@ let config = LicenseSeatConfig(
     retryDelay: 1,                                 // Base retry delay (seconds)
     debug: true,                                   // Enable logging
     offlineLicenseRefreshInterval: 259200,         // 72 hours
-    offlineFallbackEnabled: true,                  // Enable offline mode
+    strictOfflineFallback: true,                  // Enable offline mode
     maxOfflineDays: 7,                            // Grace period when offline
     maxClockSkewMs: 300000                        // 5 minutes clock tolerance
 )
@@ -438,39 +439,4 @@ Available events for monitoring:
 - `deactivation:start` / `deactivation:success` / `deactivation:error`
 - `autovalidation:cycle` / `autovalidation:stopped`
 - `network:online` / `network:offline`
-- `offlineLicense:fetching` / `offlineLicense:fetched` / `offlineLicense:fetchError`
-- `offlineLicense:ready` / `offlineLicense:verified` / `offlineLicense:verificationFailed`
-- `auth_test:start` / `auth_test:success` / `auth_test:error`
-- `sdk:error` / `sdk:reset`
-
-### SwiftUI Integration
-
-```swift
-@MainActor
-class LicenseViewModel: ObservableObject {
-    @Published var status: LicenseStatus = .inactive(message: "No license")
-    private let sdk = LicenseSeat.shared
-    private var cancellables = Set<AnyCancellable>()
-    
-    init() {
-        sdk.statusPublisher
-            .receive(on: DispatchQueue.main)
-            .assign(to: &$status)
-    }
-}
-
-struct ContentView: View {
-    @StateObject private var license = LicenseViewModel()
-    
-    var body: some View {
-        switch license.status {
-        case .active:
-            MainAppView()
-        case .inactive, .invalid:
-            LicenseActivationView()
-        default:
-            ProgressView("Validating license...")
-        }
-    }
-}
-``` 
+- `offlineLicense:fetching`

@@ -20,7 +20,7 @@ import Foundation
 ///     apiBaseUrl: "https://api.licenseseat.com",
 ///     apiKey: "your-api-key",
 ///     autoValidateInterval: 3600,     // Validate every hour
-///     offlineFallbackEnabled: true,   // Enable offline mode
+///     strictOfflineFallback: true,   // Enable offline mode (network-only fallback)
 ///     maxOfflineDays: 7              // 7-day grace period
 /// )
 /// ```
@@ -55,14 +55,49 @@ public struct LicenseSeatConfig {
     /// Interval for refreshing offline license (in seconds)
     public var offlineLicenseRefreshInterval: TimeInterval
     
-    /// Whether offline fallback is enabled
-    public var offlineFallbackEnabled: Bool
+    /// Determines how the SDK should behave when the network is unavailable or the
+    /// backend returns an *unexpected* (≥500) server error during validation cycles.
+    ///
+    /// - `networkOnly`: (New default)  The SDK falls back to the cached offline
+    ///   license **only** when the error is clearly network-related (e.g. the
+    ///   device is offline, request timeout, or the server responded with a 5xx
+    ///   status).  Business-logic errors coming from the backend (4xx) will **not**
+    ///   trigger an offline fallback – the cache is purged instead so the host app
+    ///   can react to the invalid status immediately.
+    /// - `always`: Legacy, permissive behaviour that unconditionally attempts an
+    ///   offline fallback for *any* failure.  Applications that relied on the old
+    ///   semantics can opt-in to this mode for a smooth migration.
+    public enum OfflineFallbackMode: String, Codable {
+        case networkOnly = "network_only"
+        case always = "always"
+    }
+    
+    /// Strategy for offline fallback during validation.
+    public var offlineFallbackMode: OfflineFallbackMode
     
     /// Maximum number of days to allow offline usage (0 = disabled)
     public var maxOfflineDays: Int
     
     /// Maximum allowed clock skew (in milliseconds)
     public var maxClockSkewMs: TimeInterval
+    
+    /// Backwards-compatibility shim.  Accessing this property emits a deprecation
+    /// warning while seamlessly mapping to the new `offlineFallbackMode`.
+    @available(*, deprecated, renamed: "offlineFallbackMode")
+    public var offlineFallbackEnabled: Bool {
+        get { offlineFallbackMode == .always }
+        set { offlineFallbackMode = newValue ? .always : .networkOnly }
+    }
+    
+    /// Alias for the stricter behaviour flag preferred by some integrators.
+    ///
+    /// Setting this to `true` enables the *network-only* fallback; `false` brings
+    /// back the legacy permissive mode (identical to `offlineFallbackMode == .always`).
+    /// The name reflects its semantics so it is clear at call-site what it does.
+    public var strictOfflineFallback: Bool {
+        get { offlineFallbackMode == .networkOnly }
+        set { offlineFallbackMode = newValue ? .networkOnly : .always }
+    }
     
     /// Default configuration
     public static var `default`: LicenseSeatConfig {
@@ -77,7 +112,7 @@ public struct LicenseSeatConfig {
             retryDelay: 1, // 1 second
             debug: false,
             offlineLicenseRefreshInterval: 259200, // 72 hours
-            offlineFallbackEnabled: true,
+            offlineFallbackEnabled: false,
             maxOfflineDays: 0,
             maxClockSkewMs: 300000 // 5 minutes
         )
@@ -95,7 +130,7 @@ public struct LicenseSeatConfig {
         retryDelay: TimeInterval = 1,
         debug: Bool = false,
         offlineLicenseRefreshInterval: TimeInterval = 259200,
-        offlineFallbackEnabled: Bool = true,
+        offlineFallbackEnabled: Bool = false,
         maxOfflineDays: Int = 0,
         maxClockSkewMs: TimeInterval = 300000
     ) {
@@ -109,7 +144,7 @@ public struct LicenseSeatConfig {
         self.retryDelay = retryDelay
         self.debug = debug
         self.offlineLicenseRefreshInterval = offlineLicenseRefreshInterval
-        self.offlineFallbackEnabled = offlineFallbackEnabled
+        self.offlineFallbackMode = offlineFallbackEnabled ? .always : .networkOnly
         self.maxOfflineDays = maxOfflineDays
         self.maxClockSkewMs = maxClockSkewMs
     }
