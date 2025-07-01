@@ -159,16 +159,35 @@ public struct Entitlement: Codable, Equatable {
     /// Unique key for the entitlement
     public let key: String
     
-    /// Display name
+    // MARK: – Optional, forward-compatible fields
+    /// Display name presented to end-users (optional).
+    ///
+    /// This value is **future-ready**: the current public API may not
+    /// populate it today, but offline payloads or newer backend versions
+    /// can provide it without requiring another SDK update. Treat it as
+    /// nullable.
     public let name: String?
     
-    /// Description
+    /// Human-readable description of the entitlement (optional).
+    ///
+    /// Same compatibility notes as for ``name`` apply—this is emitted by
+    /// some offline flows and might be added to the public API in the
+    /// future. Always check for `nil`.
     public let description: String?
     
-    /// Expiration date (if applicable)
+    /// Expiration date (if applicable).
+    ///
+    /// `nil` means the entitlement does **not** expire independently of the
+    /// license. The SDK's business logic only uses this value to determine
+    /// whether an entitlement is *expired* when calling
+    /// ``LicenseSeat.checkEntitlement(_: )``.
     public let expiresAt: Date?
     
-    /// Additional metadata
+    /// Arbitrary JSON metadata associated with the entitlement (optional).
+    ///
+    /// Because the structure is server-defined, it is represented as a
+    /// dictionary of ``AnyCodable`` values. Clients should cast individual
+    /// keys to concrete types as needed.
     public let metadata: [String: AnyCodable]?
     
     enum CodingKeys: String, CodingKey {
