@@ -74,7 +74,7 @@ import Network
 /// and publishers should be dispatched to the main queue when necessary.
 // MARK: - LicenseSeat Main Class
 @MainActor
-public final class LicenseSeat: ObservableObject {
+public final class LicenseSeat {
     
     // MARK: - Properties
     
@@ -122,7 +122,7 @@ public final class LicenseSeat: ObservableObject {
     internal var currentAutoLicenseKey: String?
     
     /// Online/offline status
-    @Published public private(set) var isOnline = true
+    public private(set) var isOnline = true
     
     /// Last offline validation result to avoid duplicate events
     private var lastOfflineValidation: LicenseValidationResult?
@@ -834,8 +834,10 @@ public extension LicenseSeat {
         shared.checkEntitlement(id)
     }
 
+    #if canImport(Combine)
     /// Publisher mirroring ``statusPublisher`` on the shared instance for quick subscriptions.
     static var statusPublisher: AnyPublisher<LicenseStatus, Never> {
         shared.statusPublisher
     }
+    #endif
 } 
