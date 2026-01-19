@@ -9,7 +9,7 @@
 import Foundation
 
 /// Represents an activated license
-public struct License: Codable, Equatable {
+public struct License: Codable, Equatable, Sendable {
     /// The license key
     public let licenseKey: String
     
@@ -39,7 +39,7 @@ public struct License: Codable, Equatable {
 }
 
 /// Result of a license activation
-public struct ActivationResult: Codable, Equatable {
+public struct ActivationResult: Codable, Equatable, Sendable {
     /// Activation ID
     public let id: String
     
@@ -53,7 +53,7 @@ public struct ActivationResult: Codable, Equatable {
 }
 
 /// Result of a license validation
-public struct LicenseValidationResult: Codable, Equatable {
+public struct LicenseValidationResult: Codable, Equatable, Sendable {
     /// Whether the license is valid
     public let valid: Bool
     
@@ -155,7 +155,7 @@ public struct LicenseValidationResult: Codable, Equatable {
 }
 
 /// Represents an entitlement
-public struct Entitlement: Codable, Equatable {
+public struct Entitlement: Codable, Equatable, Sendable {
     /// Unique key for the entitlement
     public let key: String
     

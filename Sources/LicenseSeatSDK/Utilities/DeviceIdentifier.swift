@@ -20,39 +20,82 @@ import WatchKit
 #endif
 
 /// Device identifier generator
+///
+/// Generates a stable, unique identifier for the current device.
+/// The identifier is cached after first generation to ensure stability.
 enum DeviceIdentifier {
-    
+
+    /// Key used to persist the cached device identifier
+    private static let cacheKey = "licenseseat_device_identifier"
+
     /// Generate a unique device identifier
+    ///
+    /// This method returns a stable identifier that persists across app launches.
+    /// On first call, it generates an identifier and caches it. Subsequent calls
+    /// return the cached value.
     static func generate() -> String {
+        // Check for cached identifier first
+        if let cached = getCachedIdentifier() {
+            return cached
+        }
+
+        // Generate a new identifier
+        let identifier = generateNewIdentifier()
+
+        // Cache it for future calls
+        cacheIdentifier(identifier)
+
+        return identifier
+    }
+
+    /// Generate a fresh device identifier (internal, for testing)
+    private static func generateNewIdentifier() -> String {
         #if os(macOS)
         // Try to get hardware UUID on macOS
         if let hardwareUUID = getMacHardwareUUID() {
             return "mac-\(hardwareUUID.lowercased())"
         }
         #endif
-        
-        // Fallback to composite identifier
+
+        // Fallback to composite identifier based on stable device characteristics
         let components = [
             getDeviceModel(),
             getSystemVersion(),
             getBundleIdentifier(),
             getPreferredLanguage(),
-            String(getScreenResolutionHash()),
-            String(Date().timeIntervalSince1970)
+            String(getScreenResolutionHash())
         ]
-        
+
         let composite = components.joined(separator: "|")
         let hash = composite.simpleHash()
-        
+
+        // Generate a stable random suffix once (not time-based)
+        let randomSuffix = UUID().uuidString.prefix(8).lowercased()
+
         #if os(iOS) || os(tvOS)
-        return "ios-\(hash)-\(Date().timeIntervalSince1970.base36String)"
+        return "ios-\(hash)-\(randomSuffix)"
         #elseif os(watchOS)
-        return "watch-\(hash)-\(Date().timeIntervalSince1970.base36String)"
+        return "watch-\(hash)-\(randomSuffix)"
         #elseif os(macOS)
-        return "mac-\(hash)-\(Date().timeIntervalSince1970.base36String)"
+        return "mac-\(hash)-\(randomSuffix)"
         #else
-        return "swift-\(hash)-\(Date().timeIntervalSince1970.base36String)"
+        return "swift-\(hash)-\(randomSuffix)"
         #endif
+    }
+
+    /// Retrieve the cached device identifier from UserDefaults
+    private static func getCachedIdentifier() -> String? {
+        return UserDefaults.standard.string(forKey: cacheKey)
+    }
+
+    /// Cache the device identifier to UserDefaults
+    private static func cacheIdentifier(_ identifier: String) {
+        UserDefaults.standard.set(identifier, forKey: cacheKey)
+    }
+
+    /// Clear the cached device identifier (for testing purposes)
+    static func clearCache() {
+        UserDefaults.standard.removeObject(forKey: cacheKey)
     }
     
     #if os(macOS) && canImport(IOKit)
@@ -149,11 +192,5 @@ private extension String {
         hasher.combine(self)
         let hash = abs(hasher.finalize())
         return String(hash, radix: 36)
-    }
-}
-
-private extension TimeInterval {
-    var base36String: String {
-        return String(Int(self), radix: 36)
     }
 } 

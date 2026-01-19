@@ -9,7 +9,10 @@
 import Foundation
 
 /// Type-erased Codable wrapper for handling heterogeneous JSON
-public struct AnyCodable: Codable {
+///
+/// - Note: Marked as `@unchecked Sendable` because it only holds primitive value types
+///   (Bool, Int, Double, String, NSNull, and collections of these) which are all Sendable.
+public struct AnyCodable: Codable, @unchecked Sendable {
     public let value: Any
     
     public init(_ value: Any) {
