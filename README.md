@@ -6,7 +6,7 @@
 [![CI](https://github.com/licenseseat/licenseseat-swift/actions/workflows/ci.yml/badge.svg)](https://github.com/licenseseat/licenseseat-swift/actions/workflows/ci.yml)
 [![Documentation](https://img.shields.io/badge/Docs-DocC-blue.svg)](https://licenseseat.github.io/licenseseat-swift/documentation/licenseseat/)
 
-The official Swift SDK for [LicenseSeat](https://licenseseat.com) — a software licensing platform for managing license keys, activations, and entitlements.
+The official Swift SDK for [LicenseSeat](https://licenseseat.com) — the simple, secure licensing platform for apps, games, and plugins.
 
 ## Features
 
