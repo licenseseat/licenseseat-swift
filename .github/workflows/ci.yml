@@ -6,21 +6,69 @@ on:
   pull_request:
     branches: [main, master]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test-macos:
-    name: Test on macOS
-    runs-on: macos-latest
+    name: Test on macOS (${{ matrix.xcode }})
+    runs-on: ${{ matrix.runner }}
     strategy:
+      fail-fast: false
       matrix:
-        xcode: ["15.0.1"]
+        include:
+          # Xcode 15.4 - Swift 5.10 (macOS 14)
+          - xcode: "15.4"
+            runner: macos-14
+          # Xcode 16.2 - Swift 6.0 (macOS 15)
+          - xcode: "16.2"
+            runner: macos-15
     steps:
       - uses: actions/checkout@v4
 
-      - name: Select Xcode
+      - name: Select Xcode ${{ matrix.xcode }}
         run: sudo xcode-select -s "/Applications/Xcode_${{ matrix.xcode }}.app/Contents/Developer"
 
       - name: Swift version
         run: swift --version
+
+      - name: Cache Swift packages
+        uses: actions/cache@v4
+        with:
+          path: .build
+          key: ${{ runner.os }}-spm-${{ matrix.xcode }}-${{ hashFiles('Package.resolved') }}
+          restore-keys: |
+            ${{ runner.os }}-spm-${{ matrix.xcode }}-
+
+      - name: Build
+        run: swift build -v
+
+      - name: Run tests
+        run: swift test -v
+
+  test-linux:
+    name: Test on Linux (Swift ${{ matrix.swift }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        swift: ["5.10", "6.0"]
+    container:
+      image: swift:${{ matrix.swift }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Swift version
+        run: swift --version
+
+      - name: Cache Swift packages
+        uses: actions/cache@v4
+        with:
+          path: .build
+          key: linux-spm-${{ matrix.swift }}-${{ hashFiles('Package.resolved') }}
+          restore-keys: |
+            linux-spm-${{ matrix.swift }}-
 
       - name: Build
         run: swift build -v

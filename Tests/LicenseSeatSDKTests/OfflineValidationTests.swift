@@ -16,23 +16,24 @@ import Crypto
 @MainActor
 final class OfflineValidationTests: XCTestCase {
     var sdk: LicenseSeat!
-    var cache: LicenseCache!
-    
+
+    private static let testPrefix = "offline_validation_test_"
+
     override func setUp() {
         super.setUp()
         let config = LicenseSeatConfig(
             apiBaseUrl: "https://api.test.com",
-            storagePrefix: "test_",
+            storagePrefix: Self.testPrefix,
             offlineFallbackEnabled: true,
             maxOfflineDays: 7,
             maxClockSkewMs: 300000
         )
         sdk = LicenseSeat(config: config)
-        cache = LicenseCache(prefix: "test_")
+        sdk.cache.clear()
     }
-    
+
     override func tearDown() {
-        cache.clear()
+        sdk.cache.clear()
         super.tearDown()
     }
     
@@ -57,8 +58,8 @@ final class OfflineValidationTests: XCTestCase {
         )
         
         // Cache the license and public key
-        cache.setOfflineLicense(offlineLicense)
-        cache.setPublicKey("test-key-id", Base64URL.encode(publicKey.rawRepresentation))
+        sdk.cache.setOfflineLicense(offlineLicense)
+        sdk.cache.setPublicKey("test-key-id", Base64URL.encode(publicKey.rawRepresentation))
         
         let testLicense = License(
             licenseKey: "TEST-LICENSE-KEY",
@@ -67,7 +68,7 @@ final class OfflineValidationTests: XCTestCase {
             activatedAt: Date(),
             lastValidated: Date()
         )
-        cache.setLicense(testLicense)
+        sdk.cache.setLicense(testLicense)
         
         // When
         let result = await sdk.verifyCachedOffline()
@@ -91,8 +92,8 @@ final class OfflineValidationTests: XCTestCase {
             kid: "test-key-id"
         )
         
-        cache.setOfflineLicense(offlineLicense)
-        cache.setPublicKey("test-key-id", "invalid-public-key")
+        sdk.cache.setOfflineLicense(offlineLicense)
+        sdk.cache.setPublicKey("test-key-id", "invalid-public-key")
         
         // When
         let result = await sdk.verifyCachedOffline()
@@ -122,8 +123,8 @@ final class OfflineValidationTests: XCTestCase {
             kid: "test-key-id"
         )
         
-        cache.setOfflineLicense(offlineLicense)
-        cache.setPublicKey("test-key-id", Base64URL.encode(publicKey.rawRepresentation))
+        sdk.cache.setOfflineLicense(offlineLicense)
+        sdk.cache.setPublicKey("test-key-id", Base64URL.encode(publicKey.rawRepresentation))
         
         let testLicense = License(
             licenseKey: "TEST-LICENSE-KEY",
@@ -132,7 +133,7 @@ final class OfflineValidationTests: XCTestCase {
             activatedAt: Date(),
             lastValidated: Date()
         )
-        cache.setLicense(testLicense)
+        sdk.cache.setLicense(testLicense)
         
         // When
         let result = await sdk.verifyCachedOffline()
@@ -162,8 +163,8 @@ final class OfflineValidationTests: XCTestCase {
             kid: "test-key-id"
         )
         
-        cache.setOfflineLicense(offlineLicense)
-        cache.setPublicKey("test-key-id", Base64URL.encode(publicKey.rawRepresentation))
+        sdk.cache.setOfflineLicense(offlineLicense)
+        sdk.cache.setPublicKey("test-key-id", Base64URL.encode(publicKey.rawRepresentation))
         
         // License last validated 8 days ago (exceeds 7 day grace period)
         let testLicense = License(
@@ -173,7 +174,7 @@ final class OfflineValidationTests: XCTestCase {
             activatedAt: Date().addingTimeInterval(-10 * 86400),
             lastValidated: Date().addingTimeInterval(-8 * 86400)
         )
-        cache.setLicense(testLicense)
+        sdk.cache.setLicense(testLicense)
         
         // When
         let result = await sdk.verifyCachedOffline()
@@ -185,7 +186,7 @@ final class OfflineValidationTests: XCTestCase {
     
     func testClockTamperDetection() async throws {
         // Given: Last seen timestamp is in the future
-        cache.setLastSeenTimestamp(Date().addingTimeInterval(600).timeIntervalSince1970) // 10 minutes in future
+        sdk.cache.setLastSeenTimestamp(Date().addingTimeInterval(600).timeIntervalSince1970) // 10 minutes in future
         
         let privateKey = Curve25519.Signing.PrivateKey()
         let publicKey = privateKey.publicKey
@@ -204,8 +205,8 @@ final class OfflineValidationTests: XCTestCase {
             kid: "test-key-id"
         )
         
-        cache.setOfflineLicense(offlineLicense)
-        cache.setPublicKey("test-key-id", Base64URL.encode(publicKey.rawRepresentation))
+        sdk.cache.setOfflineLicense(offlineLicense)
+        sdk.cache.setPublicKey("test-key-id", Base64URL.encode(publicKey.rawRepresentation))
         
         let testLicense = License(
             licenseKey: "TEST-LICENSE-KEY",
@@ -214,7 +215,7 @@ final class OfflineValidationTests: XCTestCase {
             activatedAt: Date(),
             lastValidated: Date()
         )
-        cache.setLicense(testLicense)
+        sdk.cache.setLicense(testLicense)
         
         // When
         let result = await sdk.verifyCachedOffline()
@@ -243,8 +244,8 @@ final class OfflineValidationTests: XCTestCase {
             kid: "test-key-id"
         )
         
-        cache.setOfflineLicense(offlineLicense)
-        cache.setPublicKey("test-key-id", Base64URL.encode(publicKey.rawRepresentation))
+        sdk.cache.setOfflineLicense(offlineLicense)
+        sdk.cache.setPublicKey("test-key-id", Base64URL.encode(publicKey.rawRepresentation))
         
         let testLicense = License(
             licenseKey: "TEST-LICENSE-KEY",
@@ -253,7 +254,7 @@ final class OfflineValidationTests: XCTestCase {
             activatedAt: Date(),
             lastValidated: Date()
         )
-        cache.setLicense(testLicense)
+        sdk.cache.setLicense(testLicense)
         
         // When
         let result = await sdk.verifyCachedOffline()

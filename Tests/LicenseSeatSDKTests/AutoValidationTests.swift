@@ -63,6 +63,7 @@ final class AutoValidationTests: XCTestCase {
         let config = LicenseSeatConfig(
             apiBaseUrl: "https://example.com", // value does not matter for stubs
             apiKey: "test-api-key",
+            storagePrefix: "auto_validation_test_",
             autoValidateInterval: 0.2,
             debug: false
         )
