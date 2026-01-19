@@ -102,12 +102,6 @@ public func validate(
    git push origin v1.0.0
    ```
 
-## Getting Help
-
-- 💬 [Discord Community](https://discord.gg/licenseseat)
-- 📧 [Email Support](mailto:support@licenseseat.com)
-- 📖 [Documentation](https://docs.licenseseat.com)
-
 ## Recognition
 
 Contributors will be recognized in our README and release notes. Thank you for helping make LicenseSeat better!

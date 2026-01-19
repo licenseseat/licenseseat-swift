@@ -613,4 +613,3 @@ MIT License. See [LICENSE.txt](LICENSE.txt) for details.
 
 - **Documentation:** [https://docs.licenseseat.com](https://docs.licenseseat.com)
 - **Issues:** [GitHub Issues](https://github.com/licenseseat/licenseseat-swift/issues)
-- **Email:** support@licenseseat.com
