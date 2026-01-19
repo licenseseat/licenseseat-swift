@@ -1,7 +1,7 @@
 # LicenseSeat Swift SDK
 
 [![Swift 5.9+](https://img.shields.io/badge/Swift-5.9+-F05138.svg?style=flat)](https://swift.org)
-[![Platforms](https://img.shields.io/badge/Platforms-macOS%2012+%20|%20iOS%2013+%20|%20tvOS%2013+%20|%20watchOS%208+%20|%20Linux-blue.svg)](https://swift.org)
+[![Platforms](https://img.shields.io/badge/Platforms-macOS%2012+%20|%20iOS%2013+%20|%20tvOS%2013+%20|%20watchOS%208+-blue.svg)](https://swift.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE.txt)
 [![CI](https://github.com/licenseseat/licenseseat-swift/actions/workflows/ci.yml/badge.svg)](https://github.com/licenseseat/licenseseat-swift/actions/workflows/ci.yml)
 [![Documentation](https://img.shields.io/badge/Docs-DocC-blue.svg)](https://licenseseat.github.io/licenseseat-swift/documentation/licenseseat/)
@@ -444,7 +444,6 @@ LicenseSeat.shared.eventPublisher
 | iOS | 13.0+ | Full support |
 | tvOS | 13.0+ | Full support |
 | watchOS | 8.0+ | Core features (no Network.framework) |
-| Linux | Swift 5.9+ | Full support via swift-crypto |
 
 ---
 
@@ -514,7 +513,7 @@ That's it! Swift Package Manager uses git tags for versioning. Once a tag is pus
 ### CI/CD
 
 The repository includes GitHub Actions CI that runs on every push and PR:
-- Tests on macOS (Xcode 15.4, 16.2) and Linux (Swift 5.10, 6.0)
+- Tests on macOS (Xcode 15.4, 16.2)
 - SwiftLint for code style
 - DocC documentation generation
 
