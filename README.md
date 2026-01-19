@@ -17,7 +17,7 @@ The official Swift SDK for [LicenseSeat](https://licenseseat.com) — a software
 - **Network Resilience** — Automatic retry with exponential backoff and offline fallback
 - **Reactive UI Support** — SwiftUI property wrappers and Combine publishers for reactive updates
 - **Security Features** — Clock tamper detection, secure caching, and constant-time comparisons
-- **Cross-Platform** — Full support for Apple platforms and Linux
+- **Cross-Platform** — Full support for Apple platforms (macOS, iOS, tvOS, watchOS)
 
 ## Table of Contents
 
@@ -250,7 +250,6 @@ For full control, create an instance with custom configuration:
 
 ```swift
 let config = LicenseSeatConfig(
-    apiBaseUrl: "https://api.licenseseat.com",
     apiKey: "YOUR_API_KEY",
     storagePrefix: "myapp_",
     autoValidateInterval: 3600,      // Re-validate every hour
@@ -295,7 +294,7 @@ if result.valid {
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `apiBaseUrl` | `String` | `https://api.licenseseat.com` | API endpoint |
+| `apiBaseUrl` | `String` | `https://licenseseat.com/api` | API endpoint |
 | `apiKey` | `String?` | `nil` | Your API key |
 | `storagePrefix` | `String` | `licenseseat_` | Prefix for cache keys |
 | `deviceIdentifier` | `String?` | Auto-generated | Custom device ID |
@@ -554,13 +553,15 @@ swift test --filter EntitlementTests
 swift test --enable-code-coverage
 ```
 
-The SDK includes 42 tests covering:
+The SDK includes 77+ tests covering:
 - License activation, validation, and deactivation
-- Entitlement checking
+- Entitlement checking and parsing
 - Offline cryptographic validation
 - Event bus subscriptions
 - Device identifier generation
 - API client retry logic
+- API response format compliance
+- Error handling with reason codes
 
 ---
 

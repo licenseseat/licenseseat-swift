@@ -38,7 +38,6 @@ import Network
 /// ```swift
 /// // Initialize with configuration
 /// let config = LicenseSeatConfig(
-///     apiBaseUrl: "https://api.licenseseat.com",
 ///     apiKey: "your-api-key"
 /// )
 /// let licenseSeat = LicenseSeat(config: config)
@@ -801,18 +800,20 @@ public extension LicenseSeat {
     /// libraries such as `SentrySDK.start(...)` or `Amplitude(configuration:)`.
     /// - Parameters:
     ///   - apiKey:       Your LicenseSeat API key.
-    ///   - apiBaseURL:   Base URL for the LicenseSeat backend. Defaults to production.
+    ///   - apiBaseURL:   Base URL for the LicenseSeat backend. Defaults to production (`LicenseSeatConfig.productionAPIBaseURL`).
     ///   - force:        Recreate the singleton even if it was already configured.
     ///   - customize:    Optional closure to tweak the default ``LicenseSeatConfig``.
     @MainActor
     static func configure(apiKey: String,
-                          apiBaseURL: URL = URL(string: "https://api.licenseseat.com")!,
+                          apiBaseURL: URL? = nil,
                           force: Bool = false,
                           options customize: (inout LicenseSeatConfig) -> Void = { _ in }) {
         if _shared.config.apiKey != nil && !force { return }
         var cfg = LicenseSeatConfig.default
         cfg.apiKey = apiKey
-        cfg.apiBaseUrl = apiBaseURL.absoluteString
+        if let apiBaseURL {
+            cfg.apiBaseUrl = apiBaseURL.absoluteString
+        }
         customize(&cfg)
         _shared = LicenseSeat(config: cfg)
     }

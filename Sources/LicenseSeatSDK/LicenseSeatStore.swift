@@ -90,21 +90,23 @@ public final class LicenseSeatStore {
     /// Configures the shared store. The first call wins unless `force` is true.
     /// - Parameters:
     ///   - apiKey: Your LicenseSeat API key.
-    ///   - apiBaseURL: Base URL for the LicenseSeat backend. Defaults to production.
+    ///   - apiBaseURL: Base URL for the LicenseSeat backend. Defaults to production (`LicenseSeatConfig.productionAPIBaseURL`).
     ///   - force: Recreate the underlying ``LicenseSeat`` even if it has been configured before.
     ///   - customize: Closure to modify the default ``LicenseSeatConfig`` before initialization.
     public func configure(apiKey: String,
-                          apiBaseURL: URL = URL(string: "https://api.licenseseat.com")!,
+                          apiBaseURL: URL? = nil,
                           force: Bool = false,
                           urlSession: URLSession? = nil,
                           options customize: (inout LicenseSeatConfig) -> Void = { _ in }) {
         if seat != nil && !force { return }
-        
+
         var cfg = LicenseSeatConfig.default
         cfg.apiKey = apiKey
-        cfg.apiBaseUrl = apiBaseURL.absoluteString
+        if let apiBaseURL {
+            cfg.apiBaseUrl = apiBaseURL.absoluteString
+        }
         customize(&cfg)
-        
+
         seat = LicenseSeat(config: cfg, urlSession: urlSession)
         status = seat?.getStatus() ?? .inactive(message: "Uninitialized")
         subscribeToSeat()
