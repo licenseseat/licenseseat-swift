@@ -11,17 +11,18 @@ import XCTest
 @MainActor
 final class EntitlementTests: XCTestCase {
     var sdk: LicenseSeat?
-    var cache: LicenseCache?
-    
+
+    private static let testPrefix = "entitlement_test_"
+
     override func setUp() {
         super.setUp()
-        let config = LicenseSeatConfig(storagePrefix: "test_")
+        let config = LicenseSeatConfig(storagePrefix: Self.testPrefix)
         sdk = LicenseSeat(config: config)
-        cache = LicenseCache(prefix: "test_")
+        sdk?.cache.clear()
     }
-    
+
     override func tearDown() {
-        cache?.clear()
+        sdk?.cache.clear()
         super.tearDown()
     }
     
@@ -53,7 +54,7 @@ final class EntitlementTests: XCTestCase {
             validation: validation
         )
         
-        cache?.setLicense(license)
+        sdk?.cache.setLicense(license)
         
         // When
         guard let sdk = sdk else {
@@ -95,7 +96,7 @@ final class EntitlementTests: XCTestCase {
             validation: validation
         )
         
-        cache?.setLicense(license)
+        sdk?.cache.setLicense(license)
         
         // When
         guard let sdk = sdk else {
@@ -136,7 +137,7 @@ final class EntitlementTests: XCTestCase {
             validation: validation
         )
         
-        cache?.setLicense(license)
+        sdk?.cache.setLicense(license)
         
         // When
         guard let sdk = sdk else {
@@ -193,7 +194,7 @@ final class EntitlementTests: XCTestCase {
             validation: validation
         )
         
-        cache?.setLicense(license)
+        sdk?.cache.setLicense(license)
         
         // When
         guard let sdk = sdk else {

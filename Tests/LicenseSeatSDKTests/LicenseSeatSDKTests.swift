@@ -12,16 +12,18 @@ import Combine
 final class LicenseSeatSDKTests: XCTestCase {
     private var sdk: LicenseSeat?
     private var cancellables = Set<AnyCancellable>()
-    
+
+    private static let testPrefix = "sdk_integration_test_"
+
     override func setUp() {
         super.setUp()
         URLProtocol.registerClass(MockURLProtocol.self)
         MockURLProtocol.reset()
-        
+
         let cfg = LicenseSeatConfig(
             apiBaseUrl: "https://api.test.com",
             apiKey: "unit-test",
-            storagePrefix: "test_",
+            storagePrefix: Self.testPrefix,
             autoValidateInterval: 3600, // won't trigger in unit time
             offlineFallbackEnabled: false // disable background offline asset sync for predictable request order
         )

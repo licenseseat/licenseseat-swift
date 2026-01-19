@@ -74,7 +74,7 @@ import Network
 /// and publishers should be dispatched to the main queue when necessary.
 // MARK: - LicenseSeat Main Class
 @MainActor
-public final class LicenseSeat: ObservableObject {
+public final class LicenseSeat {
     
     // MARK: - Properties
     
@@ -122,7 +122,7 @@ public final class LicenseSeat: ObservableObject {
     internal var currentAutoLicenseKey: String?
     
     /// Online/offline status
-    @Published public private(set) var isOnline = true
+    public private(set) var isOnline = true
     
     /// Last offline validation result to avoid duplicate events
     private var lastOfflineValidation: LicenseValidationResult?
@@ -377,7 +377,7 @@ public final class LicenseSeat: ObservableObject {
                 currentAutoLicenseKey = nil
                 lastOfflineValidation = nil
 
-                let reason = (apiError.data as? [String: Any])?["reason"] as? String ?? apiError.message
+                let reason = apiError.data?["reason"] as? String ?? apiError.message
                 let invalidResult = LicenseValidationResult(valid: false, reason: reason, offline: false)
                 eventBus.emit("validation:failed", invalidResult)
                 eventBus.emit("license:revoked", [
@@ -448,8 +448,8 @@ public final class LicenseSeat: ObservableObject {
                 return true
             case 422:
                 // Unprocessable – often means license revoked or already disabled.
-                if let data = apiError.data as? [String: Any],
-                   let code = data["code"] as? String {
+                // Use reasonCode if available, otherwise check for code in data
+                if let code = apiError.reasonCode ?? apiError.data?["code"] as? String {
                     return ["revoked", "already_deactivated", "not_active", "not_found", "suspended", "expired"].contains(code)
                 }
                 // Fallback to string heuristics on the message – keeps us resilient to
@@ -635,9 +635,23 @@ public final class LicenseSeat: ObservableObject {
     }
     
     /// Unsubscribe from an event
+    ///
+    /// - Note: This method is deprecated. Use the `AnyCancellable` returned from `on(_:handler:)` instead.
+    ///   Closure comparison is unreliable in Swift, so this method cannot reliably remove handlers.
+    ///
+    /// Example of proper unsubscription:
+    /// ```swift
+    /// let cancellable = licenseSeat.on("license:loaded") { data in
+    ///     // Handle event
+    /// }
+    /// // Later, to unsubscribe:
+    /// cancellable.cancel()
+    /// ```
+    ///
     /// - Parameters:
     ///   - event: Event name
-    ///   - handler: Handler to remove
+    ///   - handler: Handler to remove (no longer functional)
+    @available(*, deprecated, message: "Use the AnyCancellable returned from on(_:handler:) to unsubscribe")
     public func off(_ event: String, handler: @escaping (Any) -> Void) {
         eventBus.off(event, handler: handler)
     }
@@ -820,8 +834,10 @@ public extension LicenseSeat {
         shared.checkEntitlement(id)
     }
 
+    #if canImport(Combine)
     /// Publisher mirroring ``statusPublisher`` on the shared instance for quick subscriptions.
     static var statusPublisher: AnyPublisher<LicenseStatus, Never> {
         shared.statusPublisher
     }
+    #endif
 } 

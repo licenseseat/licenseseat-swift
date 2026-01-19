@@ -40,6 +40,9 @@
 ///
 
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 #if canImport(Combine)
 import Combine
 #endif
@@ -49,17 +52,25 @@ import SwiftUI
 
 /// Thread-safe, observable façade around ``LicenseSeat``.
 @MainActor
-public final class LicenseSeatStore: ObservableObject {
+public final class LicenseSeatStore {
     // MARK: – Public static API
     /// Canonical shared instance for the application.
     public static let shared = LicenseSeatStore()
     
     // MARK: – Published state
     /// Reactive mirror of ``LicenseSeat.getStatus()``.
+    #if canImport(Combine)
     @Published public private(set) var status: LicenseStatus = .inactive(message: "Not configured")
-    
+    #else
+    public private(set) var status: LicenseStatus = .inactive(message: "Not configured")
+    #endif
+
     /// Timestamp of the next scheduled auto-validation cycle (if any).
+    #if canImport(Combine)
     @Published public private(set) var nextAutoValidationAt: Date?
+    #else
+    public private(set) var nextAutoValidationAt: Date?
+    #endif
     
     // MARK: – Internal properties
     private(set) var seat: LicenseSeat?
@@ -231,11 +242,17 @@ extension View {
 
 public enum LicenseSeatStoreError: LocalizedError {
     case notConfigured
-    
+
     public var errorDescription: String? {
         switch self {
         case .notConfigured:
             return "LicenseSeatStore.shared must be configured before use. Call `configure(apiKey:)` early in your application's lifecycle."
         }
     }
-} 
+}
+
+// MARK: - ObservableObject Conformance
+
+#if canImport(Combine)
+extension LicenseSeatStore: ObservableObject {}
+#endif 

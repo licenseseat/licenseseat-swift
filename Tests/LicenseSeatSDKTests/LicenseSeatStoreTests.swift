@@ -23,6 +23,7 @@ final class LicenseSeatStoreTests: XCTestCase {
         let config = LicenseSeatConfig(
             apiBaseUrl: "https://api.test.com",
             apiKey: "test_key",
+            storagePrefix: "store_test_",
             autoValidateInterval: 0, // Disable auto-validation by default
             debug: true
         )
@@ -126,6 +127,7 @@ final class LicenseSeatStoreTests: XCTestCase {
         let config = LicenseSeatConfig(
             apiBaseUrl: "https://api.test.com",
             apiKey: "test_key",
+            storagePrefix: "store_test_",
             autoValidateInterval: interval,
             debug: true
         )

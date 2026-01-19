@@ -10,6 +10,10 @@ import Foundation
 #if canImport(Combine)
 import Combine
 
+// MARK: - ObservableObject Conformance
+
+extension LicenseSeat: ObservableObject {}
+
 // MARK: - Combine Publishers
 
 extension LicenseSeat {

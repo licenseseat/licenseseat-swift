@@ -30,6 +30,7 @@ final class APIClientTests: XCTestCase {
         config = LicenseSeatConfig(
             apiBaseUrl: "https://api.test.com",
             apiKey: "test-key",
+            storagePrefix: "api_client_test_",
             maxRetries: 2,
             retryDelay: 0.05, // 50 ms for fast tests
             debug: true

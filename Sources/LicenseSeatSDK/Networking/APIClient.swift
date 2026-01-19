@@ -123,7 +123,7 @@ final class APIClient {
                 let (data, response) = try await session.data(for: request)
                 
                 guard let httpResponse = response as? HTTPURLResponse else {
-                    throw APIError(message: "Invalid response", status: 0, data: nil)
+                    throw APIError(message: "Invalid response", status: 0, reasonCode: nil)
                 }
                 
                 // Check status code
@@ -173,7 +173,7 @@ final class APIClient {
             }
         }
         
-        throw lastError ?? APIError(message: "Unknown error", status: 0, data: nil)
+        throw lastError ?? APIError(message: "Unknown error", status: 0, reasonCode: nil)
     }
     
     private func isNetworkError(_ error: Error) -> Bool {
@@ -189,26 +189,16 @@ final class APIClient {
     }
     
     private func shouldRetryError(_ error: Error) -> Bool {
-        // Network errors
+        // Network errors from URLSession
         if error is URLError {
             return true
         }
-        
-        // API errors
+
+        // API errors - delegate to the error's own retry logic
         if let apiError = error as? APIError {
-            let status = apiError.status
-            
-            // Retry on server errors (5xx) except 501
-            if status >= 502 && status < 600 {
-                return true
-            }
-            
-            // Retry on specific network-related errors
-            if [0, 408, 429].contains(status) {
-                return true
-            }
+            return apiError.isRetryable
         }
-        
+
         return false
     }
     
