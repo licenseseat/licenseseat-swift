@@ -17,7 +17,6 @@ import Foundation
 ///
 /// ```swift
 /// let config = LicenseSeatConfig(
-///     apiBaseUrl: "https://api.licenseseat.com",
 ///     apiKey: "your-api-key",
 ///     autoValidateInterval: 3600,     // Validate every hour
 ///     strictOfflineFallback: true,   // Enable offline mode (network-only fallback)
@@ -25,6 +24,10 @@ import Foundation
 /// )
 /// ```
 public struct LicenseSeatConfig {
+    // MARK: - Constants
+
+    /// The production API base URL. Single source of truth for the default endpoint.
+    public static let productionAPIBaseURL = "https://licenseseat.com/api"
     /// Base URL for the LicenseSeat API
     public var apiBaseUrl: String
     
@@ -102,7 +105,7 @@ public struct LicenseSeatConfig {
     /// Default configuration
     public static var `default`: LicenseSeatConfig {
         return LicenseSeatConfig(
-            apiBaseUrl: "https://api.licenseseat.com",
+            apiBaseUrl: productionAPIBaseURL,
             apiKey: nil,
             storagePrefix: "licenseseat_",
             deviceIdentifier: nil,
@@ -120,7 +123,7 @@ public struct LicenseSeatConfig {
     
     /// Initialize with custom values
     public init(
-        apiBaseUrl: String = "https://api.licenseseat.com",
+        apiBaseUrl: String = LicenseSeatConfig.productionAPIBaseURL,
         apiKey: String? = nil,
         storagePrefix: String = "licenseseat_",
         deviceIdentifier: String? = nil,

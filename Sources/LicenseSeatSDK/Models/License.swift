@@ -40,15 +40,42 @@ public struct License: Codable, Equatable, Sendable {
 
 /// Result of a license activation
 public struct ActivationResult: Codable, Equatable, Sendable {
-    /// Activation ID
+    /// Activation ID (stored as String for flexibility; API may return Int or String)
     public let id: String
-    
+
     /// When the activation occurred
     public let activatedAt: Date
-    
+
     enum CodingKeys: String, CodingKey {
         case id
         case activatedAt = "activated_at"
+    }
+
+    // Custom decoding to handle both Int and String for `id`
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+
+        // Try decoding as String first, then fall back to Int
+        if let stringId = try? container.decode(String.self, forKey: .id) {
+            self.id = stringId
+        } else if let intId = try? container.decode(Int.self, forKey: .id) {
+            self.id = String(intId)
+        } else {
+            throw DecodingError.typeMismatch(
+                String.self,
+                DecodingError.Context(
+                    codingPath: container.codingPath + [CodingKeys.id],
+                    debugDescription: "Expected String or Int for id"
+                )
+            )
+        }
+
+        self.activatedAt = try container.decode(Date.self, forKey: .activatedAt)
+    }
+
+    public init(id: String, activatedAt: Date) {
+        self.id = id
+        self.activatedAt = activatedAt
     }
 }
 
@@ -97,7 +124,10 @@ public struct LicenseValidationResult: Codable, Equatable, Sendable {
         self.activeEntitlements = activeEntitlements
     }
     
-    // Custom decoding to provide a default value for `offline`
+    // Custom decoding to handle multiple API response formats:
+    // 1. Top-level active_entitlements (direct format)
+    // 2. Nested license.active_entitlements (API /licenses/validate format)
+    // 3. active_ents (offline payload abbreviation)
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.valid = try container.decode(Bool.self, forKey: .valid)
@@ -107,10 +137,29 @@ public struct LicenseValidationResult: Codable, Equatable, Sendable {
         self.reasonCode = try container.decodeIfPresent(String.self, forKey: .reasonCode)
         self.optimistic = try container.decodeIfPresent(Bool.self, forKey: .optimistic)
 
-        // Decode active entitlements (long key)
-        var decodedEntitlements = try container.decodeIfPresent([Entitlement].self, forKey: .activeEntitlements)
-        
-        // Fallback to abbreviated key used by offline payloads / legacy APIs
+        // Try multiple paths to find entitlements
+        var decodedEntitlements: [Entitlement]?
+
+        // 1. Try top-level active_entitlements (direct format)
+        decodedEntitlements = try container.decodeIfPresent([Entitlement].self, forKey: .activeEntitlements)
+
+        // 2. Try nested license.active_entitlements (API /licenses/validate format)
+        // The API returns: { "valid": true, "license": { "active_entitlements": [...] } }
+        if decodedEntitlements == nil {
+            struct LicenseKey: CodingKey {
+                var stringValue: String
+                init?(stringValue: String) { self.stringValue = stringValue }
+                var intValue: Int?
+                init?(intValue: Int) { return nil }
+            }
+            let rootContainer = try decoder.container(keyedBy: LicenseKey.self)
+            if let licenseKey = LicenseKey(stringValue: "license"),
+               let licenseContainer = try? rootContainer.nestedContainer(keyedBy: CodingKeys.self, forKey: licenseKey) {
+                decodedEntitlements = try licenseContainer.decodeIfPresent([Entitlement].self, forKey: .activeEntitlements)
+            }
+        }
+
+        // 3. Fallback to abbreviated key used by offline payloads
         if decodedEntitlements == nil {
             struct DynamicKey: CodingKey {
                 var stringValue: String
