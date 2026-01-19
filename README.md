@@ -21,21 +21,43 @@ The official Swift SDK for [LicenseSeat](https://licenseseat.com) — a software
 
 ## Table of Contents
 
-- [Installation](#installation)
-- [Quick Start](#quick-start)
-- [SwiftUI Integration](#swiftui-integration)
-- [UIKit / AppKit Integration](#uikit--appkit-integration)
-- [Advanced Usage](#advanced-usage)
-- [Configuration Options](#configuration-options)
-- [Entitlements](#entitlements)
-- [Offline Validation](#offline-validation)
-- [Event System](#event-system)
-- [Platform Support](#platform-support)
-- [Example App](#example-app)
-- [Publishing & Distribution](#publishing--distribution)
-- [API Documentation](#api-documentation)
-- [Testing](#testing)
-- [License](#license)
+- [LicenseSeat Swift SDK](#licenseseat-swift-sdk)
+  - [Features](#features)
+  - [Table of Contents](#table-of-contents)
+  - [Installation](#installation)
+    - [Swift Package Manager](#swift-package-manager)
+    - [Xcode](#xcode)
+  - [Quick Start](#quick-start)
+    - [1. Configure the SDK](#1-configure-the-sdk)
+    - [2. Activate a License](#2-activate-a-license)
+    - [3. Check License Status](#3-check-license-status)
+    - [4. Deactivate](#4-deactivate)
+  - [SwiftUI Integration](#swiftui-integration)
+  - [UIKit / AppKit Integration](#uikit--appkit-integration)
+  - [Advanced Usage](#advanced-usage)
+    - [Custom Configuration](#custom-configuration)
+    - [Manual Validation](#manual-validation)
+  - [Configuration Options](#configuration-options)
+    - [Environment-Based Configuration](#environment-based-configuration)
+  - [Entitlements](#entitlements)
+    - [Reactive Entitlement Monitoring](#reactive-entitlement-monitoring)
+  - [Offline Validation](#offline-validation)
+    - [Offline Fallback Modes](#offline-fallback-modes)
+  - [Event System](#event-system)
+    - [Available Events](#available-events)
+  - [Platform Support](#platform-support)
+  - [Example App](#example-app)
+  - [Publishing \& Distribution](#publishing--distribution)
+    - [For SDK Users](#for-sdk-users)
+    - [For SDK Maintainers: Publishing a New Version](#for-sdk-maintainers-publishing-a-new-version)
+    - [Version Requirements for Users](#version-requirements-for-users)
+    - [CI/CD](#cicd)
+  - [API Documentation](#api-documentation)
+    - [Generate Documentation Locally](#generate-documentation-locally)
+  - [Testing](#testing)
+  - [Migration from JavaScript SDK](#migration-from-javascript-sdk)
+  - [License](#license)
+  - [Support](#support)
 
 ---
 
@@ -47,7 +69,7 @@ Add LicenseSeat to your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/licenseseat/licenseseat-swift.git", from: "0.1.0")
+    .package(url: "https://github.com/licenseseat/licenseseat-swift.git", from: "0.2.0")
 ]
 ```
 
@@ -292,20 +314,20 @@ if result.valid {
 
 ## Configuration Options
 
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `apiBaseUrl` | `String` | `https://licenseseat.com/api` | API endpoint |
-| `apiKey` | `String?` | `nil` | Your API key |
-| `storagePrefix` | `String` | `licenseseat_` | Prefix for cache keys |
-| `deviceIdentifier` | `String?` | Auto-generated | Custom device ID |
-| `autoValidateInterval` | `TimeInterval` | `3600` (1 hour) | Background validation interval |
-| `networkRecheckInterval` | `TimeInterval` | `30` | Offline connectivity check interval |
-| `maxRetries` | `Int` | `3` | API retry attempts |
-| `retryDelay` | `TimeInterval` | `1` | Base retry delay (exponential backoff) |
-| `offlineFallbackEnabled` | `Bool` | `false` | Enable offline validation |
-| `maxOfflineDays` | `Int` | `0` | Grace period for offline use |
-| `maxClockSkewMs` | `TimeInterval` | `300000` (5 min) | Clock tamper tolerance |
-| `debug` | `Bool` | `false` | Enable debug logging |
+| Option                   | Type           | Default                       | Description                            |
+| ------------------------ | -------------- | ----------------------------- | -------------------------------------- |
+| `apiBaseUrl`             | `String`       | `https://licenseseat.com/api` | API endpoint                           |
+| `apiKey`                 | `String?`      | `nil`                         | Your API key                           |
+| `storagePrefix`          | `String`       | `licenseseat_`                | Prefix for cache keys                  |
+| `deviceIdentifier`       | `String?`      | Auto-generated                | Custom device ID                       |
+| `autoValidateInterval`   | `TimeInterval` | `3600` (1 hour)               | Background validation interval         |
+| `networkRecheckInterval` | `TimeInterval` | `30`                          | Offline connectivity check interval    |
+| `maxRetries`             | `Int`          | `3`                           | API retry attempts                     |
+| `retryDelay`             | `TimeInterval` | `1`                           | Base retry delay (exponential backoff) |
+| `offlineFallbackEnabled` | `Bool`         | `false`                       | Enable offline validation              |
+| `maxOfflineDays`         | `Int`          | `0`                           | Grace period for offline use           |
+| `maxClockSkewMs`         | `TimeInterval` | `300000` (5 min)              | Clock tamper tolerance                 |
+| `debug`                  | `Bool`         | `false`                       | Enable debug logging                   |
 
 ### Environment-Based Configuration
 
@@ -422,27 +444,27 @@ LicenseSeat.shared.eventPublisher
 
 ### Available Events
 
-| Event | Description |
-|-------|-------------|
-| `activation:start/success/error` | License activation lifecycle |
-| `validation:start/success/failed/error` | Online validation |
-| `validation:offline-success/offline-failed` | Offline validation |
-| `deactivation:start/success/error` | License deactivation |
-| `license:loaded` | Cached license loaded at startup |
-| `license:revoked` | License revoked by server |
-| `network:online/offline` | Connectivity changes |
-| `sdk:reset` | SDK state cleared |
+| Event                                       | Description                      |
+| ------------------------------------------- | -------------------------------- |
+| `activation:start/success/error`            | License activation lifecycle     |
+| `validation:start/success/failed/error`     | Online validation                |
+| `validation:offline-success/offline-failed` | Offline validation               |
+| `deactivation:start/success/error`          | License deactivation             |
+| `license:loaded`                            | Cached license loaded at startup |
+| `license:revoked`                           | License revoked by server        |
+| `network:online/offline`                    | Connectivity changes             |
+| `sdk:reset`                                 | SDK state cleared                |
 
 ---
 
 ## Platform Support
 
-| Platform | Minimum Version | Notes |
-|----------|-----------------|-------|
-| macOS | 12.0+ | Full support including hardware UUID |
-| iOS | 13.0+ | Full support |
-| tvOS | 13.0+ | Full support |
-| watchOS | 8.0+ | Core features (no Network.framework) |
+| Platform | Minimum Version | Notes                                |
+| -------- | --------------- | ------------------------------------ |
+| macOS    | 12.0+           | Full support including hardware UUID |
+| iOS      | 13.0+           | Full support                         |
+| tvOS     | 13.0+           | Full support                         |
+| watchOS  | 8.0+            | Core features (no Network.framework) |
 
 ---
 
@@ -501,13 +523,13 @@ That's it! Swift Package Manager uses git tags for versioning. Once a tag is pus
 
 ### Version Requirements for Users
 
-| Requirement | Example | Description |
-|-------------|---------|-------------|
-| `from:` | `from: "0.1.0"` | Any version ≥ 0.1.0 (recommended) |
-| `exact:` | `exact: "0.1.1"` | Exactly version 0.1.1 |
-| `upToNextMajor:` | `.upToNextMajor(from: "0.1.0")` | 0.x.x versions only |
-| `upToNextMinor:` | `.upToNextMinor(from: "0.1.0")` | 0.1.x versions only |
-| `branch:` | `branch: "main"` | Latest from branch (for development) |
+| Requirement      | Example                         | Description                          |
+| ---------------- | ------------------------------- | ------------------------------------ |
+| `from:`          | `from: "0.2.0"`                 | Any version ≥ 0.2.0 (recommended)    |
+| `exact:`         | `exact: "0.1.1"`                | Exactly version 0.1.1                |
+| `upToNextMajor:` | `.upToNextMajor(from: "0.2.0")` | 0.x.x versions only                  |
+| `upToNextMinor:` | `.upToNextMinor(from: "0.2.0")` | 0.1.x versions only                  |
+| `branch:`        | `branch: "main"`                | Latest from branch (for development) |
 
 ### CI/CD
 
@@ -569,15 +591,15 @@ The SDK includes 77+ tests covering:
 
 This Swift SDK provides feature parity with the official JavaScript SDK:
 
-| JavaScript | Swift |
-|------------|-------|
-| `new LicenseSeat(config)` | `LicenseSeat(config:)` |
-| `sdk.activate(key, options)` | `sdk.activate(licenseKey:options:)` |
-| `sdk.validate(key, options)` | `sdk.validate(licenseKey:options:)` |
-| `sdk.deactivate()` | `sdk.deactivate()` |
-| `sdk.checkEntitlement(key)` | `sdk.checkEntitlement(_:)` |
-| `sdk.getStatus()` | `sdk.getStatus()` → enum |
-| `sdk.on('event', cb)` | `sdk.on("event") { }` → AnyCancellable |
+| JavaScript                   | Swift                                  |
+| ---------------------------- | -------------------------------------- |
+| `new LicenseSeat(config)`    | `LicenseSeat(config:)`                 |
+| `sdk.activate(key, options)` | `sdk.activate(licenseKey:options:)`    |
+| `sdk.validate(key, options)` | `sdk.validate(licenseKey:options:)`    |
+| `sdk.deactivate()`           | `sdk.deactivate()`                     |
+| `sdk.checkEntitlement(key)`  | `sdk.checkEntitlement(_:)`             |
+| `sdk.getStatus()`            | `sdk.getStatus()` → enum               |
+| `sdk.on('event', cb)`        | `sdk.on("event") { }` → AnyCancellable |
 
 ---
 
