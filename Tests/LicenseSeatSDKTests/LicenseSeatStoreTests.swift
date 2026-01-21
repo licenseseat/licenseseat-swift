@@ -314,7 +314,7 @@ final class LicenseSeatStoreTests: XCTestCase {
         
         let report = store.debugReport()
         
-        XCTAssertEqual(report["sdk_version"] as? String, "2.0.0")
+        XCTAssertEqual(report["sdk_version"] as? String, LicenseSeatConfig.sdkVersion)
         XCTAssertNotNil(report["status"] as? String)
         XCTAssertEqual(report["has_seat"] as? Bool, true)
         

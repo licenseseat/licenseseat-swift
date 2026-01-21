@@ -74,7 +74,7 @@ Add LicenseSeat to your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/licenseseat/licenseseat-swift.git", from: "2.0.0")
+    .package(url: "https://github.com/licenseseat/licenseseat-swift.git", from: "0.3.0")
 ]
 ```
 
@@ -695,8 +695,8 @@ To use LicenseSeat in your project, simply add the Swift Package Manager depende
 3. **Create and push a git tag:**
    ```bash
    # Semantic versioning: MAJOR.MINOR.PATCH
-   git tag v2.0.0
-   git push origin v2.0.0
+   git tag v0.3.0
+   git push origin v0.3.0
    ```
 
 4. **Create a GitHub Release** (optional but recommended):
@@ -709,17 +709,17 @@ That's it! Swift Package Manager uses git tags for versioning. Once a tag is pus
 
 ```swift
 // Users can now specify the new version
-.package(url: "https://github.com/licenseseat/licenseseat-swift.git", from: "2.0.0")
+.package(url: "https://github.com/licenseseat/licenseseat-swift.git", from: "0.3.0")
 ```
 
 ### Version Requirements for Users
 
 | Requirement      | Example                         | Description                          |
 | ---------------- | ------------------------------- | ------------------------------------ |
-| `from:`          | `from: "2.0.0"`                 | Any version >= 2.0.0 (recommended)   |
-| `exact:`         | `exact: "2.0.0"`                | Exactly version 2.0.0                |
-| `upToNextMajor:` | `.upToNextMajor(from: "2.0.0")` | 2.x.x versions only                  |
-| `upToNextMinor:` | `.upToNextMinor(from: "2.0.0")` | 2.0.x versions only                  |
+| `from:`          | `from: "0.3.0"`                 | Any version >= 0.3.0 (recommended)   |
+| `exact:`         | `exact: "0.3.0"`                | Exactly version 0.3.0                |
+| `upToNextMajor:` | `.upToNextMajor(from: "0.3.0")` | 0.x.x versions only                  |
+| `upToNextMinor:` | `.upToNextMinor(from: "0.3.0")` | 0.3.x versions only                  |
 | `branch:`        | `branch: "main"`                | Latest from branch (for development) |
 
 ### CI/CD

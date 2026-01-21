@@ -182,7 +182,7 @@ public final class LicenseSeatStore {
     /// Generate a redacted diagnostic report for support tickets
     public func debugReport() -> [String: Any] {
         var report: [String: Any] = [
-            "sdk_version": "2.0.0",
+            "sdk_version": LicenseSeatConfig.sdkVersion,
             "status": String(describing: status),
             "has_seat": seat != nil,
             "next_validation": nextAutoValidationAt?.timeIntervalSince1970 ?? "none"
