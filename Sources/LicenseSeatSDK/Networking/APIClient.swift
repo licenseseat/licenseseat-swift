@@ -11,6 +11,9 @@ import Foundation
 import FoundationNetworking
 #endif
 
+/// Empty response placeholder for endpoints that return no body
+struct EmptyResponse: Decodable {}
+
 /// API client with retry logic and exponential backoff
 final class APIClient {
     private let config: LicenseSeatConfig
@@ -123,7 +126,7 @@ final class APIClient {
                 let (data, response) = try await session.data(for: request)
                 
                 guard let httpResponse = response as? HTTPURLResponse else {
-                    throw APIError(message: "Invalid response", status: 0, reasonCode: nil)
+                    throw APIError(message: "Invalid response", status: 0)
                 }
                 
                 // Check status code
@@ -141,14 +144,12 @@ final class APIClient {
                     
                     return try decoder.decode(T.self, from: data)
                 } else {
-                    // Error response
-                    var errorData: [String: Any]?
+                    // Error response - parse new format: {"error": {"code": "...", "message": "..."}}
+                    var errorData: [String: Any] = [:]
                     if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
                         errorData = json
                     }
-                    
-                    let error = errorData?["error"] as? String ?? "Request failed"
-                    throw APIError(message: error, status: httpResponse.statusCode, data: errorData)
+                    throw APIError(from: errorData, status: httpResponse.statusCode)
                 }
                 
             } catch {
@@ -173,7 +174,7 @@ final class APIClient {
             }
         }
         
-        throw lastError ?? APIError(message: "Unknown error", status: 0, reasonCode: nil)
+        throw lastError ?? APIError(message: "Unknown error", status: 0)
     }
     
     private func isNetworkError(_ error: Error) -> Bool {

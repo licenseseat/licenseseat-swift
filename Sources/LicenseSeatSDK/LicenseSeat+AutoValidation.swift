@@ -9,22 +9,22 @@
 import Foundation
 
 extension LicenseSeat {
-    
+
     /// Start automatic license validation
     /// - Parameter licenseKey: License key to validate periodically
     func startAutoValidation(licenseKey: String) {
         // Cancel any existing timer/task
         stopAutoValidation()
-        
+
         currentAutoLicenseKey = licenseKey
         let interval = config.autoValidateInterval
-        
+
         // Don't start auto-validation if interval is 0 or negative
         guard interval > 0 else {
             log("Auto-validation disabled (interval: \(interval))")
             return
         }
-        
+
         // Schedule validation using a detached Task so we are not tied to a RunLoop.
         validationTask = Task.detached { [weak self] in
             guard let self else { return }
@@ -34,7 +34,7 @@ extension LicenseSeat {
                     "nextRunAt": Date().addingTimeInterval(interval)
                 ])
             }
-            
+
             // Continuous loop until cancelled.
             while !Task.isCancelled {
                 do {
@@ -43,7 +43,7 @@ extension LicenseSeat {
                     // Task was likely cancelled – exit loop
                     break
                 }
-                
+
                 await MainActor.run {
                     Task { @MainActor [weak self] in
                         guard let self else { return }
@@ -53,7 +53,7 @@ extension LicenseSeat {
             }
         }
     }
-    
+
     /// Stop automatic validation
     func stopAutoValidation() {
         // Invalidate legacy timer (if any)
@@ -64,11 +64,11 @@ extension LicenseSeat {
         validationTask = nil
         eventBus.emit("autovalidation:stopped", [:])
     }
-    
+
     /// Perform auto-validation
     private func performAutoValidation(licenseKey: String) async {
         do {
-            try await validate(licenseKey: licenseKey)
+            _ = try await validate(licenseKey: licenseKey)
         } catch {
             log("Auto-validation failed:", error)
             eventBus.emit("validation:auto-failed", [
@@ -76,7 +76,7 @@ extension LicenseSeat {
                 "error": error
             ])
         }
-        
+
         // Announce next scheduled run
         if validationTask != nil {
             eventBus.emit("autovalidation:cycle", [
@@ -89,11 +89,11 @@ extension LicenseSeat {
 // MARK: - Connectivity Polling
 
 extension LicenseSeat {
-    
+
     /// Start connectivity polling (fallback when Network framework unavailable)
     func startConnectivityPolling() {
         guard connectivityTimer == nil else { return }
-        
+
         connectivityTimer = Timer.scheduledTimer(
             withTimeInterval: config.networkRecheckInterval,
             repeats: true
@@ -103,18 +103,19 @@ extension LicenseSeat {
             }
         }
     }
-    
+
     /// Stop connectivity polling
     func stopConnectivityPolling() {
         connectivityTimer?.invalidate()
         connectivityTimer = nil
     }
-    
-    /// Check connectivity by hitting heartbeat endpoint
+
+    /// Check connectivity by hitting health endpoint
     private func checkConnectivity() async {
         do {
-            let _: EmptyResponse = try await apiClient.get(path: "/heartbeat")
-            
+            // GET /health
+            let _: HealthResponse = try await apiClient.get(path: "/health")
+
             // Success - we're back online
             if !isOnline {
                 handleNetworkStatusChange(isOnline: true)
@@ -129,29 +130,27 @@ extension LicenseSeat {
 // MARK: - Offline Assets Sync
 
 extension LicenseSeat {
-    
-    /// Sync offline license and public key
+
+    /// Sync offline token and public key
     func syncOfflineAssets() async {
         do {
-            let offlineLicense = try await getOfflineLicense()
-            cache.setOfflineLicense(offlineLicense)
-            
-            // Extract key ID
-            let kid = offlineLicense.kid ?? offlineLicense.payload?["kid"] as? String
-            if let kid = kid {
-                // Check if we already have this key
-                if cache.getPublicKey(kid) == nil {
-                    let publicKey = try await getPublicKey(keyId: kid)
-                    cache.setPublicKey(kid, publicKey)
-                }
+            let offlineToken = try await getOfflineToken()
+            cache.setOfflineToken(offlineToken)
+
+            // Extract key ID from token
+            let kid = offlineToken.token.kid
+            // Check if we already have this key
+            if cache.getPublicKey(kid) == nil {
+                let publicKey = try await getSigningKey(keyId: kid)
+                cache.setPublicKey(kid, publicKey)
             }
-            
-            eventBus.emit("offlineLicense:ready", [
-                "kid": kid as Any,
-                "exp_at": offlineLicense.payload?["exp_at"] as Any
+
+            eventBus.emit("offlineToken:ready", [
+                "kid": kid,
+                "exp": offlineToken.token.exp
             ])
-            
-            // Immediately verify offline license locally so that
+
+            // Immediately verify offline token locally so that
             // active entitlements (and other validation fields) are
             // cached and available even when we are online.
             if let offlineResult = await quickVerifyCachedOfflineLocal() {
@@ -162,18 +161,18 @@ extension LicenseSeat {
                     eventBus.emit("validation:offline-failed", offlineResult)
                 }
             }
-            
+
         } catch {
             log("Failed to sync offline assets:", error)
         }
     }
-    
+
     /// Schedule periodic offline refresh
     func scheduleOfflineRefresh() {
         stopOfflineRefresh()
-        
+
         offlineRefreshTimer = Timer.scheduledTimer(
-            withTimeInterval: config.offlineLicenseRefreshInterval,
+            withTimeInterval: config.offlineTokenRefreshInterval,
             repeats: true
         ) { [weak self] _ in
             Task { @MainActor in
@@ -181,72 +180,71 @@ extension LicenseSeat {
             }
         }
     }
-    
+
     /// Stop offline refresh timer
     func stopOfflineRefresh() {
         offlineRefreshTimer?.invalidate()
         offlineRefreshTimer = nil
     }
-    
-    /// Get offline license from server
-    private func getOfflineLicense() async throws -> OfflineLicense {
+
+    /// Get offline token from server
+    private func getOfflineToken() async throws -> OfflineTokenResponse {
+        guard let productSlug = config.productSlug else {
+            throw LicenseSeatError.productSlugRequired
+        }
+
         guard let license = cache.getLicense() else {
             let error = LicenseSeatError.noActiveLicense
             eventBus.emit("sdk:error", ["message": error.localizedDescription])
             throw error
         }
-        
-        eventBus.emit("offlineLicense:fetching", ["licenseKey": license.licenseKey])
-        
+
+        eventBus.emit("offlineToken:fetching", ["licenseKey": license.licenseKey])
+
         do {
-            let response: OfflineLicense = try await apiClient.post(
-                path: "/licenses/\(license.licenseKey)/offline_license"
+            var body: [String: Any] = [:]
+            body["device_id"] = license.deviceId
+
+            // POST /products/{slug}/licenses/{key}/offline-token
+            let response: OfflineTokenResponse = try await apiClient.post(
+                path: "/products/\(productSlug)/licenses/\(license.licenseKey)/offline-token",
+                body: body
             )
-            
-            eventBus.emit("offlineLicense:fetched", [
-                "licenseKey": license.licenseKey,
-                "data": response
+
+            eventBus.emit("offlineToken:fetched", [
+                "licenseKey": license.licenseKey
             ])
-            
+
             return response
-            
+
         } catch {
-            log("Failed to get offline license for \(license.licenseKey):", error)
-            eventBus.emit("offlineLicense:fetchError", [
+            log("Failed to get offline token for \(license.licenseKey):", error)
+            eventBus.emit("offlineToken:fetchError", [
                 "licenseKey": license.licenseKey,
                 "error": error
             ])
             throw error
         }
     }
-    
-    /// Get public key from server
-    internal func getPublicKey(keyId: String) async throws -> String {
+
+    /// Get signing key (public key) from server
+    internal func getSigningKey(keyId: String) async throws -> String {
         guard !keyId.isEmpty else {
             throw LicenseSeatError.invalidKeyId
         }
-        
-        log("Fetching public key for kid: \(keyId)")
-        
-        struct PublicKeyResponse: Codable {
-            let keyId: String
-            let publicKeyB64: String
-            
-            enum CodingKeys: String, CodingKey {
-                case keyId = "key_id"
-                case publicKeyB64 = "public_key_b64"
-            }
-        }
-        
-        let response: PublicKeyResponse = try await apiClient.get(
-            path: "/public_keys/\(keyId)"
+
+        log("Fetching signing key for kid: \(keyId)")
+
+        // GET /signing-keys/{key_id}
+        let response: SigningKeyResponse = try await apiClient.get(
+            path: "/signing-keys/\(keyId)"
         )
-        
-        guard !response.publicKeyB64.isEmpty else {
+
+        guard !response.publicKey.isEmpty else {
             throw LicenseSeatError.invalidPublicKey
         }
-        
-        log("Successfully fetched public key for kid: \(keyId)")
-        return response.publicKeyB64
+
+        log("Successfully fetched signing key for kid: \(keyId)")
+        return response.publicKey
     }
-} 
+}

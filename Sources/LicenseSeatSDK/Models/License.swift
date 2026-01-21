@@ -8,317 +8,370 @@
 
 import Foundation
 
-/// Represents an activated license
+// MARK: - Product
+
+/// Product information included in license responses
+public struct Product: Codable, Equatable, Sendable {
+    public let slug: String
+    public let name: String
+}
+
+// MARK: - Entitlement
+
+/// Represents an entitlement (feature flag) attached to a license
+public struct Entitlement: Codable, Equatable, Sendable {
+    /// Unique key for the entitlement
+    public let key: String
+
+    /// Expiration date (if applicable)
+    public let expiresAt: Date?
+
+    /// Additional metadata
+    public let metadata: [String: AnyCodable]?
+
+    enum CodingKeys: String, CodingKey {
+        case key
+        case expiresAt = "expires_at"
+        case metadata
+    }
+
+    public init(key: String, expiresAt: Date? = nil, metadata: [String: AnyCodable]? = nil) {
+        self.key = key
+        self.expiresAt = expiresAt
+        self.metadata = metadata
+    }
+}
+
+// MARK: - License (API Response)
+
+/// License object as returned by the API
+/// Response format: `{"object": "license", "key": "...", ...}`
+public struct LicenseResponse: Codable, Equatable, Sendable {
+    public let object: String
+    public let key: String
+    public let status: String
+    public let startsAt: Date?
+    public let expiresAt: Date?
+    public let mode: String
+    public let planKey: String
+    public let seatLimit: Int?
+    public let activeSeats: Int
+    public let activeEntitlements: [Entitlement]
+    public let metadata: [String: AnyCodable]?
+    public let product: Product
+
+    enum CodingKeys: String, CodingKey {
+        case object
+        case key
+        case status
+        case startsAt = "starts_at"
+        case expiresAt = "expires_at"
+        case mode
+        case planKey = "plan_key"
+        case seatLimit = "seat_limit"
+        case activeSeats = "active_seats"
+        case activeEntitlements = "active_entitlements"
+        case metadata
+        case product
+    }
+}
+
+// MARK: - Activation (API Response)
+
+/// Activation object as returned by the API
+/// Response format: `{"object": "activation", "id": 123, "device_id": "...", ...}`
+public struct ActivationResponse: Codable, Equatable, Sendable {
+    public let object: String
+    public let id: Int
+    public let deviceId: String
+    public let deviceName: String?
+    public let licenseKey: String
+    public let activatedAt: Date
+    public let deactivatedAt: Date?
+    public let ipAddress: String?
+    public let metadata: [String: AnyCodable]?
+    public let license: LicenseResponse
+
+    enum CodingKeys: String, CodingKey {
+        case object
+        case id
+        case deviceId = "device_id"
+        case deviceName = "device_name"
+        case licenseKey = "license_key"
+        case activatedAt = "activated_at"
+        case deactivatedAt = "deactivated_at"
+        case ipAddress = "ip_address"
+        case metadata
+        case license
+    }
+}
+
+// MARK: - Deactivation (API Response)
+
+/// Deactivation object as returned by the API
+/// Response format: `{"object": "deactivation", "activation_id": 123, "deactivated_at": "..."}`
+public struct DeactivationResponse: Codable, Equatable, Sendable {
+    public let object: String
+    public let activationId: Int
+    public let deactivatedAt: Date
+
+    enum CodingKeys: String, CodingKey {
+        case object
+        case activationId = "activation_id"
+        case deactivatedAt = "deactivated_at"
+    }
+}
+
+// MARK: - Validation Warning
+
+/// Warning returned during license validation
+public struct ValidationWarning: Codable, Equatable, Sendable {
+    public let code: String
+    public let message: String
+}
+
+// MARK: - Validation Result (API Response)
+
+/// Validation result as returned by the API
+/// Response format: `{"object": "validation_result", "valid": true, "license": {...}, ...}`
+public struct ValidationResponse: Codable, Equatable, Sendable {
+    public let object: String
+    public let valid: Bool
+    public let code: String?
+    public let message: String?
+    public let warnings: [ValidationWarning]?
+    public let license: LicenseResponse
+    public let activation: ActivationResponseNested?
+
+    /// Nested activation without full license (to avoid circular reference)
+    public struct ActivationResponseNested: Codable, Equatable, Sendable {
+        public let id: Int
+        public let deviceId: String
+        public let deviceName: String?
+        public let licenseKey: String
+        public let activatedAt: Date
+        public let deactivatedAt: Date?
+        public let ipAddress: String?
+        public let metadata: [String: AnyCodable]?
+
+        enum CodingKeys: String, CodingKey {
+            case id
+            case deviceId = "device_id"
+            case deviceName = "device_name"
+            case licenseKey = "license_key"
+            case activatedAt = "activated_at"
+            case deactivatedAt = "deactivated_at"
+            case ipAddress = "ip_address"
+            case metadata
+        }
+    }
+}
+
+// MARK: - Offline Token (API Response)
+
+/// Offline token as returned by the API
+/// Response format: `{"object": "offline_token", "token": {...}, "signature": {...}, "canonical": "..."}`
+public struct OfflineTokenResponse: Codable, Equatable, Sendable {
+    public let object: String
+    public let token: TokenPayload
+    public let signature: Signature
+    public let canonical: String
+
+    /// Token payload containing license information
+    public struct TokenPayload: Codable, Equatable, Sendable {
+        public let schemaVersion: Int
+        public let licenseKey: String
+        public let productSlug: String
+        public let planKey: String
+        public let mode: String
+        public let seatLimit: Int?
+        public let deviceId: String?
+        public let iat: Int
+        public let exp: Int
+        public let nbf: Int
+        public let licenseExpiresAt: Int?
+        public let kid: String
+        public let entitlements: [TokenEntitlement]
+        public let metadata: [String: AnyCodable]?
+
+        enum CodingKeys: String, CodingKey {
+            case schemaVersion = "schema_version"
+            case licenseKey = "license_key"
+            case productSlug = "product_slug"
+            case planKey = "plan_key"
+            case mode
+            case seatLimit = "seat_limit"
+            case deviceId = "device_id"
+            case iat, exp, nbf
+            case licenseExpiresAt = "license_expires_at"
+            case kid
+            case entitlements
+            case metadata
+        }
+    }
+
+    /// Entitlement in offline token (uses Unix timestamps)
+    public struct TokenEntitlement: Codable, Equatable, Sendable {
+        public let key: String
+        public let expiresAt: Int?
+
+        enum CodingKeys: String, CodingKey {
+            case key
+            case expiresAt = "expires_at"
+        }
+    }
+
+    /// Signature block
+    public struct Signature: Codable, Equatable, Sendable {
+        public let algorithm: String
+        public let keyId: String
+        public let value: String
+
+        enum CodingKeys: String, CodingKey {
+            case algorithm
+            case keyId = "key_id"
+            case value
+        }
+    }
+}
+
+// MARK: - Signing Key (API Response)
+
+/// Signing key as returned by the API
+/// Response format: `{"object": "signing_key", "key_id": "...", "public_key": "...", ...}`
+public struct SigningKeyResponse: Codable, Equatable, Sendable {
+    public let object: String
+    public let keyId: String
+    public let algorithm: String
+    public let publicKey: String
+    public let createdAt: Date?
+    public let status: String
+
+    enum CodingKeys: String, CodingKey {
+        case object
+        case keyId = "key_id"
+        case algorithm
+        case publicKey = "public_key"
+        case createdAt = "created_at"
+        case status
+    }
+}
+
+// MARK: - Health (API Response)
+
+/// Health check response
+/// Response format: `{"object": "health", "status": "healthy", ...}`
+public struct HealthResponse: Codable, Equatable, Sendable {
+    public let object: String
+    public let status: String
+    public let apiVersion: String
+    public let timestamp: Date
+
+    enum CodingKeys: String, CodingKey {
+        case object
+        case status
+        case apiVersion = "api_version"
+        case timestamp
+    }
+}
+
+// MARK: - Release (API Response)
+
+/// Release object
+public struct ReleaseResponse: Codable, Equatable, Sendable {
+    public let object: String
+    public let version: String
+    public let channel: String
+    public let platform: String
+    public let publishedAt: Date
+    public let productSlug: String
+
+    enum CodingKeys: String, CodingKey {
+        case object
+        case version
+        case channel
+        case platform
+        case publishedAt = "published_at"
+        case productSlug = "product_slug"
+    }
+}
+
+// MARK: - Release List (API Response)
+
+/// List response wrapper
+public struct ReleaseListResponse: Codable, Equatable, Sendable {
+    public let object: String
+    public let data: [ReleaseResponse]
+    public let hasMore: Bool
+    public let nextCursor: String?
+
+    enum CodingKeys: String, CodingKey {
+        case object
+        case data
+        case hasMore = "has_more"
+        case nextCursor = "next_cursor"
+    }
+}
+
+// MARK: - Download Token (API Response)
+
+/// Download token for gated releases
+public struct DownloadTokenResponse: Codable, Equatable, Sendable {
+    public let object: String
+    public let token: String
+    public let expiresAt: Date
+
+    enum CodingKeys: String, CodingKey {
+        case object
+        case token
+        case expiresAt = "expires_at"
+    }
+}
+
+// MARK: - SDK Internal License Model
+
+/// Internal license model used by the SDK for caching and state management
 public struct License: Codable, Equatable, Sendable {
     /// The license key
     public let licenseKey: String
-    
-    /// Device identifier this license is activated on
-    public let deviceIdentifier: String
-    
-    /// Activation details
-    public let activation: ActivationResult
-    
+
+    /// Device ID this license is activated on
+    public let deviceId: String
+
+    /// Activation ID from the server
+    public let activationId: Int
+
     /// When the license was activated
     public let activatedAt: Date
-    
+
     /// When the license was last validated
     public var lastValidated: Date
-    
+
     /// Current validation state
-    public var validation: LicenseValidationResult?
-    
+    public var validation: ValidationResponse?
+
     enum CodingKeys: String, CodingKey {
         case licenseKey = "license_key"
-        case deviceIdentifier = "device_identifier"
-        case activation
+        case deviceId = "device_id"
+        case activationId = "activation_id"
         case activatedAt = "activated_at"
         case lastValidated = "last_validated"
         case validation
     }
-}
 
-/// Result of a license activation
-public struct ActivationResult: Codable, Equatable, Sendable {
-    /// Activation ID (stored as String for flexibility; API may return Int or String)
-    public let id: String
-
-    /// When the activation occurred
-    public let activatedAt: Date
-
-    enum CodingKeys: String, CodingKey {
-        case id
-        case activatedAt = "activated_at"
-    }
-
-    // Custom decoding to handle both Int and String for `id`
-    public init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-
-        // Try decoding as String first, then fall back to Int
-        if let stringId = try? container.decode(String.self, forKey: .id) {
-            self.id = stringId
-        } else if let intId = try? container.decode(Int.self, forKey: .id) {
-            self.id = String(intId)
-        } else {
-            throw DecodingError.typeMismatch(
-                String.self,
-                DecodingError.Context(
-                    codingPath: container.codingPath + [CodingKeys.id],
-                    debugDescription: "Expected String or Int for id"
-                )
-            )
-        }
-
-        self.activatedAt = try container.decode(Date.self, forKey: .activatedAt)
-    }
-
-    public init(id: String, activatedAt: Date) {
-        self.id = id
-        self.activatedAt = activatedAt
-    }
-}
-
-/// Result of a license validation
-public struct LicenseValidationResult: Codable, Equatable, Sendable {
-    /// Whether the license is valid
-    public let valid: Bool
-    
-    /// Reason for invalidity (if applicable)
-    public let reason: String?
-    
-    /// Whether this is an offline validation
-    public let offline: Bool
-    
-    /// Reason code for offline validation failures
-    public let reasonCode: String?
-    
-    /// Whether this is an optimistic validation
-    public let optimistic: Bool?
-    
-    /// Active entitlements
-    public let activeEntitlements: [Entitlement]?
-    
-    enum CodingKeys: String, CodingKey {
-        case valid
-        case reason
-        case offline
-        case reasonCode = "reason_code"
-        case optimistic
-        case activeEntitlements = "active_entitlements"
-    }
-    
     public init(
-        valid: Bool,
-        reason: String? = nil,
-        offline: Bool,
-        reasonCode: String? = nil,
-        optimistic: Bool? = nil,
-        activeEntitlements: [Entitlement]? = nil
+        licenseKey: String,
+        deviceId: String,
+        activationId: Int,
+        activatedAt: Date,
+        lastValidated: Date,
+        validation: ValidationResponse? = nil
     ) {
-        self.valid = valid
-        self.reason = reason
-        self.offline = offline
-        self.reasonCode = reasonCode
-        self.optimistic = optimistic
-        self.activeEntitlements = activeEntitlements
-    }
-    
-    // Custom decoding to handle multiple API response formats:
-    // 1. Top-level active_entitlements (direct format)
-    // 2. Nested license.active_entitlements (API /licenses/validate format)
-    // 3. active_ents (offline payload abbreviation)
-    public init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.valid = try container.decode(Bool.self, forKey: .valid)
-        self.reason = try container.decodeIfPresent(String.self, forKey: .reason)
-        // Default to `false` when key is absent to be backwards-compatible with older servers
-        self.offline = try container.decodeIfPresent(Bool.self, forKey: .offline) ?? false
-        self.reasonCode = try container.decodeIfPresent(String.self, forKey: .reasonCode)
-        self.optimistic = try container.decodeIfPresent(Bool.self, forKey: .optimistic)
-
-        // Try multiple paths to find entitlements
-        var decodedEntitlements: [Entitlement]?
-
-        // 1. Try top-level active_entitlements (direct format)
-        decodedEntitlements = try container.decodeIfPresent([Entitlement].self, forKey: .activeEntitlements)
-
-        // 2. Try nested license.active_entitlements (API /licenses/validate format)
-        // The API returns: { "valid": true, "license": { "active_entitlements": [...] } }
-        if decodedEntitlements == nil {
-            struct LicenseKey: CodingKey {
-                var stringValue: String
-                init?(stringValue: String) { self.stringValue = stringValue }
-                var intValue: Int?
-                init?(intValue: Int) { return nil }
-            }
-            let rootContainer = try decoder.container(keyedBy: LicenseKey.self)
-            if let licenseKey = LicenseKey(stringValue: "license"),
-               let licenseContainer = try? rootContainer.nestedContainer(keyedBy: CodingKeys.self, forKey: licenseKey) {
-                decodedEntitlements = try licenseContainer.decodeIfPresent([Entitlement].self, forKey: .activeEntitlements)
-            }
-        }
-
-        // 3. Fallback to abbreviated key used by offline payloads
-        if decodedEntitlements == nil {
-            struct DynamicKey: CodingKey {
-                var stringValue: String
-                init?(stringValue: String) { self.stringValue = stringValue }
-                var intValue: Int?
-                init?(intValue: Int) { return nil }
-            }
-            let dynContainer = try decoder.container(keyedBy: DynamicKey.self)
-            if let activeEntsKey = DynamicKey(stringValue: "active_ents"),
-               let rawEnts = try dynContainer.decodeIfPresent([[String: AnyCodable]].self, forKey: activeEntsKey) {
-                let isoFormatter = ISO8601DateFormatter()
-                decodedEntitlements = rawEnts.compactMap { dict -> Entitlement? in
-                    guard let keyVal = dict["key"]?.value as? String else { return nil }
-                    let name = dict["name"]?.value as? String
-                    let description = dict["description"]?.value as? String
-                    let expiresStr = dict["expires_at"]?.value as? String
-                    let expiresAt = expiresStr.flatMap { isoFormatter.date(from: $0) }
-                    let metaAny = dict["metadata"]?.value as? [String: Any]
-                    let metadata = metaAny?.mapValues { AnyCodable($0) }
-                    return Entitlement(
-                        key: keyVal,
-                        name: name,
-                        description: description,
-                        expiresAt: expiresAt,
-                        metadata: metadata
-                    )
-                }
-            }
-        }
-        self.activeEntitlements = decodedEntitlements
-    }
-    
-    public func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(valid, forKey: .valid)
-        try container.encodeIfPresent(reason, forKey: .reason)
-        try container.encode(offline, forKey: .offline)
-        try container.encodeIfPresent(reasonCode, forKey: .reasonCode)
-        try container.encodeIfPresent(optimistic, forKey: .optimistic)
-        try container.encodeIfPresent(activeEntitlements, forKey: .activeEntitlements)
-    }
-}
-
-/// Represents an entitlement
-public struct Entitlement: Codable, Equatable, Sendable {
-    /// Unique key for the entitlement
-    public let key: String
-    
-    /// Display name
-    public let name: String?
-    
-    /// Description
-    public let description: String?
-    
-    /// Expiration date (if applicable)
-    public let expiresAt: Date?
-    
-    /// Additional metadata
-    public let metadata: [String: AnyCodable]?
-    
-    enum CodingKeys: String, CodingKey {
-        case key
-        case name
-        case description
-        case expiresAt = "expires_at"
-        case metadata
-    }
-}
-
-/// Activation payload
-struct ActivationPayload: Codable {
-    let licenseKey: String
-    let deviceIdentifier: String
-    var metadata: [String: Any]?
-    var softwareReleaseDate: String?
-    
-    enum CodingKeys: String, CodingKey {
-        case licenseKey = "license_key"
-        case deviceIdentifier = "device_identifier"
-        case metadata
-        case softwareReleaseDate = "software_release_date"
-    }
-    
-    // Memberwise init
-    init(licenseKey: String, deviceIdentifier: String, metadata: [String: Any]? = nil, softwareReleaseDate: String? = nil) {
         self.licenseKey = licenseKey
-        self.deviceIdentifier = deviceIdentifier
-        self.metadata = metadata
-        self.softwareReleaseDate = softwareReleaseDate
-    }
-    
-    // Custom encoding to handle [String: Any] metadata
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(licenseKey, forKey: .licenseKey)
-        try container.encode(deviceIdentifier, forKey: .deviceIdentifier)
-        try container.encodeIfPresent(softwareReleaseDate, forKey: .softwareReleaseDate)
-        
-        if let metadata = metadata {
-            let encodableMetadata = metadata.mapValues { AnyCodable($0) }
-            try container.encode(encodableMetadata, forKey: .metadata)
-        }
-    }
-    
-    // Custom decoding to handle [String: Any] metadata
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        licenseKey = try container.decode(String.self, forKey: .licenseKey)
-        deviceIdentifier = try container.decode(String.self, forKey: .deviceIdentifier)
-        softwareReleaseDate = try container.decodeIfPresent(String.self, forKey: .softwareReleaseDate)
-        
-        if let metadataDict = try container.decodeIfPresent([String: AnyCodable].self, forKey: .metadata) {
-            metadata = metadataDict.mapValues { $0.value }
-        } else {
-            metadata = nil
-        }
+        self.deviceId = deviceId
+        self.activationId = activationId
+        self.activatedAt = activatedAt
+        self.lastValidated = lastValidated
+        self.validation = validation
     }
 }
-
-/// Offline license structure
-struct OfflineLicense: Codable {
-    let payload: [String: Any]?
-    let signatureB64u: String?
-    let kid: String?
-    
-    enum CodingKeys: String, CodingKey {
-        case payload
-        case signatureB64u = "signature_b64u"
-        case kid
-    }
-    
-    // Memberwise init
-    init(payload: [String: Any]? = nil, signatureB64u: String? = nil, kid: String? = nil) {
-        self.payload = payload
-        self.signatureB64u = signatureB64u
-        self.kid = kid
-    }
-    
-    // Custom decoding for [String: Any] payload
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        signatureB64u = try container.decodeIfPresent(String.self, forKey: .signatureB64u)
-        kid = try container.decodeIfPresent(String.self, forKey: .kid)
-        
-        if let payloadData = try? container.decode([String: AnyCodable].self, forKey: .payload) {
-            payload = payloadData.mapValues { $0.value }
-        } else {
-            payload = nil
-        }
-    }
-    
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encodeIfPresent(signatureB64u, forKey: .signatureB64u)
-        try container.encodeIfPresent(kid, forKey: .kid)
-        
-        if let payload = payload {
-            let encodablePayload = payload.mapValues { AnyCodable($0) }
-            try container.encode(encodablePayload, forKey: .payload)
-        }
-    }
-} 
