@@ -11,56 +11,63 @@ import Foundation
 /// API error with status code and response data
 ///
 /// This error type represents errors returned by the LicenseSeat API.
-/// Use `reasonCode` for programmatic error handling.
-public struct APIError: LocalizedError, Equatable {
+/// The API returns errors in the format: `{"error": {"code": "...", "message": "..."}}`
+///
+/// Use `code` for programmatic error handling:
+/// - `license_not_found`: License key doesn't exist
+/// - `product_not_found`: Product doesn't exist
+/// - `expired`: License has expired
+/// - `revoked`: License has been revoked
+/// - `suspended`: License is suspended
+/// - `seat_limit_exceeded`: All seats are in use
+/// - `device_not_activated`: Device is not activated for this license
+/// - `parameter_missing`: Required parameter is missing
+public struct APIError: LocalizedError, Equatable, Sendable {
+    /// Machine-readable error code for programmatic handling
+    public let code: String?
+
     /// Human-readable error message
     public let message: String
 
     /// HTTP status code
     public let status: Int
 
-    /// Machine-readable error code for programmatic handling
-    ///
-    /// Common values:
-    /// - `license_not_found`: License key doesn't exist
-    /// - `product_mismatch`: License product doesn't match requested product
-    /// - `expired`: License has expired
-    /// - `revoked`: License has been revoked
-    /// - `suspended`: License is suspended
-    /// - `not_active`: License is pending, canceled, or not yet started
-    /// - `seat_limit_exceeded`: All seats are in use
-    /// - `device_not_activated`: Device is not activated for this license
-    /// - `parameter_missing`: Required parameter is missing
-    public let reasonCode: String?
-
-    /// Response data (if available)
-    public let data: [String: Any]?
+    /// Additional error details (if available)
+    public let details: [String: Any]?
 
     public var errorDescription: String? {
         return message
     }
 
-    public init(message: String, status: Int, data: [String: Any]?) {
-        self.message = message
+    /// Create an API error from the new nested format: `{"error": {"code": "...", "message": "..."}}`
+    public init(from responseData: [String: Any], status: Int) {
         self.status = status
-        self.data = data
-        self.reasonCode = data?["reason_code"] as? String
+        if let errorObj = responseData["error"] as? [String: Any] {
+            self.code = errorObj["code"] as? String
+            self.message = errorObj["message"] as? String ?? "Unknown error"
+            self.details = errorObj["details"] as? [String: Any]
+        } else {
+            // Fallback for non-standard error responses
+            self.code = nil
+            self.message = responseData["message"] as? String ?? "Request failed"
+            self.details = nil
+        }
     }
 
-    /// Create an API error with explicit reason code
-    public init(message: String, status: Int, reasonCode: String? = nil) {
+    /// Create an API error with explicit values
+    public init(code: String? = nil, message: String, status: Int, details: [String: Any]? = nil) {
+        self.code = code
         self.message = message
         self.status = status
-        self.reasonCode = reasonCode
-        self.data = nil
+        self.details = details
     }
 
-    // MARK: - Equatable (ignoring data)
+    // MARK: - Equatable (ignoring details)
 
     public static func == (lhs: APIError, rhs: APIError) -> Bool {
-        return lhs.message == rhs.message &&
-               lhs.status == rhs.status &&
-               lhs.reasonCode == rhs.reasonCode
+        return lhs.code == rhs.code &&
+               lhs.message == rhs.message &&
+               lhs.status == rhs.status
     }
 
     // MARK: - Error Classification
@@ -88,8 +95,8 @@ public struct APIError: LocalizedError, Equatable {
     /// Whether this error indicates the license has a terminal state
     /// (revoked, expired, suspended) that won't change without intervention
     public var isLicenseTerminalError: Bool {
-        guard let code = reasonCode else { return false }
-        return ["revoked", "expired", "suspended"].contains(code)
+        guard let code = code else { return false }
+        return ["revoked", "expired", "suspended", "license_revoked", "license_expired", "license_suspended"].contains(code)
     }
 
     /// Whether this error is retryable

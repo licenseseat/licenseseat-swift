@@ -190,7 +190,7 @@ public final class LicenseSeatStore {
         
         if let license = seat?.currentLicense() {
             report["license_key_prefix"] = String(license.licenseKey.prefix(8)) + "..."
-            report["device_id_hash"] = license.deviceIdentifier.hashValue
+            report["device_id_hash"] = license.deviceId.hashValue
             report["activated_at"] = license.activatedAt.timeIntervalSince1970
             report["last_validated"] = license.lastValidated.timeIntervalSince1970
         }

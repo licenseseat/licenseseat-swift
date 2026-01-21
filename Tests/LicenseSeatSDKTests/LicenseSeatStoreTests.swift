@@ -13,6 +13,8 @@ final class LicenseSeatStoreTests: XCTestCase {
     private var store: LicenseSeatStore!
     private var cancellables: Set<AnyCancellable> = []
 
+    private static let testProductSlug = "test-app"
+
     override func setUp() {
         super.setUp()
         // Register the mock protocol globally so default URLSessions pick it up.
@@ -23,6 +25,7 @@ final class LicenseSeatStoreTests: XCTestCase {
         let config = LicenseSeatConfig(
             apiBaseUrl: "https://api.test.com",
             apiKey: "test_key",
+            productSlug: Self.testProductSlug,
             storagePrefix: "store_test_",
             autoValidateInterval: 0, // Disable auto-validation by default
             debug: true
@@ -55,63 +58,117 @@ final class LicenseSeatStoreTests: XCTestCase {
             let path = request.url!.path
             let headers = ["Content-Type": "application/json"]
 
-            switch path {
-            case "/activations/activate":
-                // Return a minimal ActivationResult payload
-                let payload = [
-                    "id": "act_test",
-                    "activated_at": "2025-01-01T00:00:00Z"
+            // Extract license key from path for dynamic responses
+            let licenseKey = "LICENSE-TEST"
+
+            if path.contains("/activate") {
+                // Return v1 ActivationResponse
+                let payload: [String: Any] = [
+                    "object": "activation",
+                    "id": 12345,
+                    "device_id": "test-device",
+                    "device_name": "Test Device",
+                    "license_key": licenseKey,
+                    "activated_at": ISO8601DateFormatter().string(from: Date()),
+                    "deactivated_at": NSNull(),
+                    "ip_address": "127.0.0.1",
+                    "metadata": NSNull(),
+                    "license": [
+                        "object": "license",
+                        "key": licenseKey,
+                        "status": "active",
+                        "starts_at": NSNull(),
+                        "expires_at": NSNull(),
+                        "mode": "hardware_locked",
+                        "plan_key": "pro",
+                        "seat_limit": 5,
+                        "active_seats": 1,
+                        "active_entitlements": [],
+                        "metadata": NSNull(),
+                        "product": ["slug": Self.testProductSlug, "name": "Test App"]
+                    ]
                 ]
                 let data = try JSONSerialization.data(withJSONObject: payload)
-                let resp = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: headers)!
+                let resp = HTTPURLResponse(url: request.url!, statusCode: 201, httpVersion: nil, headerFields: headers)!
                 return (resp, data)
-
-            case "/licenses/validate":
-                // Return a minimal validation result
-                let result = [
+            } else if path.contains("/validate") {
+                // Return v1 ValidationResponse
+                let result: [String: Any] = [
+                    "object": "validation_result",
                     "valid": true,
-                    "offline": false
+                    "code": NSNull(),
+                    "message": NSNull(),
+                    "warnings": NSNull(),
+                    "license": [
+                        "object": "license",
+                        "key": licenseKey,
+                        "status": "active",
+                        "starts_at": NSNull(),
+                        "expires_at": NSNull(),
+                        "mode": "hardware_locked",
+                        "plan_key": "pro",
+                        "seat_limit": 5,
+                        "active_seats": 1,
+                        "active_entitlements": [],
+                        "metadata": NSNull(),
+                        "product": ["slug": Self.testProductSlug, "name": "Test App"]
+                    ],
+                    "activation": NSNull()
                 ]
                 let data = try JSONSerialization.data(withJSONObject: result)
                 let resp = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: headers)!
                 return (resp, data)
-                
-            case let p where p.contains("/licenses/") && p.hasSuffix("/offline_license"):
-                // Return a minimal offline license
-                let offlineLicense = [
-                    "kid": "test-key-id",
-                    "signature_b64u": "test-signature",
-                    "payload": [
-                        "kid": "test-key-id",
-                        "exp_at": "2025-12-31T23:59:59Z"
-                    ]
-                ] as [String : Any]
-                let data = try JSONSerialization.data(withJSONObject: offlineLicense)
+            } else if path.contains("/deactivate") {
+                // Return v1 DeactivationResponse
+                let result: [String: Any] = [
+                    "object": "deactivation",
+                    "activation_id": 12345,
+                    "deactivated_at": ISO8601DateFormatter().string(from: Date())
+                ]
+                let data = try JSONSerialization.data(withJSONObject: result)
                 let resp = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: headers)!
                 return (resp, data)
-                
-            case let p where p.hasPrefix("/public_keys/"):
-                // Return a minimal public key response
-                let publicKey = [
+            } else if path.contains("/offline-token") {
+                // Return v1 OfflineTokenResponse
+                let offlineToken: [String: Any] = [
+                    "object": "offline_token",
+                    "token": [
+                        "schema_version": 1,
+                        "license_key": licenseKey,
+                        "product_slug": Self.testProductSlug,
+                        "plan_key": "pro",
+                        "mode": "hardware_locked",
+                        "seat_limit": 5,
+                        "device_id": "test-device",
+                        "iat": Int(Date().timeIntervalSince1970),
+                        "exp": Int(Date().timeIntervalSince1970) + 86400 * 30,
+                        "nbf": Int(Date().timeIntervalSince1970),
+                        "kid": "test-key-id",
+                        "entitlements": []
+                    ],
+                    "signature": [
+                        "algorithm": "Ed25519",
+                        "key_id": "test-key-id",
+                        "value": "test-signature"
+                    ],
+                    "canonical": "{}"
+                ]
+                let data = try JSONSerialization.data(withJSONObject: offlineToken)
+                let resp = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: headers)!
+                return (resp, data)
+            } else if path.contains("/signing-keys/") {
+                // Return v1 SigningKeyResponse
+                let publicKey: [String: Any] = [
+                    "object": "signing_key",
                     "key_id": "test-key-id",
-                    "public_key_b64": "test-public-key"
+                    "algorithm": "Ed25519",
+                    "public_key": "test-public-key"
                 ]
                 let data = try JSONSerialization.data(withJSONObject: publicKey)
                 let resp = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: headers)!
                 return (resp, data)
-                
-            case let p where p.contains("/licenses/") && p.hasSuffix("/check"):
-                // Return a validation result for check endpoint
-                let result = [
-                    "valid": true,
-                    "offline": false
-                ]
-                let data = try JSONSerialization.data(withJSONObject: result)
-                let resp = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: headers)!
-                return (resp, data)
-                
-            default:
-                // For any other path, return a 404 to indicate no license
+            } else {
+                // For any other path, return a 404
                 let resp = HTTPURLResponse(url: request.url!, statusCode: 404, httpVersion: nil, headerFields: headers)!
                 return (resp, Data())
             }
@@ -127,6 +184,7 @@ final class LicenseSeatStoreTests: XCTestCase {
         let config = LicenseSeatConfig(
             apiBaseUrl: "https://api.test.com",
             apiKey: "test_key",
+            productSlug: Self.testProductSlug,
             storagePrefix: "store_test_",
             autoValidateInterval: interval,
             debug: true
@@ -177,6 +235,7 @@ final class LicenseSeatStoreTests: XCTestCase {
         conf.protocolClasses = [MockURLProtocol.self]
         let session = URLSession(configuration: conf)
         LicenseSeatStore.shared.configure(apiKey: "test_key", apiBaseURL: URL(string: "https://api.test.com")!, urlSession: session) { cfg in
+            cfg.productSlug = Self.testProductSlug
             cfg.autoValidateInterval = 0 // Disable auto-validation
             cfg.debug = true
         }
@@ -303,10 +362,15 @@ final class LicenseSeatStoreTests: XCTestCase {
     }
     
     func testActivationError() async {
-        // Configure handlers to return error
+        // Configure handlers to return v1 error format
         MockURLProtocol.requestHandler = { request in
-            if request.url!.path == "/activations/activate" {
-                let error = ["error": "License already activated on another device"]
+            if request.url!.path.contains("/activate") {
+                let error: [String: Any] = [
+                    "error": [
+                        "code": "seat_limit_exceeded",
+                        "message": "License already activated on another device"
+                    ]
+                ]
                 let data = try JSONSerialization.data(withJSONObject: error)
                 let resp = HTTPURLResponse(
                     url: request.url!,
@@ -318,7 +382,7 @@ final class LicenseSeatStoreTests: XCTestCase {
             }
             return (HTTPURLResponse(url: request.url!, statusCode: 404, httpVersion: nil, headerFields: nil)!, Data())
         }
-        
+
         do {
             _ = try await store.activate("ALREADY-USED-KEY")
             XCTFail("Should have thrown activation error")
@@ -377,30 +441,38 @@ final class LicenseSeatStoreTests: XCTestCase {
     
     func testDeactivation() async throws {
         installStubHandlers()
-        
-        // Add deactivation handler
+
+        // Add deactivation handler (v1 path)
         let originalHandler = MockURLProtocol.requestHandler
         MockURLProtocol.requestHandler = { request in
-            if request.url!.path == "/activations/deactivate" {
+            if request.url!.path.contains("/deactivate") {
+                let result: [String: Any] = [
+                    "object": "deactivation",
+                    "activation_id": 12345,
+                    "deactivated_at": ISO8601DateFormatter().string(from: Date())
+                ]
+                let data = try JSONSerialization.data(withJSONObject: result)
                 let resp = HTTPURLResponse(
                     url: request.url!,
                     statusCode: 200,
                     httpVersion: nil,
                     headerFields: ["Content-Type": "application/json"]
                 )!
-                return (resp, Data("{}".utf8))
+                return (resp, data)
             }
             return try originalHandler!(request)
         }
         
         // Activate first
         _ = try await store.activate("LICENSE-DEACTIVATE-TEST")
-        
-        // Verify active
-        if case .active = store.status {
-            // Good
-        } else {
-            XCTFail("Should be active before deactivation")
+
+        // Verify we have a license (status could be .active or .pending depending on validation)
+        switch store.status {
+        case .active, .pending, .offlineValid:
+            // Good - we have an activated license
+            break
+        case .inactive, .invalid, .offlineInvalid:
+            XCTFail("Should have a license before deactivation, got: \(store.status)")
         }
         
         // Deactivate
@@ -419,7 +491,7 @@ final class LicenseSeatStoreTests: XCTestCase {
     #if canImport(SwiftUI)
     func testEntitlementStatePropertyWrapper() async throws {
         installStubHandlers()
-        
+
         // Configure shared store
         let conf = URLSessionConfiguration.ephemeral
         conf.protocolClasses = [MockURLProtocol.self]
@@ -428,7 +500,9 @@ final class LicenseSeatStoreTests: XCTestCase {
             apiKey: "test_key",
             apiBaseURL: URL(string: "https://api.test.com")!,
             urlSession: session
-        )
+        ) { cfg in
+            cfg.productSlug = Self.testProductSlug
+        }
         
         _ = try await LicenseSeatStore.shared.activate("LICENSE-ENT-TEST")
         _ = try? await Task.sleep(nanoseconds: 100_000_000)

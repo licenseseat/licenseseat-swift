@@ -11,6 +11,7 @@ The official Swift SDK for [LicenseSeat](https://licenseseat.com) — the simple
 ## Features
 
 - **License Lifecycle** — Activate, validate, and deactivate licenses with async/await APIs
+- **Product-Scoped Operations** — All operations are scoped to your product via `productSlug`
 - **Offline Validation** — Ed25519 cryptographic verification for offline use with configurable grace periods
 - **Automatic Re-validation** — Background validation with configurable intervals
 - **Entitlement Management** — Fine-grained feature access control with expiration tracking
@@ -43,8 +44,12 @@ The official Swift SDK for [LicenseSeat](https://licenseseat.com) — the simple
     - [Reactive Entitlement Monitoring](#reactive-entitlement-monitoring)
   - [Offline Validation](#offline-validation)
     - [Offline Fallback Modes](#offline-fallback-modes)
+    - [Offline Token Structure](#offline-token-structure)
   - [Event System](#event-system)
     - [Available Events](#available-events)
+  - [API Response Format](#api-response-format)
+    - [Success Responses](#success-responses)
+    - [Error Responses](#error-responses)
   - [Platform Support](#platform-support)
   - [Example App](#example-app)
   - [Publishing \& Distribution](#publishing--distribution)
@@ -55,7 +60,7 @@ The official Swift SDK for [LicenseSeat](https://licenseseat.com) — the simple
   - [API Documentation](#api-documentation)
     - [Generate Documentation Locally](#generate-documentation-locally)
   - [Testing](#testing)
-  - [Migration from JavaScript SDK](#migration-from-javascript-sdk)
+  - [Migration from v1 SDK](#migration-from-v1-sdk)
   - [License](#license)
   - [Support](#support)
 
@@ -69,7 +74,7 @@ Add LicenseSeat to your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/licenseseat/licenseseat-swift.git", from: "0.2.0")
+    .package(url: "https://github.com/licenseseat/licenseseat-swift.git", from: "2.0.0")
 ]
 ```
 
@@ -97,13 +102,16 @@ Then add the dependency to your target:
 
 ### 1. Configure the SDK
 
-Configure LicenseSeat once at app launch:
+Configure LicenseSeat once at app launch. The `productSlug` is required for all license operations:
 
 ```swift
 import LicenseSeat
 
 // In your app's initialization (e.g., @main App.init or AppDelegate)
-LicenseSeat.configure(apiKey: "YOUR_API_KEY")
+LicenseSeatStore.shared.configure(
+    apiKey: "YOUR_API_KEY",
+    productSlug: "your-product-slug"
+)
 ```
 
 ### 2. Activate a License
@@ -112,8 +120,12 @@ When a user enters their license key:
 
 ```swift
 do {
-    let license = try await LicenseSeat.activate("USER-LICENSE-KEY")
+    let license = try await LicenseSeatStore.shared.activate("USER-LICENSE-KEY")
     print("Activated: \(license.licenseKey)")
+    print("Device ID: \(license.deviceId)")
+    print("Activation ID: \(license.activationId)")
+} catch let error as APIError {
+    print("Activation failed: \(error.code ?? "unknown") - \(error.message)")
 } catch {
     print("Activation failed: \(error.localizedDescription)")
 }
@@ -122,17 +134,17 @@ do {
 ### 3. Check License Status
 
 ```swift
-switch LicenseSeat.shared.getStatus() {
+switch LicenseSeatStore.shared.status {
 case .active(let details):
     print("Licensed! Device: \(details.device)")
 case .offlineValid(let details):
     print("Valid offline until next sync")
-case .inactive:
-    print("No license activated")
+case .inactive(let message):
+    print("No license activated: \(message)")
 case .invalid(let message):
     print("Invalid: \(message)")
-case .pending:
-    print("Validating...")
+case .pending(let message):
+    print("Validating: \(message)")
 case .offlineInvalid(let message):
     print("Offline validation failed: \(message)")
 }
@@ -141,7 +153,7 @@ case .offlineInvalid(let message):
 ### 4. Deactivate
 
 ```swift
-try await LicenseSeat.deactivate()
+try await LicenseSeatStore.shared.deactivate()
 ```
 
 ---
@@ -157,7 +169,10 @@ import LicenseSeat
 @main
 struct MyApp: App {
     init() {
-        LicenseSeat.configure(apiKey: ProcessInfo.processInfo.environment["LICENSESEAT_API_KEY"] ?? "")
+        LicenseSeatStore.shared.configure(
+            apiKey: ProcessInfo.processInfo.environment["LICENSESEAT_API_KEY"] ?? "",
+            productSlug: "my-app"
+        )
     }
 
     var body: some Scene {
@@ -202,7 +217,9 @@ struct ActivationView: View {
                     isLoading = true
                     defer { isLoading = false }
                     do {
-                        try await LicenseSeat.activate(licenseKey)
+                        try await LicenseSeatStore.shared.activate(licenseKey)
+                    } catch let apiError as APIError {
+                        self.error = apiError.message
                     } catch {
                         self.error = error.localizedDescription
                     }
@@ -235,29 +252,37 @@ class LicenseManager: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
 
     init() {
-        LicenseSeat.configure(apiKey: "YOUR_API_KEY")
+        LicenseSeatStore.shared.configure(
+            apiKey: "YOUR_API_KEY",
+            productSlug: "your-product"
+        )
 
         // React to license status changes
-        LicenseSeat.statusPublisher
+        LicenseSeatStore.shared.$status
             .receive(on: DispatchQueue.main)
             .sink { [weak self] status in
-                self?.isLicensed = status.isValid
+                switch status {
+                case .active, .offlineValid:
+                    self?.isLicensed = true
+                default:
+                    self?.isLicensed = false
+                }
             }
             .store(in: &cancellables)
 
         // Monitor specific entitlements
-        LicenseSeat.shared.entitlementPublisher(for: "pro-features")
+        LicenseSeatStore.shared.entitlementPublisher(for: "pro-features")
             .map { $0.active }
             .receive(on: DispatchQueue.main)
             .assign(to: &$hasProFeatures)
     }
 
     func activate(_ key: String) async throws {
-        try await LicenseSeat.activate(key)
+        try await LicenseSeatStore.shared.activate(key)
     }
 
     func deactivate() async throws {
-        try await LicenseSeat.deactivate()
+        try await LicenseSeatStore.shared.deactivate()
     }
 }
 ```
@@ -272,13 +297,16 @@ For full control, create an instance with custom configuration:
 
 ```swift
 let config = LicenseSeatConfig(
+    apiBaseUrl: "https://licenseseat.com/api/v1",  // v1 API endpoint
     apiKey: "YOUR_API_KEY",
+    productSlug: "your-product",                   // Required for all operations
     storagePrefix: "myapp_",
-    autoValidateInterval: 3600,      // Re-validate every hour
+    autoValidateInterval: 3600,                    // Re-validate every hour
     maxRetries: 3,
     retryDelay: 1,
-    offlineFallbackEnabled: true,    // Enable offline validation
-    maxOfflineDays: 7,               // 7-day grace period
+    offlineFallbackMode: .networkOnly,             // Offline fallback strategy
+    maxOfflineDays: 7,                             // 7-day grace period
+    maxClockSkewMs: 300000,                        // 5-minute clock tolerance
     debug: true
 )
 
@@ -288,25 +316,39 @@ let licenseSeat = LicenseSeat(config: config)
 let license = try await licenseSeat.activate(
     licenseKey: "USER-KEY",
     options: ActivationOptions(
-        deviceIdentifier: "custom-device-id",
+        deviceId: "custom-device-id",
+        deviceName: "User's MacBook Pro",
         metadata: ["version": "2.0.0", "environment": "production"]
     )
 )
+
+// Access activation details
+print("License Key: \(license.licenseKey)")
+print("Device ID: \(license.deviceId)")
+print("Activation ID: \(license.activationId)")
+print("Activated At: \(license.activatedAt)")
 ```
 
 ### Manual Validation
 
 ```swift
-let result = try await licenseSeat.validate(
-    licenseKey: license.licenseKey,
-    options: ValidationOptions(productSlug: "pro-edition")
-)
+let result = try await licenseSeat.validate(licenseKey: license.licenseKey)
 
 if result.valid {
     print("License is valid")
-    if result.offline {
-        print("Validated offline")
+    print("Plan: \(result.license.planKey)")
+    print("Status: \(result.license.status)")
+
+    // Check entitlements from validation
+    for entitlement in result.license.activeEntitlements {
+        print("Entitlement: \(entitlement.key)")
+        if let expiresAt = entitlement.expiresAt {
+            print("  Expires: \(expiresAt)")
+        }
     }
+} else {
+    print("License invalid: \(result.code ?? "unknown")")
+    print("Message: \(result.message ?? "")")
 }
 ```
 
@@ -314,20 +356,22 @@ if result.valid {
 
 ## Configuration Options
 
-| Option                   | Type           | Default                       | Description                            |
-| ------------------------ | -------------- | ----------------------------- | -------------------------------------- |
-| `apiBaseUrl`             | `String`       | `https://licenseseat.com/api` | API endpoint                           |
-| `apiKey`                 | `String?`      | `nil`                         | Your API key                           |
-| `storagePrefix`          | `String`       | `licenseseat_`                | Prefix for cache keys                  |
-| `deviceIdentifier`       | `String?`      | Auto-generated                | Custom device ID                       |
-| `autoValidateInterval`   | `TimeInterval` | `3600` (1 hour)               | Background validation interval         |
-| `networkRecheckInterval` | `TimeInterval` | `30`                          | Offline connectivity check interval    |
-| `maxRetries`             | `Int`          | `3`                           | API retry attempts                     |
-| `retryDelay`             | `TimeInterval` | `1`                           | Base retry delay (exponential backoff) |
-| `offlineFallbackEnabled` | `Bool`         | `false`                       | Enable offline validation              |
-| `maxOfflineDays`         | `Int`          | `0`                           | Grace period for offline use           |
-| `maxClockSkewMs`         | `TimeInterval` | `300000` (5 min)              | Clock tamper tolerance                 |
-| `debug`                  | `Bool`         | `false`                       | Enable debug logging                   |
+| Option                      | Type                  | Default                            | Description                              |
+| --------------------------- | --------------------- | ---------------------------------- | ---------------------------------------- |
+| `apiBaseUrl`                | `String`              | `https://licenseseat.com/api/v1`   | v1 API endpoint                          |
+| `apiKey`                    | `String?`             | `nil`                              | Your API key                             |
+| `productSlug`               | `String?`             | `nil`                              | Product identifier (required)            |
+| `storagePrefix`             | `String`              | `licenseseat_`                     | Prefix for cache keys                    |
+| `deviceIdentifier`          | `String?`             | Auto-generated                     | Custom device ID                         |
+| `autoValidateInterval`      | `TimeInterval`        | `3600` (1 hour)                    | Background validation interval           |
+| `networkRecheckInterval`    | `TimeInterval`        | `30`                               | Offline connectivity check interval      |
+| `maxRetries`                | `Int`                 | `3`                                | API retry attempts                       |
+| `retryDelay`                | `TimeInterval`        | `1`                                | Base retry delay (exponential backoff)   |
+| `offlineFallbackMode`       | `OfflineFallbackMode` | `.networkOnly`                     | Offline fallback strategy                |
+| `offlineTokenRefreshInterval` | `TimeInterval`      | `259200` (72 hours)                | Offline token refresh interval           |
+| `maxOfflineDays`            | `Int`                 | `0`                                | Grace period for offline use             |
+| `maxClockSkewMs`            | `TimeInterval`        | `300000` (5 min)                   | Clock tamper tolerance                   |
+| `debug`                     | `Bool`                | `false`                            | Enable debug logging                     |
 
 ### Environment-Based Configuration
 
@@ -335,16 +379,23 @@ if result.valid {
 struct AppConfiguration {
     static func configureLicenseSeat() {
         let apiKey = ProcessInfo.processInfo.environment["LICENSESEAT_API_KEY"] ?? ""
+        let productSlug = ProcessInfo.processInfo.environment["LICENSESEAT_PRODUCT_SLUG"] ?? "my-app"
 
         #if DEBUG
-        LicenseSeat.configure(apiKey: apiKey) { config in
+        LicenseSeatStore.shared.configure(
+            apiKey: apiKey,
+            productSlug: productSlug
+        ) { config in
             config.debug = true
             config.autoValidateInterval = 60 // Frequent validation in debug
         }
         #else
-        LicenseSeat.configure(apiKey: apiKey) { config in
+        LicenseSeatStore.shared.configure(
+            apiKey: apiKey,
+            productSlug: productSlug
+        ) { config in
             config.autoValidateInterval = 3600
-            config.strictOfflineFallback = true
+            config.offlineFallbackMode = .networkOnly
             config.maxOfflineDays = 14
         }
         #endif
@@ -359,7 +410,7 @@ struct AppConfiguration {
 Check feature access based on license entitlements:
 
 ```swift
-let status = LicenseSeat.shared.checkEntitlement("premium-features")
+let status = LicenseSeatStore.shared.entitlement("premium-features")
 
 switch status.reason {
 case nil where status.active:
@@ -373,12 +424,20 @@ case .noLicense:
 default:
     disablePremiumFeatures()
 }
+
+// Access entitlement details
+if let entitlement = status.entitlement {
+    print("Entitlement key: \(entitlement.key)")
+    if let metadata = entitlement.metadata {
+        print("Metadata: \(metadata)")
+    }
+}
 ```
 
 ### Reactive Entitlement Monitoring
 
 ```swift
-LicenseSeat.shared.entitlementPublisher(for: "api-access")
+LicenseSeatStore.shared.entitlementPublisher(for: "api-access")
     .receive(on: DispatchQueue.main)
     .sink { status in
         apiAccessEnabled = status.active
@@ -396,17 +455,60 @@ LicenseSeat.shared.entitlementPublisher(for: "api-access")
 The SDK provides seamless offline support with Ed25519 cryptographic verification:
 
 ```swift
-LicenseSeat.configure(apiKey: "YOUR_API_KEY") { config in
-    config.strictOfflineFallback = true       // Network-only fallback mode
-    config.maxOfflineDays = 7                 // 7-day grace period
-    config.offlineLicenseRefreshInterval = 259200 // Refresh every 72 hours
+LicenseSeatStore.shared.configure(
+    apiKey: "YOUR_API_KEY",
+    productSlug: "your-product"
+) { config in
+    config.offlineFallbackMode = .networkOnly     // Network-first fallback mode
+    config.maxOfflineDays = 7                     // 7-day grace period
+    config.offlineTokenRefreshInterval = 259200   // Refresh every 72 hours
 }
 ```
 
 ### Offline Fallback Modes
 
-- **`networkOnly`** (default): Falls back to offline validation only for network errors (timeouts, connectivity issues, 5xx responses). Business logic errors (4xx) immediately invalidate the license.
-- **`always`**: Always attempts offline validation on any failure (legacy behavior).
+| Mode          | Description                                                                                         |
+| ------------- | --------------------------------------------------------------------------------------------------- |
+| `networkOnly` | Falls back to offline validation only for network errors (timeouts, connectivity issues, 5xx responses). Business logic errors (4xx) immediately invalidate the license. |
+| `always`      | Always attempts offline validation on any failure.                                                   |
+
+### Offline Token Structure
+
+The SDK fetches and caches offline tokens for cryptographic verification. The token structure includes:
+
+```swift
+// Offline token payload fields
+struct TokenPayload {
+    let schemaVersion: Int      // Token schema version
+    let licenseKey: String      // Associated license key
+    let productSlug: String     // Product identifier
+    let planKey: String         // License plan
+    let mode: String            // License mode (e.g., "hardware_locked")
+    let seatLimit: Int?         // Maximum seats
+    let deviceId: String        // Bound device ID
+    let iat: Int                // Issued at (Unix timestamp)
+    let exp: Int                // Expires at (Unix timestamp)
+    let nbf: Int                // Not before (Unix timestamp)
+    let licenseExpiresAt: Int?  // License expiration (if applicable)
+    let kid: String             // Signing key ID
+    let entitlements: [...]     // Active entitlements
+    let metadata: [...]?        // Custom metadata
+}
+
+// Signature block for Ed25519 verification
+struct Signature {
+    let algorithm: String       // "Ed25519"
+    let keyId: String           // Key ID for lookup
+    let value: String           // Base64URL-encoded signature
+}
+```
+
+The SDK verifies offline tokens by:
+1. Fetching the public key from `/signing-keys/{keyId}`
+2. Verifying the Ed25519 signature against the canonical JSON
+3. Checking token expiration (`exp`), not-before (`nbf`), and license expiration
+4. Validating the grace period based on last online validation
+5. Detecting clock tampering with `maxClockSkewMs` tolerance
 
 ---
 
@@ -416,7 +518,7 @@ Subscribe to SDK events for analytics, UI updates, or custom logic:
 
 ```swift
 // Subscribe with closure (returns AnyCancellable)
-let cancellable = LicenseSeat.shared.on("activation:success") { data in
+let cancellable = licenseSeat.on("activation:success") { data in
     print("License activated!")
     Analytics.track("license_activated")
 }
@@ -425,7 +527,7 @@ let cancellable = LicenseSeat.shared.on("activation:success") { data in
 cancellable.cancel()
 
 // Or use Combine publishers
-LicenseSeat.shared.eventPublisher
+licenseSeat.eventPublisher
     .filter { $0.name.hasPrefix("validation:") }
     .sink { event in
         switch event.name {
@@ -444,16 +546,104 @@ LicenseSeat.shared.eventPublisher
 
 ### Available Events
 
-| Event                                       | Description                      |
-| ------------------------------------------- | -------------------------------- |
-| `activation:start/success/error`            | License activation lifecycle     |
-| `validation:start/success/failed/error`     | Online validation                |
-| `validation:offline-success/offline-failed` | Offline validation               |
-| `deactivation:start/success/error`          | License deactivation             |
-| `license:loaded`                            | Cached license loaded at startup |
-| `license:revoked`                           | License revoked by server        |
-| `network:online/offline`                    | Connectivity changes             |
-| `sdk:reset`                                 | SDK state cleared                |
+| Event                                       | Description                        |
+| ------------------------------------------- | ---------------------------------- |
+| `activation:start/success/error`            | License activation lifecycle       |
+| `validation:start/success/failed/error`     | Online validation                  |
+| `validation:offline-success/offline-failed` | Offline validation                 |
+| `deactivation:start/success/error`          | License deactivation               |
+| `license:loaded`                            | Cached license loaded at startup   |
+| `license:revoked`                           | License revoked by server          |
+| `offlineToken:verified`                     | Offline token signature verified   |
+| `offlineToken:verificationFailed`           | Offline token verification failed  |
+| `autovalidation:cycle`                      | Auto-validation cycle triggered    |
+| `network:online/offline`                    | Connectivity changes               |
+| `sdk:reset`                                 | SDK state cleared                  |
+
+---
+
+## API Response Format
+
+The v1 API uses Stripe-style conventions with `object` fields identifying response types.
+
+### Success Responses
+
+**Activation Response:**
+```json
+{
+  "object": "activation",
+  "id": 12345,
+  "device_id": "mac_abc123",
+  "device_name": "User's MacBook",
+  "license_key": "LICENSE-KEY",
+  "activated_at": "2025-01-15T10:30:00Z",
+  "deactivated_at": null,
+  "ip_address": "192.168.1.1",
+  "metadata": null,
+  "license": {
+    "object": "license",
+    "key": "LICENSE-KEY",
+    "status": "active",
+    "starts_at": null,
+    "expires_at": null,
+    "mode": "hardware_locked",
+    "plan_key": "pro",
+    "seat_limit": 5,
+    "active_seats": 1,
+    "active_entitlements": [
+      {"key": "premium", "expires_at": null, "metadata": null}
+    ],
+    "metadata": null,
+    "product": {"slug": "my-app", "name": "My App"}
+  }
+}
+```
+
+**Validation Response:**
+```json
+{
+  "object": "validation_result",
+  "valid": true,
+  "code": null,
+  "message": null,
+  "warnings": null,
+  "license": { ... },
+  "activation": { ... }
+}
+```
+
+**Deactivation Response:**
+```json
+{
+  "object": "deactivation",
+  "activation_id": 12345,
+  "deactivated_at": "2025-01-15T12:00:00Z"
+}
+```
+
+### Error Responses
+
+All errors use a nested format:
+
+```json
+{
+  "error": {
+    "code": "license_not_found",
+    "message": "The specified license key was not found",
+    "details": {
+      "license_key": "INVALID-KEY"
+    }
+  }
+}
+```
+
+Common error codes:
+- `license_not_found` — License key doesn't exist
+- `license_expired` — License has expired
+- `license_suspended` — License has been suspended
+- `seat_limit_exceeded` — No available seats
+- `device_mismatch` — Device ID doesn't match activation
+- `product_mismatch` — License not valid for this product
 
 ---
 
@@ -477,8 +667,9 @@ An interactive CLI example is included for testing the SDK:
 swift run --package-path Examples/LicenseSeatExample
 
 # Or with custom environment
-export LICENSESEAT_API_URL=http://localhost:3000
+export LICENSESEAT_API_URL=https://licenseseat.com/api/v1
 export LICENSESEAT_API_KEY=sk_test_123
+export LICENSESEAT_PRODUCT_SLUG=my-app
 swift run --package-path Examples/LicenseSeatExample
 ```
 
@@ -504,8 +695,8 @@ To use LicenseSeat in your project, simply add the Swift Package Manager depende
 3. **Create and push a git tag:**
    ```bash
    # Semantic versioning: MAJOR.MINOR.PATCH
-   git tag v0.2.0
-   git push origin v0.2.0
+   git tag v2.0.0
+   git push origin v2.0.0
    ```
 
 4. **Create a GitHub Release** (optional but recommended):
@@ -518,17 +709,17 @@ That's it! Swift Package Manager uses git tags for versioning. Once a tag is pus
 
 ```swift
 // Users can now specify the new version
-.package(url: "https://github.com/licenseseat/licenseseat-swift.git", from: "0.2.0")
+.package(url: "https://github.com/licenseseat/licenseseat-swift.git", from: "2.0.0")
 ```
 
 ### Version Requirements for Users
 
 | Requirement      | Example                         | Description                          |
 | ---------------- | ------------------------------- | ------------------------------------ |
-| `from:`          | `from: "0.2.0"`                 | Any version ≥ 0.2.0 (recommended)    |
-| `exact:`         | `exact: "0.1.1"`                | Exactly version 0.1.1                |
-| `upToNextMajor:` | `.upToNextMajor(from: "0.2.0")` | 0.x.x versions only                  |
-| `upToNextMinor:` | `.upToNextMinor(from: "0.2.0")` | 0.1.x versions only                  |
+| `from:`          | `from: "2.0.0"`                 | Any version >= 2.0.0 (recommended)   |
+| `exact:`         | `exact: "2.0.0"`                | Exactly version 2.0.0                |
+| `upToNextMajor:` | `.upToNextMajor(from: "2.0.0")` | 2.x.x versions only                  |
+| `upToNextMinor:` | `.upToNextMinor(from: "2.0.0")` | 2.0.x versions only                  |
 | `branch:`        | `branch: "main"`                | Latest from branch (for development) |
 
 ### CI/CD
@@ -575,31 +766,77 @@ swift test --filter EntitlementTests
 swift test --enable-code-coverage
 ```
 
-The SDK includes 77+ tests covering:
+The SDK includes 70+ tests covering:
 - License activation, validation, and deactivation
+- Product-scoped API endpoints
 - Entitlement checking and parsing
-- Offline cryptographic validation
+- Offline cryptographic token validation
 - Event bus subscriptions
 - Device identifier generation
 - API client retry logic
-- API response format compliance
-- Error handling with reason codes
+- v1 API response format compliance
+- Nested error handling with error codes
 
 ---
 
-## Migration from JavaScript SDK
+## Migration from v1 SDK
 
-This Swift SDK provides feature parity with the official JavaScript SDK:
+If you're upgrading from an earlier version of the SDK, here are the key changes:
 
-| JavaScript                   | Swift                                  |
-| ---------------------------- | -------------------------------------- |
-| `new LicenseSeat(config)`    | `LicenseSeat(config:)`                 |
-| `sdk.activate(key, options)` | `sdk.activate(licenseKey:options:)`    |
-| `sdk.validate(key, options)` | `sdk.validate(licenseKey:options:)`    |
-| `sdk.deactivate()`           | `sdk.deactivate()`                     |
-| `sdk.checkEntitlement(key)`  | `sdk.checkEntitlement(_:)`             |
-| `sdk.getStatus()`            | `sdk.getStatus()` → enum               |
-| `sdk.on('event', cb)`        | `sdk.on("event") { }` → AnyCancellable |
+### Configuration Changes
+
+```swift
+// Before (v0.x)
+LicenseSeat.configure(apiKey: "YOUR_API_KEY")
+
+// After (v2.0)
+LicenseSeatStore.shared.configure(
+    apiKey: "YOUR_API_KEY",
+    productSlug: "your-product"  // Now required
+)
+```
+
+### API URL Change
+
+The base URL has changed from `/api` to `/api/v1`:
+- Old: `https://licenseseat.com/api`
+- New: `https://licenseseat.com/api/v1`
+
+### Field Name Changes
+
+| Old Field           | New Field    |
+| ------------------- | ------------ |
+| `device_identifier` | `device_id`  |
+| `license_key`       | `key`        |
+| `reason_code`       | `error.code` |
+
+### Offline Configuration
+
+```swift
+// Before (v0.x)
+config.offlineFallbackEnabled = true
+config.offlineLicenseRefreshInterval = 259200
+
+// After (v2.0)
+config.offlineFallbackMode = .networkOnly  // or .always
+config.offlineTokenRefreshInterval = 259200
+```
+
+### Error Handling
+
+```swift
+// Before (v0.x)
+catch let error as APIError {
+    print(error.reasonCode)
+}
+
+// After (v2.0)
+catch let error as APIError {
+    print(error.code)     // Error code from error.code
+    print(error.message)  // Error message from error.message
+    print(error.details)  // Optional additional details
+}
+```
 
 ---
 

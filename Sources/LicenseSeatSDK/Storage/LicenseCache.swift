@@ -52,15 +52,15 @@ final class LicenseCache {
         }
     }
     
-    func updateValidation(_ validation: LicenseValidationResult) {
+    func updateValidation(_ validation: ValidationResponse) {
         guard var license = getLicense() else { return }
         license.validation = validation
         license.lastValidated = Date()
         setLicense(license)
     }
-    
+
     func getDeviceId() -> String? {
-        return getLicense()?.deviceIdentifier
+        return getLicense()?.deviceId
     }
     
     func clearLicense() {
@@ -70,22 +70,26 @@ final class LicenseCache {
         }
     }
     
-    // MARK: - Offline License Storage
-    
-    func getOfflineLicense() -> OfflineLicense? {
-        if let data = userDefaults.data(forKey: prefix + "offline_license") {
-            return try? JSONDecoder().decode(OfflineLicense.self, from: data)
+    // MARK: - Offline Token Storage
+
+    func getOfflineToken() -> OfflineTokenResponse? {
+        guard let data = userDefaults.data(forKey: prefix + "offline_token") else {
+            return nil
         }
-        return nil
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try? decoder.decode(OfflineTokenResponse.self, from: data)
     }
-    
-    func setOfflineLicense(_ license: OfflineLicense) {
-        guard let data = try? JSONEncoder().encode(license) else { return }
-        userDefaults.set(data, forKey: prefix + "offline_license")
+
+    func setOfflineToken(_ token: OfflineTokenResponse) {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        guard let data = try? encoder.encode(token) else { return }
+        userDefaults.set(data, forKey: prefix + "offline_token")
     }
-    
-    func clearOfflineLicense() {
-        userDefaults.removeObject(forKey: prefix + "offline_license")
+
+    func clearOfflineToken() {
+        userDefaults.removeObject(forKey: prefix + "offline_token")
     }
     
     // MARK: - Public Key Storage

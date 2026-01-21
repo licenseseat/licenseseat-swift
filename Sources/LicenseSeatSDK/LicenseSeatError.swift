@@ -9,15 +9,18 @@
 import Foundation
 
 /// Errors that can occur during SDK operations
-public enum LicenseSeatError: LocalizedError {
+public enum LicenseSeatError: LocalizedError, Sendable, Equatable {
     /// No active license found in cache
     case noActiveLicense
-    
+
     /// API key is required but not configured
     case apiKeyRequired
-    
-    /// Offline license data is malformed or missing required fields
-    case invalidOfflineLicense
+
+    /// Product slug is required but not configured
+    case productSlugRequired
+
+    /// Offline token data is malformed or missing required fields
+    case invalidOfflineToken
     
     /// Public key ID is empty or invalid
     case invalidKeyId
@@ -49,12 +52,14 @@ public enum LicenseSeatError: LocalizedError {
             return "No active license found"
         case .apiKeyRequired:
             return "API key is required for this operation"
+        case .productSlugRequired:
+            return "Product slug is required for this operation"
         case .invalidKeyId:
             return "Invalid key ID"
         case .invalidPublicKey:
             return "Invalid public key"
-        case .invalidOfflineLicense:
-            return "Invalid offline license structure"
+        case .invalidOfflineToken:
+            return "Invalid offline token structure"
         case .cryptoUnavailable:
             return "Cryptographic functionality unavailable on this platform"
         case .networkError:
