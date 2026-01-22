@@ -26,7 +26,7 @@ final class ActivationResponseDecodingTests: XCTestCase {
         let json = """
         {
             "object": "activation",
-            "id": 12345,
+            "id": "act-12345-uuid",
             "device_id": "device-abc-123",
             "device_name": "John's MacBook Pro",
             "license_key": "LS-PRO-2025",
@@ -56,7 +56,7 @@ final class ActivationResponseDecodingTests: XCTestCase {
         let result = try decoder.decode(ActivationResponse.self, from: Data(json.utf8))
 
         XCTAssertEqual(result.object, "activation")
-        XCTAssertEqual(result.id, 12345)
+        XCTAssertEqual(result.id, "act-12345-uuid")
         XCTAssertEqual(result.deviceId, "device-abc-123")
         XCTAssertEqual(result.deviceName, "John's MacBook Pro")
         XCTAssertEqual(result.licenseKey, "LS-PRO-2025")
@@ -81,7 +81,7 @@ final class ActivationResponseDecodingTests: XCTestCase {
         let json = """
         {
             "object": "activation",
-            "id": 1,
+            "id": "act-1-uuid",
             "device_id": "dev-1",
             "device_name": null,
             "license_key": "KEY-1",
@@ -108,7 +108,7 @@ final class ActivationResponseDecodingTests: XCTestCase {
 
         let result = try decoder.decode(ActivationResponse.self, from: Data(json.utf8))
 
-        XCTAssertEqual(result.id, 1)
+        XCTAssertEqual(result.id, "act-1-uuid")
         XCTAssertNil(result.deviceName)
         XCTAssertNil(result.ipAddress)
         XCTAssertNil(result.metadata)
@@ -131,7 +131,7 @@ final class DeactivationResponseDecodingTests: XCTestCase {
         let json = """
         {
             "object": "deactivation",
-            "activation_id": 12345,
+            "activation_id": "act-12345-uuid",
             "deactivated_at": "2025-01-20T15:30:00Z"
         }
         """
@@ -139,7 +139,7 @@ final class DeactivationResponseDecodingTests: XCTestCase {
         let result = try decoder.decode(DeactivationResponse.self, from: Data(json.utf8))
 
         XCTAssertEqual(result.object, "deactivation")
-        XCTAssertEqual(result.activationId, 12345)
+        XCTAssertEqual(result.activationId, "act-12345-uuid")
         XCTAssertNotNil(result.deactivatedAt)
     }
 }
@@ -256,7 +256,7 @@ final class ValidationResponseDecodingTests: XCTestCase {
                 "product": {"slug": "app", "name": "App"}
             },
             "activation": {
-                "id": 999,
+                "id": "act-999-uuid",
                 "device_id": "my-device",
                 "device_name": "My Mac",
                 "license_key": "TEST-KEY",
@@ -274,7 +274,7 @@ final class ValidationResponseDecodingTests: XCTestCase {
         XCTAssertEqual(result.warnings?.count, 1)
         XCTAssertEqual(result.warnings?[0].code, "expiring_soon")
         XCTAssertNotNil(result.activation)
-        XCTAssertEqual(result.activation?.id, 999)
+        XCTAssertEqual(result.activation?.id, "act-999-uuid")
         XCTAssertEqual(result.activation?.deviceId, "my-device")
     }
 }

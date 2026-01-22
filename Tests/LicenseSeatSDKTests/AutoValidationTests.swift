@@ -39,7 +39,7 @@ final class AutoValidationTests: XCTestCase {
                 statusCode = 201
                 json = [
                     "object": "activation",
-                    "id": 12345,
+                    "id": "act-12345-uuid",
                     "device_id": "test-device",
                     "device_name": "Test Device",
                     "license_key": licenseKey,

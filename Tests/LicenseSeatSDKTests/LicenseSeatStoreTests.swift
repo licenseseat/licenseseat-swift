@@ -65,7 +65,7 @@ final class LicenseSeatStoreTests: XCTestCase {
                 // Return v1 ActivationResponse
                 let payload: [String: Any] = [
                     "object": "activation",
-                    "id": 12345,
+                    "id": "act-12345-uuid",
                     "device_id": "test-device",
                     "device_name": "Test Device",
                     "license_key": licenseKey,
@@ -122,7 +122,7 @@ final class LicenseSeatStoreTests: XCTestCase {
                 // Return v1 DeactivationResponse
                 let result: [String: Any] = [
                     "object": "deactivation",
-                    "activation_id": 12345,
+                    "activation_id": "act-12345-uuid",
                     "deactivated_at": ISO8601DateFormatter().string(from: Date())
                 ]
                 let data = try JSONSerialization.data(withJSONObject: result)
@@ -448,7 +448,7 @@ final class LicenseSeatStoreTests: XCTestCase {
             if request.url!.path.contains("/deactivate") {
                 let result: [String: Any] = [
                     "object": "deactivation",
-                    "activation_id": 12345,
+                    "activation_id": "act-12345-uuid",
                     "deactivated_at": ISO8601DateFormatter().string(from: Date())
                 ]
                 let data = try JSONSerialization.data(withJSONObject: result)

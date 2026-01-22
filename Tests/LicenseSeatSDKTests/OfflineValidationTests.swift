@@ -110,7 +110,7 @@ final class OfflineValidationTests: XCTestCase {
         let license = License(
             licenseKey: licenseKey,
             deviceId: "test-device",
-            activationId: 12345,
+            activationId: "act-12345-uuid",
             activatedAt: Date(),
             lastValidated: lastValidated
         )
