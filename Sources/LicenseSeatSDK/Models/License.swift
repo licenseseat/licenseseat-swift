@@ -79,10 +79,10 @@ public struct LicenseResponse: Codable, Equatable, Sendable {
 // MARK: - Activation (API Response)
 
 /// Activation object as returned by the API
-/// Response format: `{"object": "activation", "id": 123, "device_id": "...", ...}`
+/// Response format: `{"object": "activation", "id": "uuid", "device_id": "...", ...}`
 public struct ActivationResponse: Codable, Equatable, Sendable {
     public let object: String
-    public let id: Int
+    public let id: String
     public let deviceId: String
     public let deviceName: String?
     public let licenseKey: String
@@ -109,10 +109,10 @@ public struct ActivationResponse: Codable, Equatable, Sendable {
 // MARK: - Deactivation (API Response)
 
 /// Deactivation object as returned by the API
-/// Response format: `{"object": "deactivation", "activation_id": 123, "deactivated_at": "..."}`
+/// Response format: `{"object": "deactivation", "activation_id": "uuid", "deactivated_at": "..."}`
 public struct DeactivationResponse: Codable, Equatable, Sendable {
     public let object: String
-    public let activationId: Int
+    public let activationId: String
     public let deactivatedAt: Date
 
     enum CodingKeys: String, CodingKey {
@@ -145,7 +145,7 @@ public struct ValidationResponse: Codable, Equatable, Sendable {
 
     /// Nested activation without full license (to avoid circular reference)
     public struct ActivationResponseNested: Codable, Equatable, Sendable {
-        public let id: Int
+        public let id: String
         public let deviceId: String
         public let deviceName: String?
         public let licenseKey: String
@@ -338,8 +338,8 @@ public struct License: Codable, Equatable, Sendable {
     /// Device ID this license is activated on
     public let deviceId: String
 
-    /// Activation ID from the server
-    public let activationId: Int
+    /// Activation ID (UUID) from the server
+    public let activationId: String
 
     /// When the license was activated
     public let activatedAt: Date
@@ -362,7 +362,7 @@ public struct License: Codable, Equatable, Sendable {
     public init(
         licenseKey: String,
         deviceId: String,
-        activationId: Int,
+        activationId: String,
         activatedAt: Date,
         lastValidated: Date,
         validation: ValidationResponse? = nil

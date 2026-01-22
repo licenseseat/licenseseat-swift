@@ -63,7 +63,7 @@ final class EntitlementTests: XCTestCase {
         return License(
             licenseKey: "TEST-KEY",
             deviceId: "device-1",
-            activationId: 12345,
+            activationId: "act-12345-uuid",
             activatedAt: Date(),
             lastValidated: Date(),
             validation: validation

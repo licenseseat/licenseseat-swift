@@ -47,7 +47,7 @@ final class LicenseSeatSDKTests: XCTestCase {
     private func makeActivationResponse(licenseKey: String, deviceId: String) -> [String: Any] {
         return [
             "object": "activation",
-            "id": 12345,
+            "id": "act-12345-uuid",
             "device_id": deviceId,
             "device_name": "Test Device",
             "license_key": licenseKey,
@@ -102,7 +102,7 @@ final class LicenseSeatSDKTests: XCTestCase {
     private func makeDeactivationResponse() -> [String: Any] {
         return [
             "object": "deactivation",
-            "activation_id": 12345,
+            "activation_id": "act-12345-uuid",
             "deactivated_at": ISO8601DateFormatter().string(from: Date())
         ]
     }
@@ -157,7 +157,7 @@ final class LicenseSeatSDKTests: XCTestCase {
         let license = try await sdk?.activate(licenseKey: licenseKey)
         XCTAssertEqual(license?.licenseKey, licenseKey)
         XCTAssertNotNil(sdk?.currentLicense())
-        XCTAssertEqual(license?.activationId, 12345)
+        XCTAssertEqual(license?.activationId, "act-12345-uuid")
 
         // 2. Validate
         let validation = try await sdk?.validate(licenseKey: licenseKey)

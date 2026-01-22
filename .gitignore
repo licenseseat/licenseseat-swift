@@ -7,7 +7,15 @@ DerivedData/
 .swiftpm/configuration/registries.json
 .swiftpm/xcode/package.xcworkspace/contents.xcworkspacedata
 .netrc
+
+# Example and test project build artifacts
 Examples/LicenseSeatExample/.build
+StressTest/.build
+StressTest/.swiftpm
+StressTest/Package.resolved
 
 TODO
 .aux/
+
+# Claude Code local settings
+.claude/

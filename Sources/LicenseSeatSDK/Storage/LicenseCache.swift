@@ -13,42 +13,69 @@ final class LicenseCache {
     private let prefix: String
     private let userDefaults: UserDefaults
     private let fileManager = FileManager.default
-    private let documentsDirectory: URL?
-    
+    private let cacheDirectory: URL?
+
     init(prefix: String, userDefaults: UserDefaults = .standard) {
         self.prefix = prefix
         self.userDefaults = userDefaults
-        
-        // Get documents directory for file storage
-        self.documentsDirectory = fileManager.urls(
-            for: .documentDirectory,
-            in: .userDomainMask
-        ).first
+
+        // Use Application Support directory for file storage (proper location for app data)
+        // Falls back to Documents if Application Support is unavailable
+        if let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
+            let bundleId = Bundle.main.bundleIdentifier ?? "com.licenseseat.sdk"
+            let sdkDir = appSupport.appendingPathComponent(bundleId, isDirectory: true)
+
+            // Create directory if needed
+            try? fileManager.createDirectory(at: sdkDir, withIntermediateDirectories: true)
+            self.cacheDirectory = sdkDir
+        } else {
+            // Fallback to caches directory
+            self.cacheDirectory = fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first
+        }
     }
     
     // MARK: - License Storage
-    
+
+    private var licenseEncoder: JSONEncoder {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        return encoder
+    }
+
+    private var licenseDecoder: JSONDecoder {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return decoder
+    }
+
     func getLicense() -> License? {
         // Try UserDefaults first
         if let data = userDefaults.data(forKey: prefix + "license") {
-            return try? JSONDecoder().decode(License.self, from: data)
+            return try? licenseDecoder.decode(License.self, from: data)
         }
-        
+
         // Fallback to file storage
         guard let url = licenseFileURL else { return nil }
         guard let data = try? Data(contentsOf: url) else { return nil }
-        return try? JSONDecoder().decode(License.self, from: data)
+        return try? licenseDecoder.decode(License.self, from: data)
     }
-    
+
     func setLicense(_ license: License) {
-        guard let data = try? JSONEncoder().encode(license) else { return }
-        
-        // Save to UserDefaults
-        userDefaults.set(data, forKey: prefix + "license")
-        
-        // Also save to file
-        if let url = licenseFileURL {
-            try? data.write(to: url, options: .atomic)
+        do {
+            let data = try licenseEncoder.encode(license)
+
+            // Save to UserDefaults
+            userDefaults.set(data, forKey: prefix + "license")
+            userDefaults.synchronize() // Force sync for CLI tools
+
+            // Also save to file
+            if let url = licenseFileURL {
+                try data.write(to: url, options: .atomic)
+            }
+        } catch {
+            #if DEBUG
+            print("[LicenseCache] Failed to encode license: \(error)")
+            #endif
         }
     }
     
@@ -147,6 +174,6 @@ final class LicenseCache {
     // MARK: - Private Helpers
     
     private var licenseFileURL: URL? {
-        return documentsDirectory?.appendingPathComponent(prefix + "license.json")
+        return cacheDirectory?.appendingPathComponent(prefix + "license.json")
     }
 } 

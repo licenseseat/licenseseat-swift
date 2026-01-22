@@ -60,6 +60,7 @@ The official Swift SDK for [LicenseSeat](https://licenseseat.com) — the simple
   - [API Documentation](#api-documentation)
     - [Generate Documentation Locally](#generate-documentation-locally)
   - [Testing](#testing)
+  - [Integration Tests (StressTest)](#integration-tests-stresstest)
   - [Migration from v1 SDK](#migration-from-v1-sdk)
   - [License](#license)
   - [Support](#support)
@@ -74,7 +75,7 @@ Add LicenseSeat to your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/licenseseat/licenseseat-swift.git", from: "0.3.0")
+    .package(url: "https://github.com/licenseseat/licenseseat-swift.git", from: "0.3.1")
 ]
 ```
 
@@ -695,8 +696,8 @@ To use LicenseSeat in your project, simply add the Swift Package Manager depende
 3. **Create and push a git tag:**
    ```bash
    # Semantic versioning: MAJOR.MINOR.PATCH
-   git tag v0.3.0
-   git push origin v0.3.0
+   git tag v0.3.1
+   git push origin v0.3.1
    ```
 
 4. **Create a GitHub Release** (optional but recommended):
@@ -709,17 +710,17 @@ That's it! Swift Package Manager uses git tags for versioning. Once a tag is pus
 
 ```swift
 // Users can now specify the new version
-.package(url: "https://github.com/licenseseat/licenseseat-swift.git", from: "0.3.0")
+.package(url: "https://github.com/licenseseat/licenseseat-swift.git", from: "0.3.1")
 ```
 
 ### Version Requirements for Users
 
 | Requirement      | Example                         | Description                          |
 | ---------------- | ------------------------------- | ------------------------------------ |
-| `from:`          | `from: "0.3.0"`                 | Any version >= 0.3.0 (recommended)   |
-| `exact:`         | `exact: "0.3.0"`                | Exactly version 0.3.0                |
-| `upToNextMajor:` | `.upToNextMajor(from: "0.3.0")` | 0.x.x versions only                  |
-| `upToNextMinor:` | `.upToNextMinor(from: "0.3.0")` | 0.3.x versions only                  |
+| `from:`          | `from: "0.3.1"`                 | Any version >= 0.3.1 (recommended)   |
+| `exact:`         | `exact: "0.3.1"`                | Exactly version 0.3.1                |
+| `upToNextMajor:` | `.upToNextMajor(from: "0.3.1")` | 0.x.x versions only                  |
+| `upToNextMinor:` | `.upToNextMinor(from: "0.3.1")` | 0.3.x versions only                  |
 | `branch:`        | `branch: "main"`                | Latest from branch (for development) |
 
 ### CI/CD
@@ -776,6 +777,78 @@ The SDK includes 70+ tests covering:
 - API client retry logic
 - v1 API response format compliance
 - Nested error handling with error codes
+
+---
+
+## Integration Tests (StressTest)
+
+The `StressTest` directory contains a comprehensive end-to-end integration test that simulates real-world customer usage against the live LicenseSeat API. This test exercises the complete license lifecycle.
+
+### What It Tests
+
+The integration test simulates a real macOS app customer journey:
+
+1. **First Launch & Activation** — Fresh install, license key entry, activation
+2. **Auto-Validation Cycles** — Background validation with configurable intervals
+3. **Offline Token Caching** — Ed25519 signed tokens for offline resilience
+4. **Security & Tampering Detection** — Forged keys, wrong products, missing credentials
+5. **License Persistence** — Data survives app restarts
+6. **SwiftUI Integration** — LicenseSeatStore singleton reactive updates
+7. **Deactivation & Re-activation** — Seat management for device transfers
+
+### Running Integration Tests
+
+```bash
+# Navigate to the StressTest directory
+cd StressTest
+
+# Set required environment variables
+export LICENSESEAT_API_KEY="your-api-key"
+export LICENSESEAT_LICENSE_KEY="your-test-license-key"
+export LICENSESEAT_PRODUCT_SLUG="your-product-slug"
+
+# For local SDK development, modify Package.swift to use local path:
+# .package(path: "..")
+
+# Build and run
+swift run
+```
+
+### Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `LICENSESEAT_API_KEY` | Your LicenseSeat API key |
+| `LICENSESEAT_LICENSE_KEY` | A valid license key for testing |
+| `LICENSESEAT_PRODUCT_SLUG` | The product slug matching your license |
+
+### Sample Output
+
+```
+======================================================================
+  SCENARIO 1: First App Launch (Fresh Install)
+======================================================================
+
+-> Testing: Initial state check (no license)
+   ✅ PASS: App shows activation screen (no license)
+
+-> Testing: User enters license key and clicks 'Activate'
+   ✅ PASS: Activation successful!
+   📝 Device ID: mac_abc123
+   📝 Activation ID: act-12345-uuid
+
+...
+
+======================================================================
+  RESULTS
+======================================================================
+  Passed: 23
+  Failed: 0
+  Total:  23
+======================================================================
+
+🎉 ALL SCENARIOS PASSED!
+```
 
 ---
 
