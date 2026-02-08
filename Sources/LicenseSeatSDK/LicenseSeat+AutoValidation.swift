@@ -77,6 +77,10 @@ extension LicenseSeat {
             ])
         }
 
+        Task { [weak self] in
+            try? await self?.heartbeat()
+        }
+
         // Announce next scheduled run
         if validationTask != nil {
             eventBus.emit("autovalidation:cycle", [

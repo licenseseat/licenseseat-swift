@@ -412,6 +412,31 @@ public final class LicenseSeat {
         }
     }
 
+    /// Send a heartbeat for the current license
+    /// - Throws: ``LicenseSeatError/productSlugRequired`` if product slug is not configured
+    public func heartbeat() async throws {
+        guard let productSlug = config.productSlug else {
+            throw LicenseSeatError.productSlugRequired
+        }
+
+        guard let license = cache.getLicense() else {
+            log("No active license for heartbeat")
+            return
+        }
+
+        let deviceId = license.deviceId
+
+        let body: [String: Any] = ["device_id": deviceId]
+
+        let _: HeartbeatResponse = try await apiClient.post(
+            path: "/products/\(productSlug)/licenses/\(license.licenseKey)/heartbeat",
+            body: body
+        )
+
+        eventBus.emit("heartbeat:success", [:])
+        log("Heartbeat sent successfully")
+    }
+
     /// Check if a specific entitlement is active
     /// - Parameter entitlementKey: The entitlement key to check
     /// - Returns: Entitlement status including active state and expiration
