@@ -14,6 +14,8 @@ The official Swift SDK for [LicenseSeat](https://licenseseat.com) — the simple
 - **Product-Scoped Operations** — All operations are scoped to your product via `productSlug`
 - **Offline Validation** — Ed25519 cryptographic verification for offline use with configurable grace periods
 - **Automatic Re-validation** — Background validation with configurable intervals
+- **Heartbeat** — Periodic health-check pings with auto-heartbeat alongside auto-validation
+- **Device Telemetry** — Auto-collected device and environment metadata for dashboard analytics
 - **Entitlement Management** — Fine-grained feature access control with expiration tracking
 - **Network Resilience** — Automatic retry with exponential backoff and offline fallback
 - **Reactive UI Support** — SwiftUI property wrappers and Combine publishers for reactive updates
@@ -45,6 +47,7 @@ The official Swift SDK for [LicenseSeat](https://licenseseat.com) — the simple
   - [Offline Validation](#offline-validation)
     - [Offline Fallback Modes](#offline-fallback-modes)
     - [Offline Token Structure](#offline-token-structure)
+  - [Heartbeat](#heartbeat)
   - [Event System](#event-system)
     - [Available Events](#available-events)
   - [API Response Format](#api-response-format)
@@ -366,6 +369,7 @@ if result.valid {
 | `storagePrefix`             | `String`              | `licenseseat_`                     | Prefix for cache keys                    |
 | `deviceIdentifier`          | `String?`             | Auto-generated                     | Custom device ID                         |
 | `autoValidateInterval`      | `TimeInterval`        | `3600` (1 hour)                    | Background validation interval           |
+| `heartbeatInterval`         | `TimeInterval`        | `300` (5 min)                      | Standalone heartbeat ping interval       |
 | `networkRecheckInterval`    | `TimeInterval`        | `30`                               | Offline connectivity check interval      |
 | `maxRetries`                | `Int`                 | `3`                                | API retry attempts                       |
 | `retryDelay`                | `TimeInterval`        | `1`                                | Base retry delay (exponential backoff)   |
@@ -515,6 +519,37 @@ The SDK verifies offline tokens by:
 
 ---
 
+## Heartbeat
+
+The SDK includes a heartbeat mechanism that sends periodic health-check pings to the LicenseSeat API. This lets the dashboard track active devices in real time and powers online/offline seat visibility.
+
+### Manual Heartbeat
+
+Send a one-off heartbeat at any time:
+
+```swift
+try await LicenseSeatStore.shared.seat?.heartbeat()
+```
+
+### Auto-Heartbeat
+
+When a license is activated (or loaded from cache at launch), the SDK automatically starts a standalone heartbeat timer **alongside** auto-validation. By default it fires every 5 minutes:
+
+```swift
+LicenseSeatStore.shared.configure(
+    apiKey: "YOUR_API_KEY",
+    productSlug: "your-product"
+) { config in
+    config.heartbeatInterval = 300  // every 5 minutes (default)
+}
+```
+
+Set `heartbeatInterval` to `0` to disable auto-heartbeat while keeping auto-validation active.
+
+A heartbeat is also sent automatically after every auto-validation cycle, so even with auto-heartbeat disabled the server receives periodic liveness signals whenever validation runs.
+
+---
+
 ## Event System
 
 Subscribe to SDK events for analytics, UI updates, or custom logic:
@@ -555,6 +590,7 @@ licenseSeat.eventPublisher
 | `validation:start/success/failed/error`     | Online validation                  |
 | `validation:offline-success/offline-failed` | Offline validation                 |
 | `deactivation:start/success/error`          | License deactivation               |
+| `heartbeat:success`                         | Heartbeat ping acknowledged        |
 | `license:loaded`                            | Cached license loaded at startup   |
 | `license:revoked`                           | License revoked by server          |
 | `offlineToken:verified`                     | Offline token signature verified   |
@@ -658,17 +694,27 @@ The SDK automatically collects non-personally identifiable device telemetry and 
 
 | Field | Example | Purpose |
 |-------|---------|---------|
+| `sdk_name` | `swift` | Identifies the SDK platform |
 | `sdk_version` | `0.4.0` | SDK adoption tracking |
 | `os_name` | `macOS` | Platform distribution |
 | `os_version` | `15.2.0` | OS breakdown |
-| `platform` | `macOS` | Platform analytics |
-| `device_model` | `MacBookPro18,1` | Device analytics |
-| `app_version` | `2.1.0` | Version adoption charts |
-| `app_build` | `42` | Build tracking |
-| `locale` | `en_US` | Localization insights |
-| `timezone` | `America/New_York` | Geographic context |
+| `platform` | `native` | Runtime platform |
+| `device_model` | `MacBookPro18,1` | Hardware model identifier |
+| `device_type` | `desktop` | Device category (`desktop`, `phone`, `tablet`, `tv`, `watch`, `headset`) |
+| `architecture` | `arm64` | CPU architecture (`arm64` or `x64`) |
+| `cpu_cores` | `10` | Processor count |
+| `memory_gb` | `16` | Physical RAM (rounded GB) |
+| `locale` | `en_US` | Full locale identifier |
+| `language` | `en` | Language code extracted from locale |
+| `timezone` | `America/New_York` | IANA timezone |
+| `app_version` | `2.1.0` | Host app version (`CFBundleShortVersionString`) |
+| `app_build` | `42` | Host app build number (`CFBundleVersion`) |
+| `screen_resolution` | `3024x1964` | Native screen resolution in pixels |
+| `display_scale` | `2.0` | Display scale factor (Retina = 2.0) |
 
 The `device_id` (hardware UUID on macOS, composite hash on iOS) is sent as a top-level parameter for seat management. IP addresses are resolved server-side for country/city-level geolocation — the SDK never reads or sends the device's IP address itself.
+
+`app_version` and `app_build` are read automatically from the host app's `Info.plist`. If your app bundles these values differently, you can override them in configuration — see [Configuration Options](#configuration-options).
 
 ### What's NOT Collected
 
