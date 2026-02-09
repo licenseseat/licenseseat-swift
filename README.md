@@ -50,6 +50,7 @@ The official Swift SDK for [LicenseSeat](https://licenseseat.com) — the simple
   - [API Response Format](#api-response-format)
     - [Success Responses](#success-responses)
     - [Error Responses](#error-responses)
+  - [Telemetry \& Privacy](#telemetry--privacy)
   - [Platform Support](#platform-support)
   - [Example App](#example-app)
   - [Publishing \& Distribution](#publishing--distribution)
@@ -372,6 +373,7 @@ if result.valid {
 | `offlineTokenRefreshInterval` | `TimeInterval`      | `259200` (72 hours)                | Offline token refresh interval           |
 | `maxOfflineDays`            | `Int`                 | `0`                                | Grace period for offline use             |
 | `maxClockSkewMs`            | `TimeInterval`        | `300000` (5 min)                   | Clock tamper tolerance                   |
+| `telemetryEnabled`          | `Bool`                | `true`                             | Send device telemetry with API requests  |
 | `debug`                     | `Bool`                | `false`                            | Enable debug logging                     |
 
 ### Environment-Based Configuration
@@ -645,6 +647,51 @@ Common error codes:
 - `seat_limit_exceeded` — No available seats
 - `device_mismatch` — Device ID doesn't match activation
 - `product_mismatch` — License not valid for this product
+
+---
+
+## Telemetry & Privacy
+
+The SDK automatically collects non-personally identifiable device telemetry and sends it with every API request. This powers per-product analytics in the LicenseSeat dashboard: DAU/MAU, version adoption, platform distribution, and more.
+
+### What's Collected
+
+| Field | Example | Purpose |
+|-------|---------|---------|
+| `sdk_version` | `0.4.0` | SDK adoption tracking |
+| `os_name` | `macOS` | Platform distribution |
+| `os_version` | `15.2.0` | OS breakdown |
+| `platform` | `macOS` | Platform analytics |
+| `device_model` | `MacBookPro18,1` | Device analytics |
+| `app_version` | `2.1.0` | Version adoption charts |
+| `app_build` | `42` | Build tracking |
+| `locale` | `en_US` | Localization insights |
+| `timezone` | `America/New_York` | Geographic context |
+
+The `device_id` (hardware UUID on macOS, composite hash on iOS) is sent as a top-level parameter for seat management. IP addresses are resolved server-side for country/city-level geolocation — the SDK never reads or sends the device's IP address itself.
+
+### What's NOT Collected
+
+- No names, emails, or user accounts
+- No IP addresses from the device
+- No file paths, browsing history, or app usage patterns
+- No advertising identifiers (IDFA/IDFV)
+- No cross-app tracking
+
+### Disabling Telemetry
+
+If your app needs to comply with GDPR or similar privacy regulations, you can disable telemetry entirely:
+
+```swift
+LicenseSeatStore.shared.configure(
+    apiKey: "YOUR_API_KEY",
+    productSlug: "your-product"
+) { config in
+    config.telemetryEnabled = false
+}
+```
+
+When disabled, API requests still work normally — the SDK simply omits the `telemetry` object from request bodies. License activation, validation, deactivation, and heartbeat all function the same way.
 
 ---
 

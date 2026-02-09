@@ -62,6 +62,16 @@ public struct LicenseSeatConfig {
     /// Whether to enable debug logging
     public var debug: Bool
 
+    /// Whether to include device telemetry (OS, platform, app version, etc.) with API requests.
+    ///
+    /// Telemetry helps power per-product analytics in the LicenseSeat dashboard (DAU/MAU,
+    /// version adoption, platform distribution). No personally identifiable information is
+    /// collected — see the Telemetry & Privacy section in the README for details.
+    ///
+    /// Set to `false` to disable telemetry entirely (e.g., for GDPR compliance).
+    /// Defaults to `true`.
+    public var telemetryEnabled: Bool
+
     /// Interval for refreshing offline token (in seconds)
     public var offlineTokenRefreshInterval: TimeInterval
 
@@ -104,6 +114,7 @@ public struct LicenseSeatConfig {
         maxRetries: Int = 3,
         retryDelay: TimeInterval = 1,
         debug: Bool = false,
+        telemetryEnabled: Bool = true,
         offlineTokenRefreshInterval: TimeInterval = 259200,
         offlineFallbackMode: OfflineFallbackMode = .networkOnly,
         maxOfflineDays: Int = 0,
@@ -119,6 +130,7 @@ public struct LicenseSeatConfig {
         self.maxRetries = maxRetries
         self.retryDelay = retryDelay
         self.debug = debug
+        self.telemetryEnabled = telemetryEnabled
         self.offlineTokenRefreshInterval = offlineTokenRefreshInterval
         self.offlineFallbackMode = offlineFallbackMode
         self.maxOfflineDays = maxOfflineDays
