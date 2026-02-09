@@ -176,8 +176,10 @@ extension LicenseSeat {
 
 extension LicenseSeat {
 
-    /// Sync offline token and public key
-    func syncOfflineAssets() async {
+    /// Sync offline token and public key from the server.
+    /// Downloads the offline token and its corresponding public signing key, caching both locally.
+    /// Emits `offlineToken:ready` on success or `offlineToken:fetchError` on failure.
+    public func syncOfflineAssets() async {
         do {
             let offlineToken = try await getOfflineToken()
             cache.setOfflineToken(offlineToken)
@@ -250,9 +252,9 @@ extension LicenseSeat {
             var body: [String: Any] = [:]
             body["device_id"] = license.deviceId
 
-            // POST /products/{slug}/licenses/{key}/offline-token
+            // POST /products/{slug}/licenses/{key}/offline_token
             let response: OfflineTokenResponse = try await apiClient.post(
-                path: "/products/\(productSlug)/licenses/\(license.licenseKey)/offline-token",
+                path: "/products/\(productSlug)/licenses/\(license.licenseKey)/offline_token",
                 body: body
             )
 
@@ -280,9 +282,9 @@ extension LicenseSeat {
 
         log("Fetching signing key for kid: \(keyId)")
 
-        // GET /signing-keys/{key_id}
+        // GET /signing_keys/{key_id}
         let response: SigningKeyResponse = try await apiClient.get(
-            path: "/signing-keys/\(keyId)"
+            path: "/signing_keys/\(keyId)"
         )
 
         guard !response.publicKey.isEmpty else {

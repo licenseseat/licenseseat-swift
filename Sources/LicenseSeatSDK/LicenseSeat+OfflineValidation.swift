@@ -16,8 +16,10 @@ import Crypto
 
 extension LicenseSeat {
 
-    /// Verify cached offline token and return validation result
-    func verifyCachedOffline() async -> ValidationResponse {
+    /// Verify the cached offline token and return a validation result.
+    /// Use this to validate the license when the device is offline.
+    /// The offline token must have been previously downloaded via `syncOfflineAssets()`.
+    public func verifyCachedOffline() async -> ValidationResponse {
         guard let offlineToken = cache.getOfflineToken() else {
             return makeOfflineValidationResponse(valid: false, code: "no_offline_token")
         }

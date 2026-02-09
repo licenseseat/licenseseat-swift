@@ -400,9 +400,85 @@ struct TelemetryStressTest {
         assert(concurrentHeartbeats >= 4, "At least 4/5 concurrent heartbeats succeeded (\(concurrentHeartbeats)/5)")
 
         // ============================================================
-        // SCENARIO 9: Full lifecycle with telemetry verification
+        // SCENARIO 9: Offline Token Download & Verification
         // ============================================================
-        printHeader("SCENARIO 9: Full Lifecycle (activate -> validate -> heartbeat -> deactivate)")
+        printHeader("SCENARIO 9: Offline Token Download & Verification")
+
+        // Deactivate current session
+        try? await autoSDK.deactivate()
+
+        let offlineConfig = LicenseSeatConfig(
+            apiBaseUrl: API_URL,
+            apiKey: API_KEY,
+            productSlug: PRODUCT_SLUG,
+            storagePrefix: "stress_offline_",
+            autoValidateInterval: 0,
+            heartbeatInterval: 0,
+            debug: true
+        )
+        let offlineSDK = LicenseSeat(config: offlineConfig)
+        offlineSDK.reset()
+
+        printTest("Step 1: Activate before requesting offline token")
+        do {
+            _ = try await offlineSDK.activate(licenseKey: LICENSE_KEY)
+            pass("Activated for offline token test")
+        } catch let error as APIError {
+            if error.code == "already_activated" { pass("Already activated") }
+            else { fail("Offline activation failed: \(error.code ?? "unknown") - \(error.message)") }
+        } catch { fail("Offline activation error: \(error)") }
+
+        printTest("Step 2: Sync offline assets (token + public key)")
+        var offlineTokenReady = false
+        var offlineFetchError: String? = nil
+
+        offlineSDK.on("offlineToken:ready") { _ in
+            offlineTokenReady = true
+        }.store(in: &cancellables)
+        offlineSDK.on("offlineToken:fetchError") { data in
+            offlineFetchError = "\(data)"
+        }.store(in: &cancellables)
+
+        // Trigger offline asset sync manually
+        await offlineSDK.syncOfflineAssets()
+
+        // Give events a moment to fire
+        try? await Task.sleep(nanoseconds: 500_000_000)
+
+        if let fetchErr = offlineFetchError {
+            fail("Offline token fetch error: \(fetchErr)")
+        } else if offlineTokenReady {
+            pass("Offline token downloaded and cached")
+        } else {
+            log("offlineToken:ready event not received (may still be cached)")
+            // Check if we can do offline validation anyway
+        }
+
+        printTest("Step 3: Offline validation (verify cached token)")
+        let offlineResult = await offlineSDK.verifyCachedOffline()
+        log("Offline validation result: valid=\(offlineResult.valid), code=\(offlineResult.code ?? "nil")")
+        if offlineResult.valid {
+            pass("Offline validation succeeded with cached token")
+        } else if offlineResult.code == "no_offline_token" {
+            fail("No offline token was cached - download may have failed")
+        } else if offlineResult.code == "no_public_key" {
+            fail("Public key not cached - signing key download may have failed")
+        } else if offlineResult.code == "invalid_signature" {
+            fail("Offline token signature verification failed")
+        } else {
+            fail("Offline validation failed: \(offlineResult.code ?? "unknown")")
+        }
+
+        printTest("Step 4: Deactivate offline test session")
+        do {
+            try await offlineSDK.deactivate()
+            pass("Deactivated offline test session")
+        } catch { log("Deactivation issue: \(error) (continuing)") }
+
+        // ============================================================
+        // SCENARIO 10: Full lifecycle with telemetry verification
+        // ============================================================
+        printHeader("SCENARIO 10: Full Lifecycle (activate -> validate -> heartbeat -> deactivate)")
 
         printTest("Deactivate current session")
         try? await autoSDK.deactivate()
@@ -483,6 +559,7 @@ struct TelemetryStressTest {
             - Telemetry disabled mode (activate/validate/heartbeat)
             - Auto-validation cycles with heartbeat
             - Concurrent validation and heartbeat stress
+            - Offline token download and verification
             - Full lifecycle (activate -> validate -> heartbeat -> deactivate)
 
             """)
