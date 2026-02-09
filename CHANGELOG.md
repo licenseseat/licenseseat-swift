@@ -5,6 +5,16 @@ All notable changes to LicenseSeat will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] - 2026-02-09
+
+### Fixed
+- Offline token URL path (`/offline-token` → `/offline_token`) to match Rails API routes
+- Signing key URL path (`/signing-keys/` → `/signing_keys/`) to match Rails API routes
+
+### Changed
+- `syncOfflineAssets()` and `verifyCachedOffline()` are now public APIs
+- Added offline token download & verification to stress test suite
+
 ## [0.4.0] - 2026-02-09
 
 ### Added

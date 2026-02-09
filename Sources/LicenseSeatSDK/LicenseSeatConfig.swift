@@ -27,7 +27,7 @@ public struct LicenseSeatConfig {
     // MARK: - Constants
 
     /// The current SDK version. Single source of truth for version information.
-    public static let sdkVersion = "0.4.0"
+    public static let sdkVersion = "0.4.1"
 
     /// The production API base URL (v1). Single source of truth for the default endpoint.
     public static let productionAPIBaseURL = "https://licenseseat.com/api/v1"
