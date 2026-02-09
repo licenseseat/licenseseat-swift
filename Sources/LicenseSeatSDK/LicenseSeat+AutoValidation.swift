@@ -65,6 +65,47 @@ extension LicenseSeat {
         eventBus.emit("autovalidation:stopped", [:])
     }
 
+    // MARK: - Standalone Heartbeat
+
+    /// Start a standalone heartbeat timer, independent from auto-validation.
+    /// - Parameter licenseKey: The active license key (used for logging)
+    func startHeartbeat(licenseKey: String) {
+        stopHeartbeat()
+
+        let interval = config.heartbeatInterval
+        guard interval > 0 else {
+            log("Standalone heartbeat disabled (interval: \(interval))")
+            return
+        }
+
+        heartbeatTask = Task.detached { [weak self] in
+            while !Task.isCancelled {
+                do {
+                    try await Task.sleep(nanoseconds: UInt64(interval * 1_000_000_000))
+                } catch {
+                    break
+                }
+
+                await MainActor.run {
+                    Task { @MainActor [weak self] in
+                        guard let self else { return }
+                        do {
+                            try await self.heartbeat()
+                        } catch {
+                            self.log("Standalone heartbeat failed:", error)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Stop the standalone heartbeat timer
+    func stopHeartbeat() {
+        heartbeatTask?.cancel()
+        heartbeatTask = nil
+    }
+
     /// Perform auto-validation
     private func performAutoValidation(licenseKey: String) async {
         do {

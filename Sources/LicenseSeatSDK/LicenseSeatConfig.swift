@@ -50,6 +50,11 @@ public struct LicenseSeatConfig {
     /// Interval for automatic validation (in seconds)
     public var autoValidateInterval: TimeInterval
 
+    /// Interval for standalone heartbeat pings (in seconds).
+    /// Independent from auto-validation; provides more frequent liveness updates.
+    /// Set to 0 or negative to disable. Defaults to 300 (5 minutes).
+    public var heartbeatInterval: TimeInterval
+
     /// Interval for network recheck when offline (in seconds)
     public var networkRecheckInterval: TimeInterval
 
@@ -110,6 +115,7 @@ public struct LicenseSeatConfig {
         storagePrefix: String = "licenseseat_",
         deviceIdentifier: String? = nil,
         autoValidateInterval: TimeInterval = 3600,
+        heartbeatInterval: TimeInterval = 300,
         networkRecheckInterval: TimeInterval = 30,
         maxRetries: Int = 3,
         retryDelay: TimeInterval = 1,
@@ -126,6 +132,7 @@ public struct LicenseSeatConfig {
         self.storagePrefix = storagePrefix
         self.deviceIdentifier = deviceIdentifier
         self.autoValidateInterval = autoValidateInterval
+        self.heartbeatInterval = heartbeatInterval
         self.networkRecheckInterval = networkRecheckInterval
         self.maxRetries = maxRetries
         self.retryDelay = retryDelay
