@@ -16,6 +16,7 @@ final class TelemetryPayloadTests: XCTestCase {
     func testCollectReturnsAllRequiredFields() {
         let payload = TelemetryPayload.collect()
 
+        XCTAssertEqual(payload.sdkName, "swift")
         XCTAssertEqual(payload.sdkVersion, LicenseSeatConfig.sdkVersion)
         XCTAssertFalse(payload.osName.isEmpty)
         XCTAssertFalse(payload.osVersion.isEmpty)
@@ -133,6 +134,7 @@ final class TelemetryPayloadTests: XCTestCase {
         let dict = payload.toDictionary()
 
         // Required fields (always present)
+        XCTAssertEqual(dict["sdk_name"] as? String, "swift")
         XCTAssertNotNil(dict["sdk_version"])
         XCTAssertNotNil(dict["os_name"])
         XCTAssertNotNil(dict["os_version"])
@@ -308,6 +310,7 @@ final class TelemetryAPIIntegrationTests: XCTestCase {
         XCTAssertNotNil(telemetry, "telemetry key should be present in POST body")
 
         // Check all fields
+        XCTAssertEqual(telemetry?["sdk_name"] as? String, "swift")
         XCTAssertEqual(telemetry?["sdk_version"] as? String, LicenseSeatConfig.sdkVersion)
         XCTAssertEqual(telemetry?["platform"] as? String, "native")
         XCTAssertNotNil(telemetry?["os_name"])
