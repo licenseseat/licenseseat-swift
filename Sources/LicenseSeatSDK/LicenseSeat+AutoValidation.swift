@@ -86,13 +86,13 @@ extension LicenseSeat {
                     break
                 }
 
+                guard let strongSelf = self else { break }
                 await MainActor.run {
-                    Task { @MainActor [weak self] in
-                        guard let self else { return }
+                    Task { @MainActor in
                         do {
-                            try await self.heartbeat()
+                            try await strongSelf.heartbeat()
                         } catch {
-                            self.log("Standalone heartbeat failed:", error)
+                            strongSelf.log("Standalone heartbeat failed:", error)
                         }
                     }
                 }
