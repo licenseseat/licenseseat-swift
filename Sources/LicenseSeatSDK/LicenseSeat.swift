@@ -108,6 +108,9 @@ public final class LicenseSeat {
     /// Concurrency task for automatic validation (run-loop independent)
     internal var validationTask: Task<Void, Never>?
 
+    /// Concurrency task for standalone heartbeat pings
+    internal var heartbeatTask: Task<Void, Never>?
+
     /// Timer for connectivity polling (fallback when NWPathMonitor unavailable)
     internal var connectivityTimer: Timer?
 
@@ -169,9 +172,10 @@ public final class LicenseSeat {
                 }
             }
 
-            // Start auto-validation if API key is configured
+            // Start auto-validation and heartbeat if API key is configured
             if config.apiKey != nil {
                 startAutoValidation(licenseKey: cachedLicense.licenseKey)
+                startHeartbeat(licenseKey: cachedLicense.licenseKey)
 
                 // Background validation
                 Task {
@@ -245,8 +249,9 @@ public final class LicenseSeat {
 
             cache.setLicense(license)
 
-            // Start auto-validation
+            // Start auto-validation and heartbeat
             startAutoValidation(licenseKey: licenseKey)
+            startHeartbeat(licenseKey: licenseKey)
 
             // Sync offline assets
             Task {
@@ -374,6 +379,7 @@ public final class LicenseSeat {
             cache.clearLicense()
             cache.clearOfflineToken()
             stopAutoValidation()
+            stopHeartbeat()
             stopOfflineRefresh()
         }
 
@@ -410,6 +416,31 @@ public final class LicenseSeat {
             eventBus.emit("deactivation:error", ["error": error, "license": license])
             throw error
         }
+    }
+
+    /// Send a heartbeat for the current license
+    /// - Throws: ``LicenseSeatError/productSlugRequired`` if product slug is not configured
+    public func heartbeat() async throws {
+        guard let productSlug = config.productSlug else {
+            throw LicenseSeatError.productSlugRequired
+        }
+
+        guard let license = cache.getLicense() else {
+            log("No active license for heartbeat")
+            return
+        }
+
+        let deviceId = license.deviceId
+
+        let body: [String: Any] = ["device_id": deviceId]
+
+        let _: HeartbeatResponse = try await apiClient.post(
+            path: "/products/\(productSlug)/licenses/\(license.licenseKey)/heartbeat",
+            body: body
+        )
+
+        eventBus.emit("heartbeat:success", [:])
+        log("Heartbeat sent successfully")
     }
 
     /// Check if a specific entitlement is active
@@ -481,6 +512,7 @@ public final class LicenseSeat {
     /// Reset SDK state
     public func reset() {
         stopAutoValidation()
+        stopHeartbeat()
         stopOfflineRefresh()
         cache.clear()
         lastOfflineValidation = nil
@@ -491,6 +523,7 @@ public final class LicenseSeat {
     public func purgeCachedLicense() {
         cache.clear()
         stopAutoValidation()
+        stopHeartbeat()
         stopOfflineRefresh()
         currentAutoLicenseKey = nil
         lastOfflineValidation = nil
@@ -590,6 +623,7 @@ public final class LicenseSeat {
         connectivityTimer?.invalidate()
         offlineRefreshTimer?.invalidate()
         validationTask?.cancel()
+        heartbeatTask?.cancel()
         #if canImport(Network)
         networkMonitor?.cancel()
         #endif

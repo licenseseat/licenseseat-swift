@@ -143,6 +143,7 @@ private final class EventSubscription<S: Subscriber>: Subscription where S.Input
                 "offlineLicense:fetching", "offlineLicense:fetched",
                 "offlineLicense:fetchError", "offlineLicense:ready",
                 "offlineLicense:verified", "offlineLicense:verificationFailed",
+                "heartbeat:success", "heartbeat:error",
                 "auth_test:start", "auth_test:success", "auth_test:error",
                 "sdk:error", "sdk:reset",
                 "license:revoked"

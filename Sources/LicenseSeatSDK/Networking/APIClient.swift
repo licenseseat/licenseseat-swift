@@ -119,7 +119,12 @@ final class APIClient {
                 if let bodyData = bodyData {
                     request.httpBody = bodyData
                 } else if let body = body {
-                    request.httpBody = try JSONSerialization.data(withJSONObject: body)
+                    if method == "POST", var bodyDict = body as? [String: Any], config.telemetryEnabled {
+                        bodyDict["telemetry"] = TelemetryPayload.collect().toDictionary()
+                        request.httpBody = try JSONSerialization.data(withJSONObject: bodyDict)
+                    } else {
+                        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+                    }
                 }
                 
                 // Make request

@@ -27,7 +27,7 @@ public struct LicenseSeatConfig {
     // MARK: - Constants
 
     /// The current SDK version. Single source of truth for version information.
-    public static let sdkVersion = "0.3.1"
+    public static let sdkVersion = "0.4.0"
 
     /// The production API base URL (v1). Single source of truth for the default endpoint.
     public static let productionAPIBaseURL = "https://licenseseat.com/api/v1"
@@ -50,6 +50,11 @@ public struct LicenseSeatConfig {
     /// Interval for automatic validation (in seconds)
     public var autoValidateInterval: TimeInterval
 
+    /// Interval for standalone heartbeat pings (in seconds).
+    /// Independent from auto-validation; provides more frequent liveness updates.
+    /// Set to 0 or negative to disable. Defaults to 300 (5 minutes).
+    public var heartbeatInterval: TimeInterval
+
     /// Interval for network recheck when offline (in seconds)
     public var networkRecheckInterval: TimeInterval
 
@@ -61,6 +66,16 @@ public struct LicenseSeatConfig {
 
     /// Whether to enable debug logging
     public var debug: Bool
+
+    /// Whether to include device telemetry (OS, platform, app version, etc.) with API requests.
+    ///
+    /// Telemetry helps power per-product analytics in the LicenseSeat dashboard (DAU/MAU,
+    /// version adoption, platform distribution). No personally identifiable information is
+    /// collected — see the Telemetry & Privacy section in the README for details.
+    ///
+    /// Set to `false` to disable telemetry entirely (e.g., for GDPR compliance).
+    /// Defaults to `true`.
+    public var telemetryEnabled: Bool
 
     /// Interval for refreshing offline token (in seconds)
     public var offlineTokenRefreshInterval: TimeInterval
@@ -100,10 +115,12 @@ public struct LicenseSeatConfig {
         storagePrefix: String = "licenseseat_",
         deviceIdentifier: String? = nil,
         autoValidateInterval: TimeInterval = 3600,
+        heartbeatInterval: TimeInterval = 300,
         networkRecheckInterval: TimeInterval = 30,
         maxRetries: Int = 3,
         retryDelay: TimeInterval = 1,
         debug: Bool = false,
+        telemetryEnabled: Bool = true,
         offlineTokenRefreshInterval: TimeInterval = 259200,
         offlineFallbackMode: OfflineFallbackMode = .networkOnly,
         maxOfflineDays: Int = 0,
@@ -115,10 +132,12 @@ public struct LicenseSeatConfig {
         self.storagePrefix = storagePrefix
         self.deviceIdentifier = deviceIdentifier
         self.autoValidateInterval = autoValidateInterval
+        self.heartbeatInterval = heartbeatInterval
         self.networkRecheckInterval = networkRecheckInterval
         self.maxRetries = maxRetries
         self.retryDelay = retryDelay
         self.debug = debug
+        self.telemetryEnabled = telemetryEnabled
         self.offlineTokenRefreshInterval = offlineTokenRefreshInterval
         self.offlineFallbackMode = offlineFallbackMode
         self.maxOfflineDays = maxOfflineDays

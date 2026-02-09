@@ -5,6 +5,16 @@ All notable changes to LicenseSeat will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-02-09
+
+### Added
+- Auto-collected device telemetry sent with every API request (17 fields: sdk_name, sdk_version, os_name, os_version, platform, device_model, device_type, architecture, cpu_cores, memory_gb, locale, language, timezone, app_version, app_build, screen_resolution, display_scale)
+- Heartbeat endpoint (`heartbeat()`) for periodic health-check pings
+- Auto-heartbeat timer that runs alongside auto-validation (default: every 5 minutes)
+- `heartbeatInterval` configuration option (default 300 seconds, set to 0 to disable)
+- `telemetryEnabled` configuration option to opt out of telemetry (default `true`)
+- `heartbeat:success` event emitted on successful heartbeat pings
+
 ## [1.0.0] - 2025-06-20
 
 ### Added
@@ -37,4 +47,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Clock skew detection (±5 minutes default)
 - Secure storage with platform-appropriate mechanisms
 
-[1.0.0]: https://github.com/licenseseat/licenseseat-swift/releases/tag/v1.0.0 
+[0.4.0]: https://github.com/licenseseat/licenseseat-swift/releases/tag/v0.4.0
+[1.0.0]: https://github.com/licenseseat/licenseseat-swift/releases/tag/v1.0.0
