@@ -7,7 +7,7 @@ let package = Package(
     dependencies: [
         // Use published SDK from GitHub
         // For local development, change to: .package(path: "..")
-        .package(url: "https://github.com/licenseseat/licenseseat-swift.git", from: "0.3.1")
+        .package(url: "https://github.com/licenseseat/licenseseat-swift.git", from: "0.4.0")
     ],
     targets: [
         .executableTarget(

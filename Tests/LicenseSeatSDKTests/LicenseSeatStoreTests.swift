@@ -128,7 +128,7 @@ final class LicenseSeatStoreTests: XCTestCase {
                 let data = try JSONSerialization.data(withJSONObject: result)
                 let resp = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: headers)!
                 return (resp, data)
-            } else if path.contains("/offline-token") {
+            } else if path.contains("/offline_token") {
                 // Return v1 OfflineTokenResponse
                 let offlineToken: [String: Any] = [
                     "object": "offline_token",
@@ -156,7 +156,7 @@ final class LicenseSeatStoreTests: XCTestCase {
                 let data = try JSONSerialization.data(withJSONObject: offlineToken)
                 let resp = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: headers)!
                 return (resp, data)
-            } else if path.contains("/signing-keys/") {
+            } else if path.contains("/signing_keys/") {
                 // Return v1 SigningKeyResponse
                 let publicKey: [String: Any] = [
                     "object": "signing_key",

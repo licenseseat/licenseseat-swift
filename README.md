@@ -511,7 +511,7 @@ struct Signature {
 ```
 
 The SDK verifies offline tokens by:
-1. Fetching the public key from `/signing-keys/{keyId}`
+1. Fetching the public key from `/signing_keys/{keyId}`
 2. Verifying the Ed25519 signature against the canonical JSON
 3. Checking token expiration (`exp`), not-before (`nbf`), and license expiration
 4. Validating the grace period based on last online validation
