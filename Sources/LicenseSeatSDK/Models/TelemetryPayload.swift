@@ -14,6 +14,7 @@ import AppKit
 #endif
 
 struct TelemetryPayload: Encodable, Sendable {
+    let sdkName: String
     let sdkVersion: String
     let osName: String
     let osVersion: String
@@ -31,9 +32,30 @@ struct TelemetryPayload: Encodable, Sendable {
     let screenResolution: String?
     let displayScale: Double?
 
+    enum CodingKeys: String, CodingKey {
+        case sdkName = "sdk_name"
+        case sdkVersion = "sdk_version"
+        case osName = "os_name"
+        case osVersion = "os_version"
+        case platform
+        case deviceModel = "device_model"
+        case locale
+        case timezone
+        case appVersion = "app_version"
+        case appBuild = "app_build"
+        case deviceType = "device_type"
+        case architecture
+        case cpuCores = "cpu_cores"
+        case memoryGb = "memory_gb"
+        case language
+        case screenResolution = "screen_resolution"
+        case displayScale = "display_scale"
+    }
+
     static func collect() -> TelemetryPayload {
         let version = ProcessInfo.processInfo.operatingSystemVersion
         return TelemetryPayload(
+            sdkName: "swift",
             sdkVersion: LicenseSeatConfig.sdkVersion,
             osName: currentOSName(),
             osVersion: "\(version.majorVersion).\(version.minorVersion).\(version.patchVersion)",
@@ -55,6 +77,7 @@ struct TelemetryPayload: Encodable, Sendable {
 
     func toDictionary() -> [String: Any] {
         var dict: [String: Any] = [
+            "sdk_name": sdkName,
             "sdk_version": sdkVersion,
             "os_name": osName,
             "os_version": osVersion,
