@@ -1,6 +1,6 @@
 # LicenseSeat Swift SDK
 
-[![Swift 5.9+](https://img.shields.io/badge/Swift-5.9+-F05138.svg?style=flat)](https://swift.org)
+[![Swift 5.10+](https://img.shields.io/badge/Swift-5.10+-F05138.svg?style=flat)](https://swift.org)
 [![Platforms](https://img.shields.io/badge/Platforms-macOS%2012+%20|%20iOS%2013+%20|%20tvOS%2013+%20|%20watchOS%208+-blue.svg)](https://swift.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE.txt)
 [![CI](https://github.com/licenseseat/licenseseat-swift/actions/workflows/ci.yml/badge.svg)](https://github.com/licenseseat/licenseseat-swift/actions/workflows/ci.yml)
@@ -65,7 +65,7 @@ The official Swift SDK for [LicenseSeat](https://licenseseat.com) — the simple
     - [Generate Documentation Locally](#generate-documentation-locally)
   - [Testing](#testing)
   - [Integration Tests (StressTest)](#integration-tests-stresstest)
-  - [Migration from v1 SDK](#migration-from-v1-sdk)
+  - [Migration to v0.4.2](#migration-to-v042)
   - [License](#license)
   - [Support](#support)
 
@@ -73,13 +73,15 @@ The official Swift SDK for [LicenseSeat](https://licenseseat.com) — the simple
 
 ## Installation
 
+LicenseSeat requires Swift 5.10 or newer.
+
 ### Swift Package Manager
 
 Add LicenseSeat to your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/licenseseat/licenseseat-swift.git", from: "0.3.1")
+    .package(url: "https://github.com/licenseseat/licenseseat-swift.git", from: "0.4.2")
 ]
 ```
 
@@ -375,9 +377,9 @@ if result.valid {
 | `retryDelay`                | `TimeInterval`        | `1`                                | Base retry delay (exponential backoff)   |
 | `offlineFallbackMode`       | `OfflineFallbackMode` | `.networkOnly`                     | Offline fallback strategy                |
 | `offlineTokenRefreshInterval` | `TimeInterval`      | `259200` (72 hours)                | Offline token refresh interval           |
-| `maxOfflineDays`            | `Int`                 | `0`                                | Grace period for offline use             |
+| `maxOfflineDays`            | `Int`                 | `0`                                | Optional maximum signed-grant age (`0` disables this extra cap; token/license expiry still apply) |
 | `maxClockSkewMs`            | `TimeInterval`        | `300000` (5 min)                   | Clock tamper tolerance                   |
-| `telemetryEnabled`          | `Bool`                | `true`                             | Send device telemetry with API requests  |
+| `telemetryEnabled`          | `Bool`                | `true`                             | Send device telemetry with supported licensing POST requests |
 | `debug`                     | `Bool`                | `false`                            | Enable debug logging                     |
 
 ### Environment-Based Configuration
@@ -476,8 +478,8 @@ LicenseSeatStore.shared.configure(
 
 | Mode          | Description                                                                                         |
 | ------------- | --------------------------------------------------------------------------------------------------- |
-| `networkOnly` | Falls back to offline validation only for network errors (timeouts, connectivity issues, 5xx responses). Business logic errors (4xx) immediately invalidate the license. |
-| `always`      | Always attempts offline validation on any failure.                                                   |
+| `networkOnly` | Falls back only for transport failures, timeouts, and 5xx responses. Ordinary auth/scope/request 4xx errors neither use fallback nor erase a valid cache; authoritative license-state errors do invalidate it. |
+| `always`      | Attempts offline validation for nonterminal failures as an explicit compatibility policy. Authoritative revoked/expired/suspended/not-active responses still invalidate cached grants. |
 
 ### Offline Token Structure
 
@@ -492,7 +494,7 @@ struct TokenPayload {
     let planKey: String         // License plan
     let mode: String            // License mode (e.g., "hardware_locked")
     let seatLimit: Int?         // Maximum seats
-    let deviceId: String        // Bound device ID
+    let deviceId: String?       // Bound device fingerprint (`fingerprint` on the wire)
     let iat: Int                // Issued at (Unix timestamp)
     let exp: Int                // Expires at (Unix timestamp)
     let nbf: Int                // Not before (Unix timestamp)
@@ -511,11 +513,14 @@ struct Signature {
 ```
 
 The SDK verifies offline tokens by:
-1. Fetching the public key from `/signing_keys/{keyId}`
-2. Verifying the Ed25519 signature against the canonical JSON
-3. Checking token expiration (`exp`), not-before (`nbf`), and license expiration
-4. Validating the grace period based on last online validation
-5. Detecting clock tampering with `maxClockSkewMs` tolerance
+1. Requiring the Ed25519 algorithm and matching signature/token key IDs
+2. Reconstructing the token and requiring it to match the signed canonical payload
+3. Verifying the Ed25519 signature with `/signing_keys/{keyId}`
+4. Binding the signed license, product, and fingerprint to the protected cached activation
+5. Checking schema, `iat`, `exp`, `nbf`, underlying license expiry, and the optional `maxOfflineDays` cap against signed `iat`
+6. Detecting local clock rollback with `maxClockSkewMs` tolerance
+
+On Apple platforms the activation, offline token, signing keys, rollback timestamp, and default app-scoped installation identifier are stored in Keychain with `AfterFirstUnlockThisDeviceOnly`. Existing 0.4.x UserDefaults/Application Support data is migrated on first access and removed only after the protected write succeeds. Resetting a license removes grant state but intentionally retains the installation identifier so a future activation uses the same seat identity.
 
 ---
 
@@ -528,7 +533,7 @@ The SDK includes a heartbeat mechanism that sends periodic health-check pings to
 Send a one-off heartbeat at any time:
 
 ```swift
-try await LicenseSeatStore.shared.seat?.heartbeat()
+try await LicenseSeatStore.shared.heartbeat()
 ```
 
 ### Auto-Heartbeat
@@ -546,7 +551,9 @@ LicenseSeatStore.shared.configure(
 
 Set `heartbeatInterval` to `0` to disable auto-heartbeat while keeping auto-validation active.
 
-A heartbeat is also sent automatically after every auto-validation cycle, so even with auto-heartbeat disabled the server receives periodic liveness signals whenever validation runs.
+Auto-validation and heartbeat use independent schedules. Disabling heartbeat
+does not disable validation, and disabling validation does not create extra
+heartbeat traffic.
 
 ---
 
@@ -612,7 +619,7 @@ The v1 API uses Stripe-style conventions with `object` fields identifying respon
 {
   "object": "activation",
   "id": 12345,
-  "device_id": "mac_abc123",
+  "fingerprint": "mac_abc123",
   "device_name": "User's MacBook",
   "license_key": "LICENSE-KEY",
   "activated_at": "2025-01-15T10:30:00Z",
@@ -681,21 +688,34 @@ Common error codes:
 - `license_expired` — License has expired
 - `license_suspended` — License has been suspended
 - `seat_limit_exceeded` — No available seats
-- `device_mismatch` — Device ID doesn't match activation
+- `device_not_activated` — Fingerprint does not have an active seat
 - `product_mismatch` — License not valid for this product
 
 ---
 
 ## Telemetry & Privacy
 
-The SDK automatically collects non-personally identifiable device telemetry and sends it with every API request. This powers per-product analytics in the LicenseSeat dashboard: DAU/MAU, version adoption, platform distribution, and more.
+LicenseSeat transmits the identifiers needed to activate and validate a license. It also sends optional device and application telemetry by default to power per-product analytics such as DAU/MAU, version adoption, and platform distribution. These values are not advertising data, but persistent identifiers, request activity, coarse location, and diagnostic attributes can still be personal data or data linked to a user under platform policy and privacy law.
 
-### What's Collected
+The package bundles `PrivacyInfo.xcprivacy`. It declares User ID, Device ID, Coarse Location, Product Interaction, and Other Diagnostic Data as linked to the user, used for app functionality and/or analytics, and not used for tracking. It also declares the SDK's app-local UserDefaults compatibility access with Apple's `CA92.1` required reason. Applications must still describe their complete practices—including LicenseSeat and any developer-supplied metadata—in App Store Connect and their privacy policy.
+
+### Licensing and Service Data
+
+The following data is required for the licensing service and is not disabled by `telemetryEnabled`:
+
+- The customer license key, sent as an account-level licensing identifier.
+- A random app-scoped installation identifier, sent under the canonical wire name `fingerprint` for seat binding. The default identifier is not derived from hardware characteristics and is not IDFA or IDFV.
+- Licensing API interactions and heartbeat timing needed to maintain the activation and calculate service activity.
+- The request's source IP address, which is visible to the LicenseSeat service, retained with licensing activity, and used to derive coarse country/city analytics. The SDK does not separately read the device's IP address or place it in the JSON body.
+
+License keys and installation identifiers are sent together and are therefore treated as linked data. LicenseSeat does not use this data for cross-company advertising tracking.
+
+### Optional Telemetry (Enabled by Default)
 
 | Field | Example | Purpose |
 |-------|---------|---------|
 | `sdk_name` | `swift` | Identifies the SDK platform |
-| `sdk_version` | `0.4.0` | SDK adoption tracking |
+| `sdk_version` | `0.4.2` | SDK adoption tracking |
 | `os_name` | `macOS` | Platform distribution |
 | `os_version` | `15.2.0` | OS breakdown |
 | `platform` | `native` | Runtime platform |
@@ -712,21 +732,22 @@ The SDK automatically collects non-personally identifiable device telemetry and 
 | `screen_resolution` | `3024x1964` | Native screen resolution in pixels |
 | `display_scale` | `2.0` | Display scale factor (Retina = 2.0) |
 
-The `device_id` (hardware UUID on macOS, composite hash on iOS) is sent as a top-level parameter for seat management. IP addresses are resolved server-side for country/city-level geolocation — the SDK never reads or sends the device's IP address itself.
+By default, the SDK creates the app-scoped installation identifier, protects it in Keychain on Apple platforms, and migrates older UserDefaults identifiers without changing the active seat. Applications can provide their own stable identifier through `deviceIdentifier` or `ActivationOptions.deviceId`. The SDK still decodes legacy `device_id` and `device_fingerprint` response aliases.
 
-`app_version` and `app_build` are read automatically from the host app's `Info.plist`. If your app bundles these values differently, you can override them in configuration — see [Configuration Options](#configuration-options).
+`app_version` and `app_build` are read automatically from the host app's `Info.plist` when present.
 
-### What's NOT Collected
+### What the SDK Does Not Automatically Collect
 
-- No names, emails, or user accounts
-- No IP addresses from the device
-- No file paths, browsing history, or app usage patterns
+- No names, emails, contacts, or host-app account records
+- No file paths, browsing history, message content, or detailed in-app interaction events
 - No advertising identifiers (IDFA/IDFV)
 - No cross-app tracking
 
+`ActivationOptions.metadata` is developer-controlled and is transmitted exactly as supplied. Do not place names, emails, secrets, or other data there unless the application intentionally collects, secures, retains, and discloses it.
+
 ### Disabling Telemetry
 
-If your app needs to comply with GDPR or similar privacy regulations, you can disable telemetry entirely:
+Applications that do not need LicenseSeat analytics can disable the optional telemetry object:
 
 ```swift
 LicenseSeatStore.shared.configure(
@@ -737,7 +758,9 @@ LicenseSeatStore.shared.configure(
 }
 ```
 
-When disabled, API requests still work normally — the SDK simply omits the `telemetry` object from request bodies. License activation, validation, deactivation, and heartbeat all function the same way.
+When disabled, API requests still work normally and omit the `telemetry` object. The license key, installation identifier, licensing interactions, and server-visible source IP remain necessary for activation, validation, deactivation, heartbeat, and offline grants. Disabling telemetry alone does not determine GDPR, App Store, or other legal compliance; applications must provide the disclosures and controls appropriate to their own data flow.
+
+See Apple's [privacy manifest guidance](https://developer.apple.com/documentation/bundleresources/privacy-manifest-files) and [App privacy details](https://developer.apple.com/app-store/app-privacy-details/) when preparing an App Store submission.
 
 ---
 
@@ -745,10 +768,11 @@ When disabled, API requests still work normally — the SDK simply omits the `te
 
 | Platform | Minimum Version | Notes                                |
 | -------- | --------------- | ------------------------------------ |
-| macOS    | 12.0+           | Full support including hardware UUID |
+| macOS    | 12.0+           | Full support with Keychain-backed installation ID |
 | iOS      | 13.0+           | Full support                         |
 | tvOS     | 13.0+           | Full support                         |
 | watchOS  | 8.0+            | Core features (no Network.framework) |
+| Linux    | Swift 6.2.4     | Strict-concurrency build and SDK test support |
 
 ---
 
@@ -762,7 +786,7 @@ swift run --package-path Examples/LicenseSeatExample
 
 # Or with custom environment
 export LICENSESEAT_API_URL=https://licenseseat.com/api/v1
-export LICENSESEAT_API_KEY=sk_test_123
+export LICENSESEAT_API_KEY=pk_test_123
 export LICENSESEAT_PRODUCT_SLUG=my-app
 swift run --package-path Examples/LicenseSeatExample
 ```
@@ -775,13 +799,14 @@ The CLI lets you test activation, validation, entitlements, and deactivation int
 
 ### For SDK Users
 
-To use LicenseSeat in your project, simply add the Swift Package Manager dependency as shown in [Installation](#installation). No additional setup is required—SPM handles fetching and building automatically.
+To use LicenseSeat in your project, add the Swift Package Manager dependency as shown in [Installation](#installation). SPM handles fetching and building; the host application must still provide its complete privacy disclosures as described in [Telemetry & Privacy](#telemetry--privacy).
 
 ### For SDK Maintainers: Publishing a New Version
 
 1. **Ensure all tests pass:**
    ```bash
-   swift test
+   swift test --parallel -Xswiftc -strict-concurrency=complete -Xswiftc -warnings-as-errors
+   Scripts/test-linux.sh  # inside the pinned Swift 6.2.4 Linux environment
    ```
 
 2. **Update version references** (if any hardcoded versions exist in documentation)
@@ -789,8 +814,8 @@ To use LicenseSeat in your project, simply add the Swift Package Manager depende
 3. **Create and push a git tag:**
    ```bash
    # Semantic versioning: MAJOR.MINOR.PATCH
-   git tag v0.3.1
-   git push origin v0.3.1
+   git tag vX.Y.Z
+   git push origin vX.Y.Z
    ```
 
 4. **Create a GitHub Release** (optional but recommended):
@@ -803,24 +828,27 @@ That's it! Swift Package Manager uses git tags for versioning. Once a tag is pus
 
 ```swift
 // Users can now specify the new version
-.package(url: "https://github.com/licenseseat/licenseseat-swift.git", from: "0.3.1")
+.package(url: "https://github.com/licenseseat/licenseseat-swift.git", from: "0.4.2")
 ```
 
 ### Version Requirements for Users
 
 | Requirement      | Example                         | Description                          |
 | ---------------- | ------------------------------- | ------------------------------------ |
-| `from:`          | `from: "0.3.1"`                 | Any version >= 0.3.1 (recommended)   |
-| `exact:`         | `exact: "0.3.1"`                | Exactly version 0.3.1                |
-| `upToNextMajor:` | `.upToNextMajor(from: "0.3.1")` | 0.x.x versions only                  |
-| `upToNextMinor:` | `.upToNextMinor(from: "0.3.1")` | 0.3.x versions only                  |
-| `branch:`        | `branch: "main"`                | Latest from branch (for development) |
+| `from:`          | `from: "0.4.2"`                 | Any version >= 0.4.2 (recommended)   |
+| `exact:`         | `exact: "0.4.2"`                | Exactly version 0.4.2                |
+| `upToNextMajor:` | `.upToNextMajor(from: "0.4.2")` | 0.x.x versions only                  |
+| `upToNextMinor:` | `.upToNextMinor(from: "0.4.2")` | 0.4.x versions only                  |
+| `branch:`        | `branch: "master"`              | Latest from branch (for development) |
 
 ### CI/CD
 
 The repository includes GitHub Actions CI that runs on every push and PR:
 - Tests on macOS (Xcode 15.4, 16.2)
+- Strict-concurrency build and every test on Linux (Swift 6.2.4)
 - SwiftLint for code style
+- Public API compatibility against the latest release tag
+- Apple privacy-manifest validation
 - DocC documentation generation
 
 ---
@@ -860,7 +888,7 @@ swift test --filter EntitlementTests
 swift test --enable-code-coverage
 ```
 
-The SDK includes 70+ tests covering:
+The SDK includes 170+ tests covering:
 - License activation, validation, and deactivation
 - Product-scoped API endpoints
 - Entitlement checking and parsing
@@ -879,15 +907,20 @@ The `StressTest` directory contains a comprehensive end-to-end integration test 
 
 ### What It Tests
 
-The integration test simulates a real macOS app customer journey:
+The integration test exercises the behavior that requires a real API and database:
 
-1. **First Launch & Activation** — Fresh install, license key entry, activation
-2. **Auto-Validation Cycles** — Background validation with configurable intervals
-3. **Offline Token Caching** — Ed25519 signed tokens for offline resilience
-4. **Security & Tampering Detection** — Forged keys, wrong products, missing credentials
-5. **License Persistence** — Data survives app restarts
-6. **SwiftUI Integration** — LicenseSeatStore singleton reactive updates
-7. **Deactivation & Re-activation** — Seat management for device transfers
+1. **Activation and validation** with default telemetry
+2. **Single, rapid, and spaced heartbeats**
+3. **All enriched telemetry operations**, with no partial-success allowance
+4. **Activation, validation, and heartbeat with telemetry disabled**
+5. **Standalone heartbeat scheduling** when auto-validation is disabled
+6. **Independent auto-validation and heartbeat schedules**
+7. **Concurrent validation and heartbeat requests**, including intentional latest-request-wins supersession
+8. **Offline-token and signing-key download plus local Ed25519 verification**
+9. **Full activation → validation → heartbeat → deactivation lifecycle**
+10. **Lifecycle event delivery and seat cleanup between scenarios**
+
+Malformed signatures, identity substitution, cache races, rollback detection, persistence migration, and SwiftUI/Combine state are covered deterministically by the package test suite rather than mutating a live account.
 
 ### Running Integration Tests
 
@@ -899,13 +932,16 @@ cd StressTest
 export LICENSESEAT_API_KEY="your-api-key"
 export LICENSESEAT_LICENSE_KEY="your-test-license-key"
 export LICENSESEAT_PRODUCT_SLUG="your-product-slug"
+export LICENSESEAT_API_URL="https://licenseseat.com/api/v1" # optional; localhost is the default
 
-# For local SDK development, modify Package.swift to use local path:
-# .package(path: "..")
+# The checked-in StressTest package already resolves the repository-local SDK.
 
 # Build and run
 swift run
 ```
+
+The harness exits nonzero when credentials are missing or any scenario fails, so it can be used as a real release gate rather than a log-only demo.
+It activates and deactivates the supplied license repeatedly; use a dedicated test license and confirm the final deactivation before reusing that seat if the process is interrupted.
 
 ### Environment Variables
 
@@ -914,38 +950,36 @@ swift run
 | `LICENSESEAT_API_KEY` | Your LicenseSeat API key |
 | `LICENSESEAT_LICENSE_KEY` | A valid license key for testing |
 | `LICENSESEAT_PRODUCT_SLUG` | The product slug matching your license |
+| `LICENSESEAT_API_URL` | Optional API base URL; defaults to `http://localhost:3000/api/v1` |
 
 ### Sample Output
 
 ```
 ======================================================================
-  SCENARIO 1: First App Launch (Fresh Install)
+  SCENARIO 1: Activation WITH Telemetry (default)
 ======================================================================
 
--> Testing: Initial state check (no license)
-   ✅ PASS: App shows activation screen (no license)
-
--> Testing: User enters license key and clicks 'Activate'
-   ✅ PASS: Activation successful!
-   📝 Device ID: mac_abc123
-   📝 Activation ID: act-12345-uuid
+-> Testing: Activate license (telemetry enabled)
+   PASS: Activation successful with telemetry
+   Device ID: mac-...
+   Activation ID: ...
 
 ...
 
 ======================================================================
   RESULTS
 ======================================================================
-  Passed: 23
+  Passed: ...
   Failed: 0
-  Total:  23
+  Total:  ...
 ======================================================================
 
-🎉 ALL SCENARIOS PASSED!
+ALL TESTS PASSED!
 ```
 
 ---
 
-## Migration from v1 SDK
+## Migration to v0.4.2
 
 If you're upgrading from an earlier version of the SDK, here are the key changes:
 
@@ -953,9 +987,12 @@ If you're upgrading from an earlier version of the SDK, here are the key changes
 
 ```swift
 // Before (v0.x)
-LicenseSeat.configure(apiKey: "YOUR_API_KEY")
+LicenseSeat.configure(
+    apiKey: "YOUR_API_KEY",
+    productSlug: "your-product"
+)
 
-// After (v2.0)
+// Current
 LicenseSeatStore.shared.configure(
     apiKey: "YOUR_API_KEY",
     productSlug: "your-product"  // Now required
@@ -972,7 +1009,7 @@ The base URL has changed from `/api` to `/api/v1`:
 
 | Old Field           | New Field    |
 | ------------------- | ------------ |
-| `device_identifier` | `device_id`  |
+| `device_identifier` | `fingerprint` (wire format) / `deviceId` (Swift) |
 | `license_key`       | `key`        |
 | `reason_code`       | `error.code` |
 
@@ -983,7 +1020,7 @@ The base URL has changed from `/api` to `/api/v1`:
 config.offlineFallbackEnabled = true
 config.offlineLicenseRefreshInterval = 259200
 
-// After (v2.0)
+// Current
 config.offlineFallbackMode = .networkOnly  // or .always
 config.offlineTokenRefreshInterval = 259200
 ```
@@ -996,7 +1033,7 @@ catch let error as APIError {
     print(error.reasonCode)
 }
 
-// After (v2.0)
+// Current
 catch let error as APIError {
     print(error.code)     // Error code from error.code
     print(error.message)  // Error message from error.message

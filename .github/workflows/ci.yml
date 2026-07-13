@@ -10,6 +10,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   test-macos:
     name: Test on macOS (${{ matrix.xcode }})
@@ -25,7 +28,7 @@ jobs:
           - xcode: "16.2"
             runner: macos-15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Select Xcode ${{ matrix.xcode }}
         run: sudo xcode-select -s "/Applications/Xcode_${{ matrix.xcode }}.app/Contents/Developer"
@@ -33,8 +36,11 @@ jobs:
       - name: Swift version
         run: swift --version
 
+      - name: Validate privacy manifest
+        run: plutil -lint Sources/LicenseSeatSDK/Resources/PrivacyInfo.xcprivacy
+
       - name: Cache Swift packages
-        uses: actions/cache@v4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: .build
           key: ${{ runner.os }}-spm-${{ matrix.xcode }}-${{ hashFiles('Package.resolved') }}
@@ -47,23 +53,75 @@ jobs:
       - name: Run tests
         run: swift test -v
 
+  test-linux:
+    name: Test on Linux (Swift 6.2.4 strict concurrency)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    container: swift:6.2.4-jammy@sha256:1c1f422aee767a7f33b88bc3aee99cad5de4af8723fbee8a3ab6951a6879f929
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Swift version
+        run: swift --version
+
+      - name: Strict production build
+        run: >-
+          swift build
+          -Xswiftc -strict-concurrency=complete
+          -Xswiftc -warnings-as-errors
+
+      - name: Strict test suite
+        run: Scripts/test-linux.sh
+
+  integration-harnesses:
+    name: Build examples and live integration harness
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Select Xcode 16.2
+        run: sudo xcode-select -s /Applications/Xcode_16.2.app/Contents/Developer
+
+      - name: Build interactive example with strict concurrency
+        run: >-
+          swift build --package-path Examples/LicenseSeatExample
+          -Xswiftc -strict-concurrency=complete
+          -Xswiftc -warnings-as-errors
+
+      - name: Build live StressTest with strict concurrency
+        run: >-
+          swift build --package-path StressTest
+          -Xswiftc -strict-concurrency=complete
+          -Xswiftc -warnings-as-errors
+
   lint:
     name: SwiftLint
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Install SwiftLint
         run: brew install swiftlint
 
       - name: Run SwiftLint
-        run: swiftlint --quiet
+        run: swiftlint lint --strict --quiet
+
+  api-compatibility:
+    name: Public API compatibility
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+
+      - name: Reject source-breaking changes since the latest release
+        run: swift package diagnose-api-breaking-changes "$(git describe --tags --abbrev=0)"
 
   documentation:
     name: Build Documentation
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Build DocC
         run: |
@@ -90,7 +148,7 @@ jobs:
           EOF
 
       - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
           path: ./docs
 
@@ -104,4 +162,4 @@ jobs:
     steps:
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5.0.0

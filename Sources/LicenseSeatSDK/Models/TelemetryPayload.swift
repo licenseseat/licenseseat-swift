@@ -7,6 +7,9 @@
 //
 
 import Foundation
+#if canImport(Darwin)
+import Darwin
+#endif
 #if canImport(UIKit)
 import UIKit
 #elseif canImport(AppKit)
@@ -111,6 +114,8 @@ struct TelemetryPayload: Encodable, Sendable {
         return "watchOS"
         #elseif os(visionOS)
         return "visionOS"
+        #elseif os(Linux)
+        return "Linux"
         #else
         return "Unknown"
         #endif
@@ -121,12 +126,29 @@ struct TelemetryPayload: Encodable, Sendable {
     }
 
     private static func currentDeviceModel() -> String {
+        #if canImport(Darwin)
         var size = 0
         sysctlbyname("hw.model", nil, &size, nil, 0)
         guard size > 0 else { return "Unknown" }
         var model = [CChar](repeating: 0, count: size)
         sysctlbyname("hw.model", &model, &size, nil, 0)
         return String(cString: model)
+        #elseif os(Linux)
+        let modelPaths = [
+            "/sys/devices/virtual/dmi/id/product_name",
+            "/sys/firmware/devicetree/base/model"
+        ]
+        for path in modelPaths {
+            if let value = try? String(contentsOfFile: path, encoding: .utf8)
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+               !value.isEmpty {
+                return value
+            }
+        }
+        return "Linux"
+        #else
+        return "Unknown"
+        #endif
     }
 
     // MARK: - New telemetry helpers
@@ -140,6 +162,8 @@ struct TelemetryPayload: Encodable, Sendable {
         return "tv"
         #elseif os(visionOS)
         return "headset"
+        #elseif os(Linux)
+        return "unknown"
         #elseif canImport(UIKit)
         switch UIDevice.current.userInterfaceIdiom {
         case .phone:

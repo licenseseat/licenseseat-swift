@@ -16,14 +16,14 @@ import FoundationNetworking
 #endif
 @testable import LicenseSeat
 
+@MainActor
 final class APIClientTests: XCTestCase {
     private var config: LicenseSeatConfig!
     private var apiClient: APIClient!
     private var requestCount: Int!
     
-    override func setUp() {
-        super.setUp()
-        URLProtocol.registerClass(MockURLProtocol.self)
+    override func setUp() async throws {
+        _ = URLProtocol.registerClass(MockURLProtocol.self)
         MockURLProtocol.reset()
         requestCount = 0
         
@@ -41,9 +41,8 @@ final class APIClientTests: XCTestCase {
         apiClient = APIClient(config: config, session: session)
     }
     
-    override func tearDown() {
+    override func tearDown() async throws {
         URLProtocol.unregisterClass(MockURLProtocol.self)
-        super.tearDown()
     }
     
     func testSuccessfulGETRequest() async throws {
@@ -104,6 +103,28 @@ final class APIClientTests: XCTestCase {
         }
         XCTAssertEqual(attempts, 1)
     }
+
+    func testCancelledTransportIsNotRetriedOrReportedAsOffline() async {
+        var attempts = 0
+        var connectivityChanges: [Bool] = []
+        apiClient.onNetworkStatusChange = { connectivityChanges.append($0) }
+        MockURLProtocol.requestHandler = { _ in
+            attempts += 1
+            throw URLError(.cancelled)
+        }
+
+        do {
+            let _: TestResponse = try await apiClient.get(path: "/cancelled")
+            XCTFail("Expected cancellation")
+        } catch let error as URLError {
+            XCTAssertEqual(error.code, .cancelled)
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+
+        XCTAssertEqual(attempts, 1)
+        XCTAssertTrue(connectivityChanges.isEmpty)
+    }
     
     func testAuthHeaderPresent() async throws {
         MockURLProtocol.requestHandler = { request in
@@ -114,10 +135,220 @@ final class APIClientTests: XCTestCase {
         }
         let _: EmptyResponse = try await apiClient.get(path: "/auth-test")
     }
+
+    func testTypedResponseWithEmptySuccessBodyThrowsInsteadOfTrapping() async {
+        MockURLProtocol.requestHandler = { request in
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 204,
+                httpVersion: nil,
+                headerFields: nil
+            )!
+            return (response, Data())
+        }
+
+        do {
+            let _: TestResponse = try await apiClient.get(path: "/unexpected-empty-response")
+            XCTFail("A typed response must not accept an empty body")
+        } catch is DecodingError {
+            // Expected: malformed successful responses are surfaced as errors,
+            // never as an unconditional generic force-cast crash.
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+    }
+
+    func testRequestPreservesConfiguredBasePathAndNormalizesEndpointSlash() async throws {
+        config.apiBaseUrl = "https://api.test.com/api/v1/"
+        let conf = URLSessionConfiguration.ephemeral
+        conf.protocolClasses = [MockURLProtocol.self]
+        apiClient = APIClient(config: config, session: URLSession(configuration: conf))
+
+        MockURLProtocol.requestHandler = { request in
+            XCTAssertEqual(request.url?.absoluteString, "https://api.test.com/api/v1/ping")
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: nil
+            )!
+            return (response, Data("{\"message\":\"pong\"}".utf8))
+        }
+
+        let response: TestResponse = try await apiClient.get(path: "/ping")
+        XCTAssertEqual(response.message, "pong")
+    }
+
+    func testOpaquePathComponentsCannotChangeRouteStructure() async throws {
+        MockURLProtocol.requestHandler = { request in
+            XCTAssertEqual(
+                request.url?.absoluteString,
+                "https://api.test.com/signing_keys/..%2Fhealth%3Fadmin=1%23fragment"
+            )
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: nil
+            )!
+            return (response, Data())
+        }
+
+        let _: EmptyResponse = try await apiClient.get(
+            pathComponents: ["signing_keys", "../health?admin=1#fragment"]
+        )
+    }
+
+    func testRejectsPlainHTTPForNonLoopbackHostBeforeSendingRequest() async {
+        config.apiBaseUrl = "http://api.example.com/api/v1"
+        let conf = URLSessionConfiguration.ephemeral
+        conf.protocolClasses = [MockURLProtocol.self]
+        apiClient = APIClient(config: config, session: URLSession(configuration: conf))
+        var connectivityChanges = [Bool]()
+        apiClient.onNetworkStatusChange = { connectivityChanges.append($0) }
+        MockURLProtocol.requestHandler = { _ in
+            XCTFail("An invalid non-TLS request must not reach URLSession")
+            throw URLError(.badURL)
+        }
+
+        do {
+            let _: EmptyResponse = try await apiClient.get(path: "/health")
+            XCTFail("Expected an invalid base URL error")
+        } catch let error as APIError {
+            XCTAssertEqual(error.status, 0)
+            XCTAssertEqual(error.code, "invalid_base_url")
+            XCTAssertEqual(error.message, "Invalid API base URL")
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+        XCTAssertTrue(connectivityChanges.isEmpty)
+    }
+
+    func testHTTPTimeoutMarksTransportOffline() async {
+        var connectivityChanges = [Bool]()
+        apiClient.onNetworkStatusChange = { connectivityChanges.append($0) }
+        MockURLProtocol.requestHandler = { request in
+            let payload = ["error": ["code": "request_timeout", "message": "Timed out"]]
+            return (
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 408,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!,
+                try JSONSerialization.data(withJSONObject: payload)
+            )
+        }
+
+        do {
+            let _: EmptyResponse = try await apiClient.get(path: "/slow")
+            XCTFail("Expected request timeout")
+        } catch let error as APIError {
+            XCTAssertEqual(error.status, 408)
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+
+        XCTAssertEqual(connectivityChanges, [false])
+    }
+
+    func testAllowsPlainHTTPForLoopbackDevelopmentServer() async throws {
+        config.apiBaseUrl = "http://127.0.0.1:3000/api/v1"
+        let conf = URLSessionConfiguration.ephemeral
+        conf.protocolClasses = [MockURLProtocol.self]
+        apiClient = APIClient(config: config, session: URLSession(configuration: conf))
+
+        MockURLProtocol.requestHandler = { request in
+            XCTAssertEqual(request.url?.absoluteString, "http://127.0.0.1:3000/api/v1/health")
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: nil
+            )!
+            return (response, Data())
+        }
+
+        let _: EmptyResponse = try await apiClient.get(path: "/health")
+    }
+
+    func testNegativeRetryCountDoesNotTrapOrRetry() async {
+        config.maxRetries = -1
+        let conf = URLSessionConfiguration.ephemeral
+        conf.protocolClasses = [MockURLProtocol.self]
+        apiClient = APIClient(config: config, session: URLSession(configuration: conf))
+        var attempts = 0
+        MockURLProtocol.requestHandler = { request in
+            attempts += 1
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 503,
+                httpVersion: nil,
+                headerFields: nil
+            )!
+            return (response, Data())
+        }
+
+        do {
+            let _: EmptyResponse = try await apiClient.get(path: "/health")
+            XCTFail("Expected a server error")
+        } catch let error as APIError {
+            XCTAssertEqual(error.status, 503)
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+        XCTAssertEqual(attempts, 1)
+    }
+
+    func testNonFiniteRetryDelayDoesNotTrap() async throws {
+        config.maxRetries = 1
+        config.retryDelay = .infinity
+        let conf = URLSessionConfiguration.ephemeral
+        conf.protocolClasses = [MockURLProtocol.self]
+        apiClient = APIClient(config: config, session: URLSession(configuration: conf))
+        var attempts = 0
+        MockURLProtocol.requestHandler = { request in
+            attempts += 1
+            let status = attempts == 1 ? 503 : 200
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: status,
+                httpVersion: nil,
+                headerFields: nil
+            )!
+            return (response, status == 200 ? Data() : Data())
+        }
+
+        let _: EmptyResponse = try await apiClient.get(path: "/health")
+        XCTAssertEqual(attempts, 2)
+    }
+
+    func testRejectsCredentialsQueryAndFragmentInBaseURL() async {
+        for invalidURL in [
+            "https://user:password@api.example.com/api/v1",
+            "https://api.example.com/api/v1?tenant=other",
+            "https://api.example.com/api/v1#fragment"
+        ] {
+            config.apiBaseUrl = invalidURL
+            let conf = URLSessionConfiguration.ephemeral
+            conf.protocolClasses = [MockURLProtocol.self]
+            apiClient = APIClient(config: config, session: URLSession(configuration: conf))
+
+            do {
+                let _: EmptyResponse = try await apiClient.get(path: "/health")
+                XCTFail("Expected \(invalidURL) to be rejected")
+            } catch let error as APIError {
+                XCTAssertEqual(error.status, 0)
+                XCTAssertEqual(error.message, "Invalid API base URL")
+            } catch {
+                XCTFail("Unexpected error for \(invalidURL): \(error)")
+            }
+        }
+    }
 }
 
 // MARK: - Helpers
 
 private struct TestResponse: Codable, Equatable {
     let message: String
-} 
+}

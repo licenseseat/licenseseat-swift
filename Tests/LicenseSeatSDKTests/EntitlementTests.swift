@@ -12,22 +12,20 @@ import XCTest
 final class EntitlementTests: XCTestCase {
     var sdk: LicenseSeat?
 
-    private static let testPrefix = "entitlement_test_"
     private static let testProductSlug = "test-app"
 
-    override func setUp() {
-        super.setUp()
+    override func setUp() async throws {
         let config = LicenseSeatConfig(
             productSlug: Self.testProductSlug,
-            storagePrefix: Self.testPrefix
+            storagePrefix: "entitlement_test_\(UUID().uuidString)_"
         )
         sdk = LicenseSeat(config: config)
         sdk?.cache.clear()
     }
 
-    override func tearDown() {
-        sdk?.cache.clear()
-        super.tearDown()
+    override func tearDown() async throws {
+        sdk?.reset()
+        sdk = nil
     }
 
     /// Helper to create a mock validation response with entitlements
@@ -70,7 +68,7 @@ final class EntitlementTests: XCTestCase {
         )
     }
 
-    func testActiveEntitlement() {
+    func testActiveEntitlement() async {
         // Given: A license with active entitlements
         let entitlement = Entitlement(
             key: "premium-features",
@@ -96,7 +94,7 @@ final class EntitlementTests: XCTestCase {
         XCTAssertEqual(status.entitlement?.key, "premium-features")
     }
 
-    func testExpiredEntitlement() {
+    func testExpiredEntitlement() async {
         // Given: An expired entitlement
         let entitlement = Entitlement(
             key: "trial-access",
@@ -121,7 +119,7 @@ final class EntitlementTests: XCTestCase {
         XCTAssertNotNil(status.expiresAt)
     }
 
-    func testMissingEntitlement() {
+    func testMissingEntitlement() async {
         // Given: A license without the requested entitlement
         let entitlement = Entitlement(
             key: "basic-features",
@@ -146,7 +144,7 @@ final class EntitlementTests: XCTestCase {
         XCTAssertNil(status.entitlement)
     }
 
-    func testNoLicense() {
+    func testNoLicense() async {
         // Given: No cached license
 
         // When
@@ -162,7 +160,7 @@ final class EntitlementTests: XCTestCase {
         XCTAssertNil(status.entitlement)
     }
 
-    func testPermanentEntitlement() {
+    func testPermanentEntitlement() async {
         // Given: An entitlement with no expiration
         let entitlement = Entitlement(
             key: "lifetime-access",

@@ -5,7 +5,7 @@
 ///  Created by LicenseSeat on 2025.
 ///
 ///  A high-level, observable façade on top of ``LicenseSeat`` that provides:
-///  • Zero-configuration shared instance via ``LicenseSeatStore.shared``
+///  • A shared instance configured with an API key and product slug
 ///  • SwiftUI-friendly @Published `status` for real-time UI updates
 ///  • Pass-through helpers for the most common operations (`activate`, `deactivate`, `entitlement`)
 ///  • Optional quality-of-life sugar such as property-wrappers and view-modifiers (SwiftUI only)
@@ -19,7 +19,10 @@
 ///  Integration example:
 ///  ```swift
 ///  // Application start-up
-///  LicenseSeatStore.shared.configure(apiKey: "prod_xxx")
+///  LicenseSeatStore.shared.configure(
+///      apiKey: "pk_live_…",
+///      productSlug: "my-product"
+///  )
 ///  
 ///  // Somewhere in SwiftUI
 ///  struct ContentView: View {
@@ -40,6 +43,11 @@
 ///
 
 import Foundation
+#if canImport(CryptoKit)
+import CryptoKit
+#elseif canImport(Crypto)
+import Crypto
+#endif
 #if canImport(FoundationNetworking)
 import FoundationNetworking
 #endif
@@ -73,13 +81,16 @@ public final class LicenseSeatStore {
     #endif
     
     // MARK: – Internal properties
-    private(set) var seat: LicenseSeat?
+    public private(set) var seat: LicenseSeat?
+    #if canImport(Combine)
+    private var subscriptions = Set<AnyCancellable>()
+    #endif
     
     // MARK: – Initializers
     /// Creates a *detached* store that is not connected to the shared singleton. Useful for tests.
     public init(config: LicenseSeatConfig = .default, urlSession: URLSession? = nil) {
         self.seat = LicenseSeat(config: config, urlSession: urlSession)
-        status = self.seat?.getStatus() ?? .inactive(message: "Not configured")
+        status = seat?.getStatus() ?? .inactive(message: "Not configured")
         subscribeToSeat()
     }
     
@@ -87,29 +98,90 @@ public final class LicenseSeatStore {
     private init() { /* lazily configured via `configure` */ }
     
     // MARK: – Configuration
-    /// Configures the shared store. The first call wins unless `force` is true.
+    /// Configures the store with an explicit product. The first call wins unless `force` is true.
     /// - Parameters:
     ///   - apiKey: Your LicenseSeat API key.
-    ///   - apiBaseURL: Base URL for the LicenseSeat backend. Defaults to production (`LicenseSeatConfig.productionAPIBaseURL`).
+    ///   - productSlug: Product identifier required by license operations.
+    ///   - apiBaseURL: Base URL for the LicenseSeat backend. Defaults to
+    ///     production (`LicenseSeatConfig.productionAPIBaseURL`).
     ///   - force: Recreate the underlying ``LicenseSeat`` even if it has been configured before.
+    ///   - urlSession: Optional session injection for custom networking or tests.
     ///   - customize: Closure to modify the default ``LicenseSeatConfig`` before initialization.
+    public func configure(apiKey: String,
+                          productSlug: String,
+                          apiBaseURL: URL? = nil,
+                          force: Bool = false,
+                          urlSession: URLSession? = nil,
+                          options customize: (inout LicenseSeatConfig) -> Void = { _ in }) {
+        if seat != nil && !force { return }
+        let config = configured(
+            apiKey: apiKey,
+            productSlug: productSlug,
+            apiBaseURL: apiBaseURL,
+            customize: customize
+        )
+        configureInstance(
+            config: config,
+            force: force,
+            urlSession: urlSession
+        )
+    }
+
+    /// Compatibility overload for applications compiled against 0.4.1.
+    ///
+    /// Set `productSlug` in `options`, or migrate to
+    /// ``configure(apiKey:productSlug:apiBaseURL:force:urlSession:options:)``.
     public func configure(apiKey: String,
                           apiBaseURL: URL? = nil,
                           force: Bool = false,
                           urlSession: URLSession? = nil,
                           options customize: (inout LicenseSeatConfig) -> Void = { _ in }) {
         if seat != nil && !force { return }
+        let config = configured(
+            apiKey: apiKey,
+            productSlug: nil,
+            apiBaseURL: apiBaseURL,
+            customize: customize
+        )
+        configureInstance(
+            config: config,
+            force: force,
+            urlSession: urlSession
+        )
+    }
 
-        var cfg = LicenseSeatConfig.default
-        cfg.apiKey = apiKey
+    private func configured(
+        apiKey: String,
+        productSlug: String?,
+        apiBaseURL: URL?,
+        customize: (inout LicenseSeatConfig) -> Void
+    ) -> LicenseSeatConfig {
+        var config = LicenseSeatConfig.default
+        config.apiKey = apiKey
+        config.productSlug = productSlug
         if let apiBaseURL {
-            cfg.apiBaseUrl = apiBaseURL.absoluteString
+            config.apiBaseUrl = apiBaseURL.absoluteString
         }
-        customize(&cfg)
+        customize(&config)
+        return config
+    }
 
-        seat = LicenseSeat(config: cfg, urlSession: urlSession)
-        status = seat?.getStatus() ?? .inactive(message: "Uninitialized")
-        subscribeToSeat()
+    private func configureInstance(
+        config: LicenseSeatConfig,
+        force: Bool,
+        urlSession: URLSession?
+    ) {
+        if seat != nil && !force { return }
+
+        if force {
+            seat?.shutdown()
+        }
+
+        let instance = LicenseSeat(config: config, urlSession: urlSession)
+        if self === LicenseSeatStore.shared {
+            LicenseSeat.installShared(instance)
+        }
+        adoptSharedSeat(instance)
     }
     
     // MARK: – Public pass-through API
@@ -117,15 +189,43 @@ public final class LicenseSeatStore {
     public func activate(_ key: String,
                          options: ActivationOptions = .init()) async throws -> License {
         guard let seat else { throw LicenseSeatStoreError.notConfigured }
+        defer { status = seat.getStatus() }
         let license = try await seat.activate(licenseKey: key, options: options)
-        // Immediately refresh local status so callers don't depend on Combine delivery timing.
-        self.status = seat.getStatus()
         return license
+    }
+
+    /// Performs an immediate validation through the observable store facade.
+    /// The mirrored status is refreshed before this method returns.
+    @discardableResult
+    public func validate(
+        licenseKey: String,
+        options: ValidationOptions = .init()
+    ) async throws -> ValidationResponse {
+        guard let seat else { throw LicenseSeatStoreError.notConfigured }
+        defer { status = seat.getStatus() }
+        let validation = try await seat.validate(licenseKey: licenseKey, options: options)
+        return validation
     }
     
     public func deactivate() async throws {
         guard let seat else { throw LicenseSeatStoreError.notConfigured }
+        defer { status = seat.getStatus() }
         try await seat.deactivate()
+    }
+
+    /// Sends an immediate heartbeat for the active license.
+    public func heartbeat() async throws {
+        guard let seat else { throw LicenseSeatStoreError.notConfigured }
+        defer { status = seat.getStatus() }
+        try await seat.heartbeat()
+    }
+
+    /// Clears the activation, signed offline assets, timers, and observable
+    /// state while retaining the current SDK configuration.
+    public func reset() {
+        seat?.reset()
+        status = seat?.getStatus() ?? .inactive(message: "Not configured")
+        nextAutoValidationAt = nil
     }
     
     public func entitlement(_ id: String) -> EntitlementStatus {
@@ -157,25 +257,53 @@ public final class LicenseSeatStore {
             .eraseToAnyPublisher()
     }
     #endif
+
+    /// Makes the store observe the canonical static SDK instance. Keeping this
+    /// internal prevents applications from manufacturing divergent singleton
+    /// state while allowing both supported configuration entry points to share
+    /// one source of truth.
+    internal func adoptSharedSeat(_ instance: LicenseSeat) {
+        #if canImport(Combine)
+        subscriptions.removeAll()
+        #endif
+        seat = instance
+        status = instance.getStatus()
+        nextAutoValidationAt = nil
+        subscribeToSeat()
+    }
     
     // MARK: – Private helpers
     private func subscribeToSeat() {
         #if canImport(Combine)
+        subscriptions.removeAll()
+
         seat?.statusPublisher
             .receive(on: RunLoop.main)
-            .assign(to: &$status)
+            .filter { [weak self] newStatus in
+                self?.status != newStatus
+            }
+            .sink { [weak self] status in
+                self?.status = status
+            }
+            .store(in: &subscriptions)
         
         // Listen for auto-validation cycles to keep `nextAutoValidationAt` in sync.
         seat?.eventPublisher(for: "autovalidation:cycle")
             .compactMap { $0.dictionary?["nextRunAt"] as? Date }
             .receive(on: RunLoop.main)
-            .assign(to: &$nextAutoValidationAt)
+            .sink { [weak self] date in
+                self?.nextAutoValidationAt = date
+            }
+            .store(in: &subscriptions)
         
         // When auto-validation stops, clear the date so UI knows it's inactive.
         seat?.eventPublisher(for: "autovalidation:stopped")
             .map { _ in Optional<Date>.none }
             .receive(on: RunLoop.main)
-            .assign(to: &$nextAutoValidationAt)
+            .sink { [weak self] _ in
+                self?.nextAutoValidationAt = nil
+            }
+            .store(in: &subscriptions)
         #endif
     }
     
@@ -190,7 +318,10 @@ public final class LicenseSeatStore {
         
         if let license = seat?.currentLicense() {
             report["license_key_prefix"] = String(license.licenseKey.prefix(8)) + "..."
-            report["device_id_hash"] = license.deviceId.hashValue
+            report["device_id_hash"] = SHA256.hash(data: Data(license.deviceId.utf8))
+                .prefix(8)
+                .map { String(format: "%02x", $0) }
+                .joined()
             report["activated_at"] = license.activatedAt.timeIntervalSince1970
             report["last_validated"] = license.lastValidated.timeIntervalSince1970
         }
@@ -248,7 +379,8 @@ public enum LicenseSeatStoreError: LocalizedError {
     public var errorDescription: String? {
         switch self {
         case .notConfigured:
-            return "LicenseSeatStore.shared must be configured before use. Call `configure(apiKey:)` early in your application's lifecycle."
+            return "LicenseSeatStore.shared must be configured before use. "
+                + "Call `configure(apiKey:productSlug:)` early in your application's lifecycle."
         }
     }
 }
@@ -257,4 +389,4 @@ public enum LicenseSeatStoreError: LocalizedError {
 
 #if canImport(Combine)
 extension LicenseSeatStore: ObservableObject {}
-#endif 
+#endif

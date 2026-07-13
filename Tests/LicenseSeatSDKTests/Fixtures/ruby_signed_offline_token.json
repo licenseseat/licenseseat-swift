@@ -1,0 +1,35 @@
+{
+  "public_key": "A6EHv/POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg=",
+  "offline_token": {
+    "object": "offline_token",
+    "token": {
+      "entitlements": [
+        {
+          "expires_at": null,
+          "key": "pro"
+        }
+      ],
+      "exp": 4102444800,
+      "fingerprint": "test-device",
+      "iat": 1700000000,
+      "kid": "cross-language-2026",
+      "license_key": "CROSS-LANGUAGE-LICENSE",
+      "metadata": {
+        "fixture_version": 1,
+        "source": "license_seat gem"
+      },
+      "mode": "hardware_locked",
+      "nbf": 1700000000,
+      "plan_key": "pro",
+      "product_slug": "hustl",
+      "schema_version": 1,
+      "seat_limit": 5
+    },
+    "signature": {
+      "algorithm": "Ed25519",
+      "key_id": "cross-language-2026",
+      "value": "fHUej5v1e7WVDgfP97tubwvqggZgRE6gvPchNcWQJK1PEi9Jh0nUpNq3KWU7BZ6/I2ekq6YU9XhMuzWh2QD6AQ=="
+    },
+    "canonical": "{\"entitlements\":[{\"expires_at\":null,\"key\":\"pro\"}],\"exp\":4102444800,\"fingerprint\":\"test-device\",\"iat\":1700000000,\"kid\":\"cross-language-2026\",\"license_key\":\"CROSS-LANGUAGE-LICENSE\",\"metadata\":{\"fixture_version\":1,\"source\":\"license_seat gem\"},\"mode\":\"hardware_locked\",\"nbf\":1700000000,\"plan_key\":\"pro\",\"product_slug\":\"hustl\",\"schema_version\":1,\"seat_limit\":5}"
+  }
+}

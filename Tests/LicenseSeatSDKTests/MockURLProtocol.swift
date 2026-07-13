@@ -6,8 +6,22 @@ import XCTest
 
 /// A URLProtocol subclass that allows unit tests to stub network responses
 final class MockURLProtocol: URLProtocol {
+    private static let handlerLock = NSLock()
+    nonisolated(unsafe) private static var handlerStorage: ((URLRequest) throws -> (HTTPURLResponse, Data))?
+
     /// Request handler provided per-test. Throw to simulate networking errors.
-    static var requestHandler: ((URLRequest) throws -> (HTTPURLResponse, Data))?
+    static var requestHandler: ((URLRequest) throws -> (HTTPURLResponse, Data))? {
+        get {
+            handlerLock.lock()
+            defer { handlerLock.unlock() }
+            return handlerStorage
+        }
+        set {
+            handlerLock.lock()
+            handlerStorage = newValue
+            handlerLock.unlock()
+        }
+    }
     
     /// Helper to reset global state between tests
     static func reset() {
@@ -49,4 +63,4 @@ final class MockURLProtocol: URLProtocol {
     }
     
     override func stopLoading() {}
-} 
+}

@@ -22,7 +22,7 @@ import Foundation
 /// - `seat_limit_exceeded`: All seats are in use
 /// - `device_not_activated`: Device is not activated for this license
 /// - `parameter_missing`: Required parameter is missing
-public struct APIError: LocalizedError, Equatable, Sendable {
+public struct APIError: LocalizedError, Equatable, @unchecked Sendable {
     /// Machine-readable error code for programmatic handling
     public let code: String?
 
@@ -45,7 +45,14 @@ public struct APIError: LocalizedError, Equatable, Sendable {
         if let errorObj = responseData["error"] as? [String: Any] {
             self.code = errorObj["code"] as? String
             self.message = errorObj["message"] as? String ?? "Unknown error"
-            self.details = errorObj["details"] as? [String: Any]
+            self.details = (errorObj["details"] ?? errorObj["meta"]) as? [String: Any]
+        } else if let errorObj = (responseData["errors"] as? [[String: Any]])?.first {
+            // Machine-file endpoints use a JSON:API-style errors array.
+            self.code = errorObj["code"] as? String
+            self.message = errorObj["detail"] as? String
+                ?? errorObj["title"] as? String
+                ?? "Unknown error"
+            self.details = errorObj["meta"] as? [String: Any]
         } else {
             // Fallback for non-standard error responses
             self.code = nil
@@ -74,7 +81,7 @@ public struct APIError: LocalizedError, Equatable, Sendable {
 
     /// Whether this error indicates a network/transport failure
     public var isNetworkError: Bool {
-        return status == 0 || status == 408
+        return !isConfigurationError && (status == 0 || status == 408)
     }
 
     /// Whether this error indicates a server-side issue (5xx)
@@ -96,15 +103,33 @@ public struct APIError: LocalizedError, Equatable, Sendable {
     /// (revoked, expired, suspended) that won't change without intervention
     public var isLicenseTerminalError: Bool {
         guard let code = code else { return false }
-        return ["revoked", "expired", "suspended", "license_revoked", "license_expired", "license_suspended"].contains(code)
+        return [
+            "license_not_found", "license_invalid", "invalid_license",
+            "revoked", "expired", "suspended", "not_active", "device_not_activated",
+            "activation_not_found",
+            "license_revoked", "license_expired", "license_suspended", "license_not_active"
+        ].contains(code.lowercased())
+    }
+
+    /// Whether the server has authoritatively invalidated this installation's
+    /// cached license. Authentication, authorization, rate-limit, and malformed
+    /// request errors must not erase an otherwise valid signed offline grant.
+    public var invalidatesCachedLicense: Bool {
+        status == 410 || isLicenseTerminalError
     }
 
     /// Whether this error is retryable
     public var isRetryable: Bool {
+        if isConfigurationError { return false }
         // Server errors (except 501 Not Implemented)
-        if status >= 502 && status < 600 { return true }
+        if status >= 500 && status < 600 && status != 501 { return true }
         // Network/transport errors
         if [0, 408, 429].contains(status) { return true }
         return false
     }
-} 
+
+    private var isConfigurationError: Bool {
+        guard let code else { return false }
+        return ["invalid_base_url", "invalid_endpoint_path"].contains(code)
+    }
+}

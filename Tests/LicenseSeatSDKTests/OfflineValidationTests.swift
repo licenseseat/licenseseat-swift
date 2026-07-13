@@ -15,18 +15,27 @@ import Crypto
 
 @MainActor
 final class OfflineValidationTests: XCTestCase {
+    private struct CrossLanguageFixture: Decodable {
+        let publicKey: String
+        let offlineToken: OfflineTokenResponse
+
+        enum CodingKeys: String, CodingKey {
+            case publicKey = "public_key"
+            case offlineToken = "offline_token"
+        }
+    }
+
     var sdk: LicenseSeat!
 
-    private static let testPrefix = "offline_validation_test_"
-    private static let testProductSlug = "test-app"
-    private static let testLicenseKey = "TEST-LICENSE-KEY"
+    nonisolated private static let testProductSlug = "test-app"
+    nonisolated private static let testLicenseKey = "TEST-LICENSE-KEY"
 
-    override func setUp() {
-        super.setUp()
+    override func setUp() async throws {
         let config = LicenseSeatConfig(
             apiBaseUrl: "https://api.test.com",
             productSlug: Self.testProductSlug,
-            storagePrefix: Self.testPrefix,
+            storagePrefix: "offline_validation_test_\(UUID().uuidString)_",
+            maxRetries: 0,
             offlineFallbackMode: .always,
             maxOfflineDays: 7,
             maxClockSkewMs: 300000
@@ -35,34 +44,40 @@ final class OfflineValidationTests: XCTestCase {
         sdk.cache.clear()
     }
 
-    override func tearDown() {
-        sdk.cache.clear()
-        super.tearDown()
+    override func tearDown() async throws {
+        sdk.reset()
+        sdk = nil
     }
 
     /// Helper to create an offline token with given parameters and sign it
     private func makeOfflineToken(
         licenseKey: String = testLicenseKey,
         productSlug: String = testProductSlug,
+        schemaVersion: Int = 1,
+        fingerprint: String? = "test-device",
+        iat: Int? = nil,
         exp: Int? = nil,
         nbf: Int? = nil,
         licenseExpiresAt: Int? = nil,
+        kid: String = "test-key-id",
+        algorithm: String = "Ed25519",
+        signatureKeyId: String? = nil,
         privateKey: Curve25519.Signing.PrivateKey
     ) throws -> OfflineTokenResponse {
         let now = Int(Date().timeIntervalSince1970)
+        let issuedAt = iat ?? now
         let tokenExp = exp ?? (now + 86400 * 30) // 30 days from now
         let tokenNbf = nbf ?? now
-        let kid = "test-key-id"
 
         let tokenPayload = OfflineTokenResponse.TokenPayload(
-            schemaVersion: 1,
+            schemaVersion: schemaVersion,
             licenseKey: licenseKey,
             productSlug: productSlug,
             planKey: "pro",
             mode: "hardware_locked",
             seatLimit: 5,
-            deviceId: "test-device",
-            iat: now,
+            deviceId: fingerprint,
+            iat: issuedAt,
             exp: tokenExp,
             nbf: tokenNbf,
             licenseExpiresAt: licenseExpiresAt,
@@ -71,29 +86,18 @@ final class OfflineValidationTests: XCTestCase {
             metadata: nil
         )
 
-        // Create canonical JSON for signing (simplified version for testing)
-        let canonicalDict: [String: Any] = [
-            "schema_version": 1,
-            "license_key": licenseKey,
-            "product_slug": productSlug,
-            "plan_key": "pro",
-            "mode": "hardware_locked",
-            "seat_limit": 5,
-            "device_id": "test-device",
-            "iat": now,
-            "exp": tokenExp,
-            "nbf": tokenNbf,
-            "kid": kid,
-            "entitlements": []
-        ]
-        let canonical = try CanonicalJSON.stringify(canonicalDict)
+        // Derive the signed representation from the exact Codable payload.
+        // This keeps the fixture honest when optional claims are added.
+        let encodedPayload = try JSONEncoder().encode(tokenPayload)
+        let canonicalObject = try JSONSerialization.jsonObject(with: encodedPayload)
+        let canonical = try CanonicalJSON.stringify(canonicalObject)
 
         // Sign the canonical JSON
         let signature = try privateKey.signature(for: Data(canonical.utf8))
 
         let signatureBlock = OfflineTokenResponse.Signature(
-            algorithm: "Ed25519",
-            keyId: kid,
+            algorithm: algorithm,
+            keyId: signatureKeyId ?? kid,
             value: Base64URL.encode(signature)
         )
 
@@ -106,10 +110,14 @@ final class OfflineValidationTests: XCTestCase {
     }
 
     /// Helper to create and cache a test license
-    private func cacheTestLicense(licenseKey: String = testLicenseKey, lastValidated: Date = Date()) {
+    private func cacheTestLicense(
+        licenseKey: String = testLicenseKey,
+        fingerprint: String = "test-device",
+        lastValidated: Date = Date()
+    ) {
         let license = License(
             licenseKey: licenseKey,
-            deviceId: "test-device",
+            deviceId: fingerprint,
             activationId: "act-12345-uuid",
             activatedAt: Date(),
             lastValidated: lastValidated
@@ -133,6 +141,52 @@ final class OfflineValidationTests: XCTestCase {
         let result = await sdk.verifyCachedOffline()
 
         // Then
+        XCTAssertTrue(result.valid)
+        XCTAssertNil(result.code)
+    }
+
+    func testRubyGemSignedFixtureVerifiesInSwift() async throws {
+        let fixtureURL = try XCTUnwrap(
+            Bundle.module.url(
+                forResource: "ruby_signed_offline_token",
+                withExtension: "json"
+            )
+        )
+        let fixture = try JSONDecoder().decode(
+            CrossLanguageFixture.self,
+            from: Data(contentsOf: fixtureURL)
+        )
+        let config = LicenseSeatConfig(
+            productSlug: "hustl",
+            storagePrefix: "cross_language_test_\(UUID().uuidString)_",
+            deviceIdentifier: "test-device",
+            offlineFallbackMode: .always,
+            maxOfflineDays: 0
+        )
+        let crossLanguageSDK = LicenseSeat(config: config)
+        defer { crossLanguageSDK.reset() }
+
+        XCTAssertTrue(crossLanguageSDK.cache.setOfflineToken(fixture.offlineToken))
+        XCTAssertTrue(
+            crossLanguageSDK.cache.setPublicKey(
+                "cross-language-2026",
+                fixture.publicKey
+            )
+        )
+        XCTAssertTrue(
+            crossLanguageSDK.cache.setLicense(
+                License(
+                    licenseKey: "CROSS-LANGUAGE-LICENSE",
+                    deviceId: "test-device",
+                    activationId: "cross-language-activation",
+                    activatedAt: Date(timeIntervalSince1970: 1_700_000_000),
+                    lastValidated: Date(timeIntervalSince1970: 1_700_000_000)
+                )
+            )
+        )
+
+        let result = await crossLanguageSDK.verifyCachedOffline()
+
         XCTAssertTrue(result.valid)
         XCTAssertNil(result.code)
     }
@@ -216,18 +270,64 @@ final class OfflineValidationTests: XCTestCase {
         XCTAssertEqual(result.code, "token_not_yet_valid")
     }
 
+    func testIssuedAtAfterNotBeforeIsRejected() async throws {
+        let privateKey = Curve25519.Signing.PrivateKey()
+        let now = Int(Date().timeIntervalSince1970)
+        let offlineToken = try makeOfflineToken(
+            iat: now,
+            exp: now + 3_600,
+            nbf: now - 1,
+            privateKey: privateKey
+        )
+        sdk.cache.setOfflineToken(offlineToken)
+        sdk.cache.setPublicKey(
+            "test-key-id",
+            Base64URL.encode(privateKey.publicKey.rawRepresentation)
+        )
+        cacheTestLicense()
+
+        let result = await sdk.verifyCachedOffline()
+
+        XCTAssertFalse(result.valid)
+        XCTAssertEqual(result.code, "invalid_time_window")
+    }
+
+    func testUnexpectedOfflineTokenObjectIsRejected() async throws {
+        let privateKey = Curve25519.Signing.PrivateKey()
+        let signedToken = try makeOfflineToken(privateKey: privateKey)
+        let offlineToken = OfflineTokenResponse(
+            object: "not_an_offline_token",
+            token: signedToken.token,
+            signature: signedToken.signature,
+            canonical: signedToken.canonical
+        )
+        sdk.cache.setOfflineToken(offlineToken)
+        sdk.cache.setPublicKey(
+            "test-key-id",
+            Base64URL.encode(privateKey.publicKey.rawRepresentation)
+        )
+        cacheTestLicense()
+
+        let result = await sdk.verifyCachedOffline()
+
+        XCTAssertFalse(result.valid)
+        XCTAssertEqual(result.code, "invalid_token_object")
+    }
+
     func testGracePeriodExpiry() async throws {
-        // Given: A license validated more than maxOfflineDays ago
+        // Given: A signed token issued more than maxOfflineDays ago
         let privateKey = Curve25519.Signing.PrivateKey()
         let publicKey = privateKey.publicKey
 
-        let offlineToken = try makeOfflineToken(privateKey: privateKey)
+        let offlineToken = try makeOfflineToken(
+            iat: Int(Date().addingTimeInterval(-8 * 86400).timeIntervalSince1970),
+            privateKey: privateKey
+        )
 
         sdk.cache.setOfflineToken(offlineToken)
         sdk.cache.setPublicKey("test-key-id", Base64URL.encode(publicKey.rawRepresentation))
 
-        // License last validated 8 days ago (exceeds 7 day grace period)
-        cacheTestLicense(lastValidated: Date().addingTimeInterval(-8 * 86400))
+        cacheTestLicense()
 
         // When
         let result = await sdk.verifyCachedOffline()
@@ -278,6 +378,162 @@ final class OfflineValidationTests: XCTestCase {
         // Then
         XCTAssertFalse(result.valid)
         XCTAssertEqual(result.code, "license_mismatch")
+    }
+
+    func testProductMismatchFails() async throws {
+        let privateKey = Curve25519.Signing.PrivateKey()
+        let offlineToken = try makeOfflineToken(
+            productSlug: "different-product",
+            privateKey: privateKey
+        )
+
+        sdk.cache.setOfflineToken(offlineToken)
+        sdk.cache.setPublicKey("test-key-id", Base64URL.encode(privateKey.publicKey.rawRepresentation))
+        cacheTestLicense()
+
+        let result = await sdk.verifyCachedOffline()
+
+        XCTAssertFalse(result.valid)
+        XCTAssertEqual(result.code, "product_mismatch")
+    }
+
+    func testMissingFingerprintFails() async throws {
+        let privateKey = Curve25519.Signing.PrivateKey()
+        let offlineToken = try makeOfflineToken(fingerprint: nil, privateKey: privateKey)
+
+        sdk.cache.setOfflineToken(offlineToken)
+        sdk.cache.setPublicKey("test-key-id", Base64URL.encode(privateKey.publicKey.rawRepresentation))
+        cacheTestLicense()
+
+        let result = await sdk.verifyCachedOffline()
+
+        XCTAssertFalse(result.valid)
+        XCTAssertEqual(result.code, "fingerprint_missing")
+    }
+
+    func testFingerprintMismatchFails() async throws {
+        let privateKey = Curve25519.Signing.PrivateKey()
+        let offlineToken = try makeOfflineToken(
+            fingerprint: "different-device",
+            privateKey: privateKey
+        )
+
+        sdk.cache.setOfflineToken(offlineToken)
+        sdk.cache.setPublicKey("test-key-id", Base64URL.encode(privateKey.publicKey.rawRepresentation))
+        cacheTestLicense()
+
+        let result = await sdk.verifyCachedOffline()
+
+        XCTAssertFalse(result.valid)
+        XCTAssertEqual(result.code, "fingerprint_mismatch")
+    }
+
+    func testExpiredLicenseClaimFailsEvenWhenTokenIsCurrent() async throws {
+        let privateKey = Curve25519.Signing.PrivateKey()
+        let offlineToken = try makeOfflineToken(
+            licenseExpiresAt: Int(Date().addingTimeInterval(-60).timeIntervalSince1970),
+            privateKey: privateKey
+        )
+
+        sdk.cache.setOfflineToken(offlineToken)
+        sdk.cache.setPublicKey("test-key-id", Base64URL.encode(privateKey.publicKey.rawRepresentation))
+        cacheTestLicense()
+
+        let result = await sdk.verifyCachedOffline()
+
+        XCTAssertFalse(result.valid)
+        XCTAssertEqual(result.code, "license_expired")
+    }
+
+    func testUnsupportedSchemaFails() async throws {
+        let privateKey = Curve25519.Signing.PrivateKey()
+        let offlineToken = try makeOfflineToken(schemaVersion: 2, privateKey: privateKey)
+
+        sdk.cache.setOfflineToken(offlineToken)
+        sdk.cache.setPublicKey("test-key-id", Base64URL.encode(privateKey.publicKey.rawRepresentation))
+        cacheTestLicense()
+
+        let result = await sdk.verifyCachedOffline()
+
+        XCTAssertFalse(result.valid)
+        XCTAssertEqual(result.code, "unsupported_schema")
+    }
+
+    func testUnsupportedSignatureAlgorithmFailsBeforeCryptoVerification() async throws {
+        let privateKey = Curve25519.Signing.PrivateKey()
+        let offlineToken = try makeOfflineToken(
+            algorithm: "none",
+            privateKey: privateKey
+        )
+
+        sdk.cache.setOfflineToken(offlineToken)
+        sdk.cache.setPublicKey("test-key-id", Base64URL.encode(privateKey.publicKey.rawRepresentation))
+        cacheTestLicense()
+
+        let result = await sdk.verifyCachedOffline()
+
+        XCTAssertFalse(result.valid)
+        XCTAssertEqual(result.code, "signature_metadata_mismatch")
+    }
+
+    func testSignatureKeyIDMustMatchSignedTokenKeyID() async throws {
+        let privateKey = Curve25519.Signing.PrivateKey()
+        let offlineToken = try makeOfflineToken(
+            signatureKeyId: "different-key-id",
+            privateKey: privateKey
+        )
+
+        sdk.cache.setOfflineToken(offlineToken)
+        sdk.cache.setPublicKey("test-key-id", Base64URL.encode(privateKey.publicKey.rawRepresentation))
+        cacheTestLicense()
+
+        let result = await sdk.verifyCachedOffline()
+
+        XCTAssertFalse(result.valid)
+        XCTAssertEqual(result.code, "signature_metadata_mismatch")
+    }
+
+    func testUnsignedSiblingTokenSubstitutionFails() async throws {
+        let privateKey = Curve25519.Signing.PrivateKey()
+        let signedToken = try makeOfflineToken(privateKey: privateKey)
+        let attackerControlledToken = try makeOfflineToken(
+            productSlug: "attacker-product",
+            fingerprint: "attacker-device",
+            exp: Int(Date().addingTimeInterval(365 * 86400).timeIntervalSince1970),
+            privateKey: privateKey
+        )
+        let substitutedResponse = OfflineTokenResponse(
+            object: signedToken.object,
+            token: attackerControlledToken.token,
+            signature: signedToken.signature,
+            canonical: signedToken.canonical
+        )
+
+        sdk.cache.setOfflineToken(substitutedResponse)
+        sdk.cache.setPublicKey("test-key-id", Base64URL.encode(privateKey.publicKey.rawRepresentation))
+        cacheTestLicense()
+
+        let result = await sdk.verifyCachedOffline()
+
+        XCTAssertFalse(result.valid)
+        XCTAssertEqual(result.code, "token_payload_mismatch")
+    }
+
+    func testQuickLocalVerificationEnforcesExpiredTokenClaim() async throws {
+        let privateKey = Curve25519.Signing.PrivateKey()
+        let offlineToken = try makeOfflineToken(
+            exp: Int(Date().addingTimeInterval(-60).timeIntervalSince1970),
+            privateKey: privateKey
+        )
+
+        sdk.cache.setOfflineToken(offlineToken)
+        sdk.cache.setPublicKey("test-key-id", Base64URL.encode(privateKey.publicKey.rawRepresentation))
+        cacheTestLicense()
+
+        let result = await sdk.quickVerifyCachedOfflineLocal()
+
+        XCTAssertEqual(result?.valid, false)
+        XCTAssertEqual(result?.code, "token_expired")
     }
 
     func testNoOfflineToken() async {

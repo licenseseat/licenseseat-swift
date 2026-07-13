@@ -1,20 +1,20 @@
 import XCTest
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
+#if canImport(Combine)
 import Combine
+#endif
 @testable import LicenseSeat
 
 // swiftlint:disable implicitly_unwrapped_optional
+@MainActor
 final class AutoValidationTests: XCTestCase {
     private var sdk: LicenseSeat!
     private var cancellables: Set<AnyCancellable> = []
     
-    override func tearDown() {
-        super.tearDown()
-        // Ensure any background tasks are cancelled before resetting the protocol.
-        if let instance = sdk {
-            Task { @MainActor in
-                instance.reset()
-            }
-        }
+    override func tearDown() async throws {
+        sdk?.reset()
         sdk = nil
         MockURLProtocol.reset()
         cancellables.removeAll()
@@ -40,7 +40,7 @@ final class AutoValidationTests: XCTestCase {
                 json = [
                     "object": "activation",
                     "id": "act-12345-uuid",
-                    "device_id": "test-device",
+                    "fingerprint": "test-device",
                     "device_name": "Test Device",
                     "license_key": licenseKey,
                     "activated_at": ISO8601DateFormatter().string(from: Date()),
@@ -109,7 +109,8 @@ final class AutoValidationTests: XCTestCase {
             apiBaseUrl: "https://example.com",
             apiKey: "test-api-key",
             productSlug: Self.testProductSlug,
-            storagePrefix: "auto_validation_test_",
+            storagePrefix: "auto_validation_test_\(UUID().uuidString)_",
+            deviceIdentifier: "test-device",
             autoValidateInterval: 0.2,
             debug: false
         )
@@ -129,6 +130,6 @@ final class AutoValidationTests: XCTestCase {
         // Activate license (starts auto-validation)
         _ = try await sdk.activate(licenseKey: licenseKey)
 
-        await fulfillment(of: [fired], timeout: 1.0)
+        await assertFulfillment(of: [fired], timeout: 1.0)
     }
-} 
+}

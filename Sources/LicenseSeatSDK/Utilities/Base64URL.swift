@@ -24,21 +24,39 @@ enum Base64URL {
     
     /// Decode Base64URL string to data
     static func decode(_ string: String) throws -> Data {
-        // Convert from Base64URL to Base64
-        var base64 = string
-            .replacingOccurrences(of: "-", with: "+")
-            .replacingOccurrences(of: "_", with: "/")
-        
-        // Add padding if needed
-        let remainder = base64.count % 4
-        if remainder > 0 {
-            base64.append(String(repeating: "=", count: 4 - remainder))
+        // The current Rails API emits canonical padded Base64 for public keys
+        // and signatures. Older/native producers may emit canonical unpadded
+        // Base64URL. Accept those two explicit RFC 4648 forms, but reject
+        // whitespace, mixed alphabets, and malformed padding.
+        let urlSafeAlphabet = CharacterSet(
+            charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+        )
+        if !string.isEmpty,
+           string.unicodeScalars.allSatisfy(urlSafeAlphabet.contains),
+           string.utf8.count % 4 != 1 {
+            var base64 = string
+                .replacingOccurrences(of: "-", with: "+")
+                .replacingOccurrences(of: "_", with: "/")
+
+            let remainder = base64.utf8.count % 4
+            if remainder > 0 {
+                base64.append(String(repeating: "=", count: 4 - remainder))
+            }
+
+            guard let data = Data(base64Encoded: base64),
+                  encode(data) == string else {
+                throw Base64URLError.invalidInput
+            }
+            return data
         }
-        
-        guard let data = Data(base64Encoded: base64) else {
+
+        let standardPattern = #"\A[A-Za-z0-9+/]+={0,2}\z"#
+        guard string.utf8.count.isMultiple(of: 4),
+              string.range(of: standardPattern, options: .regularExpression) != nil,
+              let data = Data(base64Encoded: string),
+              data.base64EncodedString() == string else {
             throw Base64URLError.invalidInput
         }
-        
         return data
     }
 }
@@ -53,4 +71,4 @@ enum Base64URLError: LocalizedError {
             return "Invalid Base64URL input"
         }
     }
-} 
+}

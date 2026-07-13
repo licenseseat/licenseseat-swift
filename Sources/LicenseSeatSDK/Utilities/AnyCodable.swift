@@ -87,8 +87,18 @@ extension AnyCodable: Equatable {
             return lhs == rhs
         case let (lhs as String, rhs as String):
             return lhs == rhs
+        case let (lhs as [Any], rhs as [Any]):
+            return lhs.count == rhs.count && zip(lhs, rhs).allSatisfy {
+                AnyCodable($0) == AnyCodable($1)
+            }
+        case let (lhs as [String: Any], rhs as [String: Any]):
+            guard lhs.count == rhs.count else { return false }
+            return lhs.allSatisfy { key, value in
+                guard let rhsValue = rhs[key] else { return false }
+                return AnyCodable(value) == AnyCodable(rhsValue)
+            }
         default:
             return false
         }
     }
-} 
+}

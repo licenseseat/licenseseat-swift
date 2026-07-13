@@ -2,45 +2,97 @@ import XCTest
 @testable import LicenseSeat
 
 final class DeviceIdentifierTests: XCTestCase {
+    private var defaults: UserDefaults!
+    private var keychainServiceSuffix: String!
 
     override func setUp() {
         super.setUp()
-        // Clear cached identifier before each test to ensure isolation
-        DeviceIdentifier.clearCache()
+        let namespace = UUID().uuidString
+        defaults = UserDefaults(suiteName: "DeviceIdentifierTests.\(namespace)")!
+        keychainServiceSuffix = ".tests.\(namespace)"
+        clearIdentifier()
     }
 
     override func tearDown() {
-        // Clean up after tests
-        DeviceIdentifier.clearCache()
+        clearIdentifier()
+        defaults = nil
+        keychainServiceSuffix = nil
         super.tearDown()
     }
 
+    private func generateIdentifier() -> String {
+        DeviceIdentifier.generate(
+            userDefaults: defaults,
+            keychainServiceSuffix: keychainServiceSuffix
+        )
+    }
+
+    private func clearIdentifier() {
+        DeviceIdentifier.clearCache(
+            userDefaults: defaults,
+            keychainServiceSuffix: keychainServiceSuffix
+        )
+    }
+
     func testGenerateProducesNonEmptyString() {
-        let id = DeviceIdentifier.generate()
+        let id = generateIdentifier()
         XCTAssertFalse(id.isEmpty)
     }
 
     func testGenerateProducesStableValues() {
         // The device identifier should be stable across multiple calls
-        let first = DeviceIdentifier.generate()
-        let second = DeviceIdentifier.generate()
+        let first = generateIdentifier()
+        let second = generateIdentifier()
         XCTAssertEqual(first, second, "Device identifier should be cached and return the same value")
     }
 
     func testClearCacheAllowsNewGeneration() {
-        let first = DeviceIdentifier.generate()
-        DeviceIdentifier.clearCache()
-        let second = DeviceIdentifier.generate()
+        let first = generateIdentifier()
+        clearIdentifier()
+        let second = generateIdentifier()
 
-        // After clearing cache, a new identifier is generated
-        // Note: On macOS with hardware UUID, both might be the same since hardware UUID is stable
-        // But for fallback platforms, the random suffix would differ
-        XCTAssertFalse(first.isEmpty)
-        XCTAssertFalse(second.isEmpty)
+        XCTAssertNotEqual(first, second)
+    }
+
+    func testMigratesLegacyIdentifierWithoutChangingSeatIdentity() {
+        let legacyIdentifier = "mac-legacy-installation"
+        defaults.set(
+            legacyIdentifier,
+            forKey: "licenseseat_device_identifier"
+        )
+
+        XCTAssertEqual(generateIdentifier(), legacyIdentifier)
+        XCTAssertEqual(generateIdentifier(), legacyIdentifier)
+
+        #if canImport(Security)
+        XCTAssertNil(
+            defaults.string(forKey: "licenseseat_device_identifier"),
+            "Plaintext should be removed only after Keychain migration succeeds"
+        )
+        #endif
+    }
+
+    func testEmptyLegacyIdentifierIsReplacedWithUsableIdentity() {
+        defaults.set("", forKey: "licenseseat_device_identifier")
+
+        let identifier = generateIdentifier()
+
+        XCTAssertFalse(identifier.isEmpty)
+        XCTAssertNotEqual(identifier, "")
+        XCTAssertEqual(generateIdentifier(), identifier)
+    }
+
+    func testLicenseResetDoesNotRotateInstallationIdentityOrConsumeASeat() {
+        let first = generateIdentifier()
+        let licenseCache = LicenseCache(prefix: "licenseseat_", userDefaults: defaults)
+
+        licenseCache.clear()
+
+        XCTAssertEqual(generateIdentifier(), first)
     }
 
     func testGenerateProducesPlatformPrefixedString() {
-        let id = DeviceIdentifier.generate()
+        let id = generateIdentifier()
 
         #if os(iOS) || os(tvOS)
         XCTAssertTrue(id.hasPrefix("ios-"), "iOS device identifier should have 'ios-' prefix")

@@ -6,7 +6,12 @@
 ///
 
 import XCTest
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
+#if canImport(Combine)
 import Combine
+#endif
 @testable import LicenseSeat
 
 // MARK: - TelemetryPayload Unit Tests
@@ -44,6 +49,8 @@ final class TelemetryPayloadTests: XCTestCase {
         XCTAssertEqual(payload.osName, "watchOS")
         #elseif os(visionOS)
         XCTAssertEqual(payload.osName, "visionOS")
+        #elseif os(Linux)
+        XCTAssertEqual(payload.osName, "Linux")
         #endif
     }
 
@@ -65,6 +72,8 @@ final class TelemetryPayloadTests: XCTestCase {
         XCTAssertEqual(payload.deviceType, "watch")
         #elseif os(tvOS)
         XCTAssertEqual(payload.deviceType, "tv")
+        #elseif os(Linux)
+        XCTAssertEqual(payload.deviceType, "unknown")
         #endif
     }
 
@@ -255,7 +264,7 @@ final class TelemetryAPIIntegrationTests: XCTestCase {
                 let response: [String: Any] = [
                     "object": "activation",
                     "id": "act-test-uuid",
-                    "device_id": "test-device",
+                    "fingerprint": "test-device",
                     "device_name": NSNull(),
                     "license_key": "TEST-KEY",
                     "activated_at": ISO8601DateFormatter().string(from: Date()),
@@ -294,7 +303,8 @@ final class TelemetryAPIIntegrationTests: XCTestCase {
             apiBaseUrl: "https://api.test.com",
             apiKey: "unit-test",
             productSlug: Self.testProductSlug,
-            storagePrefix: "telemetry_api_test_",
+            storagePrefix: "telemetry_api_test_\(UUID().uuidString)_",
+            deviceIdentifier: "test-device",
             autoValidateInterval: 0,
             heartbeatInterval: 0,
             telemetryEnabled: true
@@ -341,7 +351,7 @@ final class TelemetryAPIIntegrationTests: XCTestCase {
                 let response: [String: Any] = [
                     "object": "activation",
                     "id": "act-test-uuid",
-                    "device_id": "test-device",
+                    "fingerprint": "test-device",
                     "device_name": NSNull(),
                     "license_key": "TEST-KEY",
                     "activated_at": ISO8601DateFormatter().string(from: Date()),
@@ -380,7 +390,8 @@ final class TelemetryAPIIntegrationTests: XCTestCase {
             apiBaseUrl: "https://api.test.com",
             apiKey: "unit-test",
             productSlug: Self.testProductSlug,
-            storagePrefix: "telemetry_disabled_test_",
+            storagePrefix: "telemetry_disabled_test_\(UUID().uuidString)_",
+            deviceIdentifier: "test-device",
             autoValidateInterval: 0,
             heartbeatInterval: 0,
             telemetryEnabled: false
@@ -405,10 +416,9 @@ final class HeartbeatTimerTests: XCTestCase {
     private var cancellables: Set<AnyCancellable> = []
     private static let testProductSlug = "test-app"
 
-    override func tearDown() {
+    override func tearDown() async throws {
         MockURLProtocol.reset()
         cancellables.removeAll()
-        super.tearDown()
     }
 
     func testHeartbeatIntervalDefaultValue() {
@@ -428,7 +438,7 @@ final class HeartbeatTimerTests: XCTestCase {
                 let response: [String: Any] = [
                     "object": "activation",
                     "id": "act-hb-uuid",
-                    "device_id": "test-device",
+                    "fingerprint": "test-device",
                     "device_name": NSNull(),
                     "license_key": "TEST-KEY",
                     "activated_at": ISO8601DateFormatter().string(from: Date()),
@@ -467,7 +477,8 @@ final class HeartbeatTimerTests: XCTestCase {
             apiBaseUrl: "https://api.test.com",
             apiKey: "unit-test",
             productSlug: Self.testProductSlug,
-            storagePrefix: "hb_disabled_test_",
+            storagePrefix: "hb_disabled_test_\(UUID().uuidString)_",
+            deviceIdentifier: "test-device",
             autoValidateInterval: 0,
             heartbeatInterval: 0
         )
@@ -489,7 +500,7 @@ final class HeartbeatTimerTests: XCTestCase {
                 let response: [String: Any] = [
                     "object": "activation",
                     "id": "act-hb-neg-uuid",
-                    "device_id": "test-device",
+                    "fingerprint": "test-device",
                     "device_name": NSNull(),
                     "license_key": "TEST-KEY",
                     "activated_at": ISO8601DateFormatter().string(from: Date()),
@@ -528,7 +539,8 @@ final class HeartbeatTimerTests: XCTestCase {
             apiBaseUrl: "https://api.test.com",
             apiKey: "unit-test",
             productSlug: Self.testProductSlug,
-            storagePrefix: "hb_neg_test_",
+            storagePrefix: "hb_neg_test_\(UUID().uuidString)_",
+            deviceIdentifier: "test-device",
             autoValidateInterval: 0,
             heartbeatInterval: -1
         )
@@ -549,7 +561,7 @@ final class HeartbeatTimerTests: XCTestCase {
                 let response: [String: Any] = [
                     "object": "activation",
                     "id": "act-hb-start-uuid",
-                    "device_id": "test-device",
+                    "fingerprint": "test-device",
                     "device_name": NSNull(),
                     "license_key": "TEST-KEY",
                     "activated_at": ISO8601DateFormatter().string(from: Date()),
@@ -588,7 +600,8 @@ final class HeartbeatTimerTests: XCTestCase {
             apiBaseUrl: "https://api.test.com",
             apiKey: "unit-test",
             productSlug: Self.testProductSlug,
-            storagePrefix: "hb_start_test_",
+            storagePrefix: "hb_start_test_\(UUID().uuidString)_",
+            deviceIdentifier: "test-device",
             autoValidateInterval: 0,
             heartbeatInterval: 300
         )
@@ -609,7 +622,7 @@ final class HeartbeatTimerTests: XCTestCase {
                 let response: [String: Any] = [
                     "object": "activation",
                     "id": "act-hb-reset-uuid",
-                    "device_id": "test-device",
+                    "fingerprint": "test-device",
                     "device_name": NSNull(),
                     "license_key": "TEST-KEY",
                     "activated_at": ISO8601DateFormatter().string(from: Date()),
@@ -648,7 +661,8 @@ final class HeartbeatTimerTests: XCTestCase {
             apiBaseUrl: "https://api.test.com",
             apiKey: "unit-test",
             productSlug: Self.testProductSlug,
-            storagePrefix: "hb_reset_test_",
+            storagePrefix: "hb_reset_test_\(UUID().uuidString)_",
+            deviceIdentifier: "test-device",
             autoValidateInterval: 0,
             heartbeatInterval: 300
         )
@@ -669,7 +683,7 @@ final class HeartbeatTimerTests: XCTestCase {
                 let response: [String: Any] = [
                     "object": "activation",
                     "id": "act-hb-deact-uuid",
-                    "device_id": "test-device",
+                    "fingerprint": "test-device",
                     "device_name": NSNull(),
                     "license_key": "TEST-KEY",
                     "activated_at": ISO8601DateFormatter().string(from: Date()),
@@ -717,7 +731,8 @@ final class HeartbeatTimerTests: XCTestCase {
             apiBaseUrl: "https://api.test.com",
             apiKey: "unit-test",
             productSlug: Self.testProductSlug,
-            storagePrefix: "hb_deact_test_",
+            storagePrefix: "hb_deact_test_\(UUID().uuidString)_",
+            deviceIdentifier: "test-device",
             autoValidateInterval: 0,
             heartbeatInterval: 300
         )
@@ -733,6 +748,7 @@ final class HeartbeatTimerTests: XCTestCase {
 
     func testHeartbeatTimerFiresIndependently() async throws {
         var heartbeatCount = 0
+        var heartbeatSuccessCount = 0
 
         MockURLProtocol.requestHandler = { request in
             guard let url = request.url else { throw URLError(.badURL) }
@@ -740,7 +756,7 @@ final class HeartbeatTimerTests: XCTestCase {
                 let response: [String: Any] = [
                     "object": "activation",
                     "id": "act-hb-fire-uuid",
-                    "device_id": "test-device",
+                    "fingerprint": "test-device",
                     "device_name": NSNull(),
                     "license_key": "TEST-KEY",
                     "activated_at": ISO8601DateFormatter().string(from: Date()),
@@ -769,7 +785,21 @@ final class HeartbeatTimerTests: XCTestCase {
                 heartbeatCount += 1
                 let response: [String: Any] = [
                     "object": "heartbeat",
-                    "status": "ok"
+                    "received_at": ISO8601DateFormatter().string(from: Date()),
+                    "license": [
+                        "object": "license",
+                        "key": "TEST-KEY",
+                        "status": "active",
+                        "starts_at": NSNull(),
+                        "expires_at": NSNull(),
+                        "mode": "hardware_locked",
+                        "plan_key": "pro",
+                        "seat_limit": 5,
+                        "active_seats": 1,
+                        "active_entitlements": [],
+                        "metadata": NSNull(),
+                        "product": ["slug": Self.testProductSlug, "name": "Test App"]
+                    ]
                 ]
                 let data = try JSONSerialization.data(withJSONObject: response)
                 return (HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil,
@@ -788,7 +818,8 @@ final class HeartbeatTimerTests: XCTestCase {
             apiBaseUrl: "https://api.test.com",
             apiKey: "unit-test",
             productSlug: Self.testProductSlug,
-            storagePrefix: "hb_fire_test_",
+            storagePrefix: "hb_fire_test_\(UUID().uuidString)_",
+            deviceIdentifier: "test-device",
             autoValidateInterval: 0, // auto-validation disabled
             heartbeatInterval: 0.3   // very short for testing
         )
@@ -796,6 +827,10 @@ final class HeartbeatTimerTests: XCTestCase {
         sdk.cache.clear()
 
         _ = try await sdk.activate(licenseKey: "TEST-KEY")
+        let heartbeatSubscription = sdk.on("heartbeat:success") { _ in
+            heartbeatSuccessCount += 1
+        }
+        defer { heartbeatSubscription.cancel() }
         XCTAssertNotNil(sdk.heartbeatTask)
         XCTAssertNil(sdk.validationTask, "validationTask should be nil (autoValidateInterval=0)")
 
@@ -804,6 +839,8 @@ final class HeartbeatTimerTests: XCTestCase {
 
         XCTAssertGreaterThanOrEqual(heartbeatCount, 2,
             "Standalone heartbeat should fire at least twice in 1s with 0.3s interval (fired \(heartbeatCount) times)")
+        XCTAssertGreaterThanOrEqual(heartbeatSuccessCount, 2,
+            "Heartbeat responses must decode and emit success, not merely reach the server")
 
         sdk.reset()
     }

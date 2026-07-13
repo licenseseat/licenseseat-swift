@@ -7,6 +7,9 @@
 //
 
 import Foundation
+#if canImport(CoreFoundation)
+import CoreFoundation
+#endif
 
 /// Canonical JSON serializer for consistent signature verification
 enum CanonicalJSON {
@@ -102,4 +105,4 @@ enum CanonicalJSONError: LocalizedError {
             return "Unsupported type for canonical JSON: \(type)"
         }
     }
-} 
+}

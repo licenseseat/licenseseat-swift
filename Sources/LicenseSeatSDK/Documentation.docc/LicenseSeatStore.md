@@ -1,149 +1,113 @@
-# LicenseSeatStore – Legacy SwiftUI Integration
+# LicenseSeatStore
 
-> **Note**: This is the legacy integration pattern. For new projects, use the static `LicenseSeat` methods shown in <doc:GettingStarted>.
+Use the observable façade for SwiftUI while sharing state with the static LicenseSeat API.
 
-## Overview
+## One Source of Truth
 
-`LicenseSeatStore` is a convenience singleton that predates the current static API design. It remains available for backwards compatibility and provides some SwiftUI-specific conveniences.
+``LicenseSeatStore/shared`` and ``LicenseSeat/shared`` refer to the same configured SDK instance. Configuring either supported singleton entry point updates the other:
 
-**For new projects, we recommend:**
 ```swift
-// Modern approach - use static methods
-LicenseSeat.configure(apiKey: "YOUR_API_KEY")
-try await LicenseSeat.activate("LICENSE-KEY")
+LicenseSeatStore.shared.configure(
+    apiKey: "pk_live_…",
+    productSlug: "my-product"
+)
+
+precondition(LicenseSeatStore.shared.status == LicenseSeat.shared.getStatus())
 ```
 
-## Legacy Store Pattern
+The first configuration call wins unless `force: true` is supplied. Forced reconfiguration shuts down the previous instance's initialization, validation, heartbeat, offline-refresh, connectivity, and event-subscription work before binding the replacement. Protected activation data is retained for the replacement when the storage prefix is unchanged.
 
-The store pattern wraps the core `LicenseSeat` instance:
+## SwiftUI Setup
 
 ```swift
-import LicenseSeat
-
 @main
 struct MyApp: App {
     init() {
-        // Legacy configuration
-        LicenseSeatStore.shared.configure(apiKey: Environment.licensingKey)
+        LicenseSeatStore.shared.configure(
+            apiKey: AppConfiguration.publishableKey,
+            productSlug: "my-product"
+        )
     }
 
     var body: some Scene {
         WindowGroup {
             ContentView()
-                .licenseSeat()   // Inject store into environment
+                .licenseSeat()
         }
     }
 }
 ```
 
-## Property Wrappers
+The environment injection is optional for the supplied property wrappers because they observe the shared store directly.
 
-The store provides SwiftUI property wrappers that work with both the legacy store and modern API:
-
-### @LicenseState
+## Observable Status
 
 ```swift
 struct ContentView: View {
-    @LicenseState private var status  // Works with either approach
-    
+    @LicenseState private var status
+
     var body: some View {
         switch status {
-        case .active:         MainAppView()
-        case .inactive:       ActivationView()
-        case .pending:        ProgressView("Validating…")
-        case .invalid:        ErrorView()
-        case .offlineValid:   MainAppView()
-        case .offlineInvalid: ErrorView()
+        case .active, .offlineValid:
+            MainView()
+        case .pending:
+            ProgressView("Validating…")
+        default:
+            ActivationView()
         }
     }
 }
 ```
 
-### @EntitlementState
+Feature gates can use ``EntitlementState``:
 
 ```swift
-struct FeatureView: View {
-    @EntitlementState("premium") private var hasPremium
-    
+struct ExportButton: View {
+    @EntitlementState("export") private var canExport
+
     var body: some View {
-        if hasPremium {
-            PremiumFeatures()
-        } else {
-            UpgradePrompt()
-        }
+        Button("Export", action: export)
+            .disabled(!canExport)
     }
 }
 ```
 
-## Modern Alternative
-
-Instead of using the store, you can achieve the same results with the static API:
+## Imperative Operations
 
 ```swift
-// Configure once
-LicenseSeat.configure(apiKey: "YOUR_API_KEY")
+let store = LicenseSeatStore.shared
 
-// Use anywhere
-class LicenseViewModel: ObservableObject {
-    @Published var status: LicenseStatus = .inactive(message: "")
-    
-    init() {
-        // Subscribe to status changes
-        LicenseSeat.statusPublisher
-            .receive(on: DispatchQueue.main)
-            .assign(to: &$status)
-    }
-    
-    func activate(_ key: String) async throws {
-        try await LicenseSeat.activate(key)
-    }
-}
+let license = try await store.activate("CUSTOMER-KEY")
+let validation = try await store.validate(licenseKey: license.licenseKey)
+let export = store.entitlement("export")
+try await store.heartbeat()
+try await store.deactivate()
+store.reset()
 ```
 
-## API Comparison
+Activation, validation, deactivation, and reset update the published status
+before returning; callers do not have to wait for a later Combine run-loop
+delivery.
 
-| Feature | Modern (Recommended) | Legacy Store |
-|---------|---------------------|--------------|
-| Configure | `LicenseSeat.configure(apiKey:)` | `LicenseSeatStore.shared.configure(apiKey:)` |
-| Activate | `LicenseSeat.activate(_:)` | `LicenseSeatStore.shared.activate(_:)` |
-| Check Status | `LicenseSeat.shared.getStatus()` | `LicenseSeatStore.shared.status` |
-| Entitlements | `LicenseSeat.shared.checkEntitlement(_:)` | `LicenseSeatStore.shared.entitlement(_:)` |
-| Property Wrappers | ✅ Work with both | ✅ Work with both |
+## Detached Stores
 
-## Should You Use the Store?
-
-**Use the modern static API if:**
-- Starting a new project
-- Want consistency with other Swift SDKs
-- Prefer explicit over implicit
-
-**Keep using the store if:**
-- You have existing code using it
-- You prefer the singleton pattern
-- You want the convenience methods
-
-Both approaches are fully supported and will continue to work. The property wrappers (`@LicenseState`, `@EntitlementState`) work seamlessly with either approach.
-
-## Migration Path
-
-To migrate from store to static API:
+Create a detached store for dependency injection or tests:
 
 ```swift
-// Old
-LicenseSeatStore.shared.configure(apiKey: key)
-try await LicenseSeatStore.shared.activate(licenseKey)
-let status = LicenseSeatStore.shared.status
+var config = LicenseSeatConfig(
+    apiKey: "pk_test_…",
+    productSlug: "test-product",
+    autoValidateInterval: 0,
+    heartbeatInterval: 0
+)
 
-// New
-LicenseSeat.configure(apiKey: key)
-try await LicenseSeat.activate(licenseKey)
-let status = LicenseSeat.shared.getStatus()
+let store = LicenseSeatStore(config: config, urlSession: testSession)
 ```
 
-The functionality is identical - only the calling convention changes.
+A detached store does not replace the process-wide singleton.
 
-## Further Reading
+## Diagnostics
 
-- <doc:GettingStarted> - Modern integration guide
-- <doc:ReactiveIntegration> - SwiftUI patterns
-- ``LicenseSeat`` - Core API reference 
+``LicenseSeatStore/debugReport()`` returns status, SDK version, timestamps, a license-key prefix, and a stable truncated SHA-256 fingerprint digest. It does not return the full license key or device fingerprint. Review support reports before transmitting them because timestamps and status can still be customer metadata.
+
+See <doc:ReactiveIntegration> for publisher-based integrations.

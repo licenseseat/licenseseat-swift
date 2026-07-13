@@ -27,7 +27,7 @@ public struct LicenseSeatConfig {
     // MARK: - Constants
 
     /// The current SDK version. Single source of truth for version information.
-    public static let sdkVersion = "0.4.1"
+    public static let sdkVersion = "0.4.2"
 
     /// The production API base URL (v1). Single source of truth for the default endpoint.
     public static let productionAPIBaseURL = "https://licenseseat.com/api/v1"
@@ -67,14 +67,16 @@ public struct LicenseSeatConfig {
     /// Whether to enable debug logging
     public var debug: Bool
 
-    /// Whether to include device telemetry (OS, platform, app version, etc.) with API requests.
+    /// Whether to include device telemetry (OS, platform, app version, etc.) with supported
+    /// licensing POST requests (activation, validation, heartbeat, deactivation, and offline grants).
     ///
     /// Telemetry helps power per-product analytics in the LicenseSeat dashboard (DAU/MAU,
-    /// version adoption, platform distribution). No personally identifiable information is
-    /// collected — see the Telemetry & Privacy section in the README for details.
+    /// version adoption, platform distribution). Device and application attributes can qualify
+    /// as linked personal data under platform policy or privacy law; see <doc:Privacy>.
     ///
-    /// Set to `false` to disable telemetry entirely (e.g., for GDPR compliance).
-    /// Defaults to `true`.
+    /// Set to `false` to omit the optional `telemetry` object. Licensing identifiers, API
+    /// interaction, and the server-visible source IP remain necessary for the service.
+    /// Defaults to `true`; disabling this option alone does not establish legal compliance.
     public var telemetryEnabled: Bool
 
     /// Interval for refreshing offline token (in seconds)
@@ -96,7 +98,9 @@ public struct LicenseSeatConfig {
     /// Strategy for offline fallback during validation.
     public var offlineFallbackMode: OfflineFallbackMode
 
-    /// Maximum number of days to allow offline usage (0 = disabled)
+    /// Maximum age of a signed offline token in days. A value of 0 disables
+    /// this additional SDK-side age cap; the signed token and license expiry
+    /// claims are always enforced.
     public var maxOfflineDays: Int
 
     /// Maximum allowed clock skew (in milliseconds)
@@ -143,4 +147,4 @@ public struct LicenseSeatConfig {
         self.maxOfflineDays = maxOfflineDays
         self.maxClockSkewMs = maxClockSkewMs
     }
-} 
+}
