@@ -2,7 +2,7 @@ import Foundation
 import XCTest
 @testable import LicenseSeat
 
-final class LicenseCacheTests: XCTestCase {
+final class LicenseCacheTests: LicenseSeatTestCase {
     private var prefix: String!
     private var suiteName: String!
     private var defaults: UserDefaults!

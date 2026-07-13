@@ -4,7 +4,7 @@ import Combine
 #endif
 @testable import LicenseSeat
 
-final class EventBusTests: XCTestCase {
+final class EventBusTests: LicenseSeatTestCase {
 
     var eventBus: EventBus!
     var cancellables: [AnyCancellable] = []
@@ -182,7 +182,7 @@ final class EventBusTests: XCTestCase {
 
 #if canImport(Combine)
 @MainActor
-final class CombineDemandTests: XCTestCase {
+final class CombineDemandTests: LicenseSeatTestCase {
     func testEventPublisherHonorsFiniteSubscriberDemand() async {
         let config = LicenseSeatConfig(
             productSlug: "demand-test",

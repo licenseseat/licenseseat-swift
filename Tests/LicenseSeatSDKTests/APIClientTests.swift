@@ -17,7 +17,7 @@ import FoundationNetworking
 @testable import LicenseSeat
 
 @MainActor
-final class APIClientTests: XCTestCase {
+final class APIClientTests: LicenseSeatTestCase {
     private var config: LicenseSeatConfig!
     private var apiClient: APIClient!
     private var requestCount: Int!
@@ -41,8 +41,9 @@ final class APIClientTests: XCTestCase {
         apiClient = APIClient(config: config, session: session)
     }
     
-    override func tearDown() async throws {
+    override func tearDown() {
         URLProtocol.unregisterClass(MockURLProtocol.self)
+        super.tearDown()
     }
     
     func testSuccessfulGETRequest() async throws {

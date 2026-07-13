@@ -9,15 +9,18 @@ import Combine
 
 // swiftlint:disable implicitly_unwrapped_optional
 @MainActor
-final class AutoValidationTests: XCTestCase {
+final class AutoValidationTests: LicenseSeatTestCase {
     private var sdk: LicenseSeat!
     private var cancellables: Set<AnyCancellable> = []
     
-    override func tearDown() async throws {
-        sdk?.reset()
-        sdk = nil
-        MockURLProtocol.reset()
-        cancellables.removeAll()
+    override func tearDown() {
+        MainActor.assumeIsolated {
+            sdk?.reset()
+            sdk = nil
+            MockURLProtocol.reset()
+            cancellables.removeAll()
+        }
+        super.tearDown()
     }
     
     private static let testProductSlug = "test-app"

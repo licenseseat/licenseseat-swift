@@ -17,7 +17,7 @@ import SwiftUI
 #endif
 
 @MainActor
-final class LicenseSeatStoreTests: XCTestCase {
+final class LicenseSeatStoreTests: LicenseSeatTestCase {
     private var store: LicenseSeatStore!
     private var cancellables: Set<AnyCancellable> = []
 
@@ -48,14 +48,17 @@ final class LicenseSeatStoreTests: XCTestCase {
         store = LicenseSeatStore(config: config, urlSession: session)
     }
 
-    override func tearDown() async throws {
-        // Stop any running auto-validation
-        store?.seat?.reset()
-        LicenseSeatStore.shared.seat?.reset()
-        store = nil
-        
-        URLProtocol.unregisterClass(MockURLProtocol.self)
-        cancellables.removeAll()
+    override func tearDown() {
+        MainActor.assumeIsolated {
+            // Stop any running auto-validation
+            store?.seat?.reset()
+            LicenseSeatStore.shared.seat?.reset()
+            store = nil
+
+            URLProtocol.unregisterClass(MockURLProtocol.self)
+            cancellables.removeAll()
+        }
+        super.tearDown()
     }
 
     // MARK: – Helpers

@@ -9,7 +9,7 @@ import XCTest
 @testable import LicenseSeat
 
 @MainActor
-final class EntitlementTests: XCTestCase {
+final class EntitlementTests: LicenseSeatTestCase {
     var sdk: LicenseSeat?
 
     private static let testProductSlug = "test-app"
@@ -23,9 +23,12 @@ final class EntitlementTests: XCTestCase {
         sdk?.cache.clear()
     }
 
-    override func tearDown() async throws {
-        sdk?.reset()
-        sdk = nil
+    override func tearDown() {
+        MainActor.assumeIsolated {
+            sdk?.reset()
+            sdk = nil
+        }
+        super.tearDown()
     }
 
     /// Helper to create a mock validation response with entitlements

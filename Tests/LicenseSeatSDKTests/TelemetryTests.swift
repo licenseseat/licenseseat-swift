@@ -16,7 +16,7 @@ import Combine
 
 // MARK: - TelemetryPayload Unit Tests
 
-final class TelemetryPayloadTests: XCTestCase {
+final class TelemetryPayloadTests: LicenseSeatTestCase {
 
     func testCollectReturnsAllRequiredFields() {
         let payload = TelemetryPayload.collect()
@@ -227,7 +227,7 @@ final class TelemetryPayloadTests: XCTestCase {
 // MARK: - Telemetry Sent With API Requests
 
 @MainActor
-final class TelemetryAPIIntegrationTests: XCTestCase {
+final class TelemetryAPIIntegrationTests: LicenseSeatTestCase {
     private static let testProductSlug = "test-app"
 
     /// Read the request body from either httpBody or httpBodyStream
@@ -412,13 +412,16 @@ final class TelemetryAPIIntegrationTests: XCTestCase {
 // MARK: - Heartbeat Timer Tests
 
 @MainActor
-final class HeartbeatTimerTests: XCTestCase {
+final class HeartbeatTimerTests: LicenseSeatTestCase {
     private var cancellables: Set<AnyCancellable> = []
     private static let testProductSlug = "test-app"
 
-    override func tearDown() async throws {
-        MockURLProtocol.reset()
-        cancellables.removeAll()
+    override func tearDown() {
+        MainActor.assumeIsolated {
+            MockURLProtocol.reset()
+            cancellables.removeAll()
+        }
+        super.tearDown()
     }
 
     func testHeartbeatIntervalDefaultValue() {
@@ -848,7 +851,7 @@ final class HeartbeatTimerTests: XCTestCase {
 
 // MARK: - Config Default Tests (heartbeat)
 
-final class HeartbeatConfigTests: XCTestCase {
+final class HeartbeatConfigTests: LicenseSeatTestCase {
 
     func testDefaultConfigIncludesHeartbeatInterval() {
         let config = LicenseSeatConfig.default

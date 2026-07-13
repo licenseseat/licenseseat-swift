@@ -13,8 +13,25 @@ import Combine
 #endif
 @testable import LicenseSeat
 
+private final class RequestPathRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var paths = [String]()
+
+    func append(_ path: String) {
+        lock.lock()
+        paths.append(path)
+        lock.unlock()
+    }
+
+    func snapshot() -> [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return paths
+    }
+}
+
 @MainActor
-final class LicenseSeatSDKTests: XCTestCase {
+final class LicenseSeatSDKTests: LicenseSeatTestCase {
     private var sdk: LicenseSeat?
     private var cancellables = Set<AnyCancellable>()
 
@@ -41,11 +58,14 @@ final class LicenseSeatSDKTests: XCTestCase {
         sdk?.cache.clear() // clean slate
     }
 
-    override func tearDown() async throws {
-        sdk?.reset()
-        sdk = nil
-        URLProtocol.unregisterClass(MockURLProtocol.self)
-        cancellables.removeAll()
+    override func tearDown() {
+        MainActor.assumeIsolated {
+            sdk?.reset()
+            sdk = nil
+            URLProtocol.unregisterClass(MockURLProtocol.self)
+            cancellables.removeAll()
+        }
+        super.tearDown()
     }
 
     /// Helper to create a mock activation response
@@ -223,13 +243,13 @@ final class LicenseSeatSDKTests: XCTestCase {
 
     func testActivationValidationDeactivationFlow() async throws {
         let licenseKey = "TEST-KEY"
-        var requestSequence = [String]()
+        let requestPaths = RequestPathRecorder()
 
         MockURLProtocol.requestHandler = { request in
             guard let url = request.url else {
                 throw URLError(.badURL)
             }
-            requestSequence.append(url.path)
+            requestPaths.append(url.path)
 
             // New v1 API paths: /products/{slug}/licenses/{key}/activate|validate|deactivate
             if url.path.contains("/activate") {
@@ -295,12 +315,27 @@ final class LicenseSeatSDKTests: XCTestCase {
             timeout: 5
         )
 
-        // Ensure correct endpoints called in order
-        XCTAssertGreaterThanOrEqual(requestSequence.count, 3)
-        // Should be product-scoped URLs
-        XCTAssertTrue(requestSequence[0].contains("/products/\(Self.testProductSlug)/licenses/\(licenseKey)/activate"))
-        XCTAssertTrue(requestSequence[1].contains("/products/\(Self.testProductSlug)/licenses/\(licenseKey)/validate"))
-        XCTAssertTrue(requestSequence.last?.contains("/products/\(Self.testProductSlug)/licenses/\(licenseKey)/deactivate") ?? false)
+        // Activation starts background offline-asset synchronization, so a
+        // signing-key or token request may race after deactivation. Verify the
+        // ordered lifecycle subsequence without assuming it owns the final
+        // request, and snapshot under a lock because URLProtocol callbacks can
+        // execute concurrently with the main-actor test.
+        let expectedLifecycleSuffixes = [
+            "/products/\(Self.testProductSlug)/licenses/\(licenseKey)/activate",
+            "/products/\(Self.testProductSlug)/licenses/\(licenseKey)/validate",
+            "/products/\(Self.testProductSlug)/licenses/\(licenseKey)/deactivate"
+        ]
+        let lifecyclePaths = requestPaths.snapshot().filter { path in
+            expectedLifecycleSuffixes.contains { path.hasSuffix($0) }
+        }
+
+        XCTAssertEqual(lifecyclePaths.count, expectedLifecycleSuffixes.count)
+        for (actual, expectedSuffix) in zip(lifecyclePaths, expectedLifecycleSuffixes) {
+            XCTAssertTrue(
+                actual.hasSuffix(expectedSuffix),
+                "Expected lifecycle path suffix \(expectedSuffix), got \(actual)"
+            )
+        }
     }
 
     func testProductSlugRequired() async {

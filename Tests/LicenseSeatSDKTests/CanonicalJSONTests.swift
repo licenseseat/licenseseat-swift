@@ -1,7 +1,7 @@
 import XCTest
 @testable import LicenseSeat
 
-final class CanonicalJSONTests: XCTestCase {
+final class CanonicalJSONTests: LicenseSeatTestCase {
     func testCanonicalizationSortsKeysRecursively() throws {
         let obj: [String: Any] = [
             "b": 1,
@@ -19,4 +19,4 @@ final class CanonicalJSONTests: XCTestCase {
         let rangeB = string1.range(of: "\"b\"")!
         XCTAssertLessThan(rangeA.lowerBound, rangeB.lowerBound)
     }
-} 
+}

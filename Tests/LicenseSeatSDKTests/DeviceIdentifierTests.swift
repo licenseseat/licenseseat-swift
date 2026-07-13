@@ -1,7 +1,7 @@
 import XCTest
 @testable import LicenseSeat
 
-final class DeviceIdentifierTests: XCTestCase {
+final class DeviceIdentifierTests: LicenseSeatTestCase {
     private var defaults: UserDefaults!
     private var keychainServiceSuffix: String!
 

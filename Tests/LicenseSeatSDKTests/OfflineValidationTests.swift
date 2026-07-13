@@ -14,7 +14,7 @@ import Crypto
 @testable import LicenseSeat
 
 @MainActor
-final class OfflineValidationTests: XCTestCase {
+final class OfflineValidationTests: LicenseSeatTestCase {
     private struct CrossLanguageFixture: Decodable {
         let publicKey: String
         let offlineToken: OfflineTokenResponse
@@ -44,9 +44,12 @@ final class OfflineValidationTests: XCTestCase {
         sdk.cache.clear()
     }
 
-    override func tearDown() async throws {
-        sdk.reset()
-        sdk = nil
+    override func tearDown() {
+        MainActor.assumeIsolated {
+            sdk.reset()
+            sdk = nil
+        }
+        super.tearDown()
     }
 
     /// Helper to create an offline token with given parameters and sign it
@@ -146,6 +149,10 @@ final class OfflineValidationTests: XCTestCase {
     }
 
     func testRubyGemSignedFixtureVerifiesInSwift() async throws {
+        // This deterministic Ruby fixture deliberately includes Unicode,
+        // escapes, slashes, nested arrays, Int64.max, negative zero, and
+        // scientific/fractional numbers in metadata. Verification therefore
+        // covers JSON decoding/re-encoding as well as Base64 and Ed25519.
         let fixtureURL = try XCTUnwrap(
             Bundle.module.url(
                 forResource: "ruby_signed_offline_token",
@@ -245,6 +252,34 @@ final class OfflineValidationTests: XCTestCase {
         // Then
         XCTAssertFalse(result.valid)
         XCTAssertEqual(result.code, "token_expired")
+    }
+
+    func testTokenIsExpiredAtTheExactExpirationSecond() throws {
+        let privateKey = Curve25519.Signing.PrivateKey()
+        let now = 1_700_000_000
+        let offlineToken = try makeOfflineToken(
+            iat: now,
+            exp: now,
+            nbf: now,
+            privateKey: privateKey
+        )
+
+        XCTAssertNoThrow(
+            try sdk.validateOfflineTimeClaims(
+                offlineToken.token,
+                nowUnix: now - 1,
+                clockSkewSeconds: 300
+            )
+        )
+        XCTAssertThrowsError(
+            try sdk.validateOfflineTimeClaims(
+                offlineToken.token,
+                nowUnix: now,
+                clockSkewSeconds: 300
+            )
+        ) { error in
+            XCTAssertEqual((error as? OfflineVerificationFailure)?.code, "token_expired")
+        }
     }
 
     func testTokenNotYetValid() async throws {
@@ -443,6 +478,35 @@ final class OfflineValidationTests: XCTestCase {
 
         XCTAssertFalse(result.valid)
         XCTAssertEqual(result.code, "license_expired")
+    }
+
+    func testLicenseIsExpiredAtTheExactExpirationSecond() throws {
+        let privateKey = Curve25519.Signing.PrivateKey()
+        let now = 1_700_000_000
+        let offlineToken = try makeOfflineToken(
+            iat: now - 60,
+            exp: now + 60,
+            nbf: now - 60,
+            licenseExpiresAt: now,
+            privateKey: privateKey
+        )
+
+        XCTAssertNoThrow(
+            try sdk.validateOfflineTimeClaims(
+                offlineToken.token,
+                nowUnix: now - 1,
+                clockSkewSeconds: 300
+            )
+        )
+        XCTAssertThrowsError(
+            try sdk.validateOfflineTimeClaims(
+                offlineToken.token,
+                nowUnix: now,
+                clockSkewSeconds: 300
+            )
+        ) { error in
+            XCTAssertEqual((error as? OfflineVerificationFailure)?.code, "license_expired")
+        }
     }
 
     func testUnsupportedSchemaFails() async throws {

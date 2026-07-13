@@ -13,7 +13,7 @@ import Foundation
 // MARK: - ActivationResponse Decoding Tests
 
 /// Tests for ActivationResponse decoding (new v1 API format)
-final class ActivationResponseDecodingTests: XCTestCase {
+final class ActivationResponseDecodingTests: LicenseSeatTestCase {
 
     private let decoder: JSONDecoder = {
         let d = JSONDecoder()
@@ -119,7 +119,7 @@ final class ActivationResponseDecodingTests: XCTestCase {
 
 // MARK: - DeactivationResponse Decoding Tests
 
-final class DeactivationResponseDecodingTests: XCTestCase {
+final class DeactivationResponseDecodingTests: LicenseSeatTestCase {
 
     private let decoder: JSONDecoder = {
         let d = JSONDecoder()
@@ -147,7 +147,7 @@ final class DeactivationResponseDecodingTests: XCTestCase {
 // MARK: - ValidationResponse Decoding Tests
 
 /// Tests for ValidationResponse decoding (new v1 API format)
-final class ValidationResponseDecodingTests: XCTestCase {
+final class ValidationResponseDecodingTests: LicenseSeatTestCase {
 
     private let decoder: JSONDecoder = {
         let d = JSONDecoder()
@@ -281,7 +281,7 @@ final class ValidationResponseDecodingTests: XCTestCase {
 
 // MARK: - OfflineTokenResponse Decoding Tests
 
-final class OfflineTokenResponseDecodingTests: XCTestCase {
+final class OfflineTokenResponseDecodingTests: LicenseSeatTestCase {
 
     private let decoder: JSONDecoder = {
         let d = JSONDecoder()
@@ -344,7 +344,7 @@ final class OfflineTokenResponseDecodingTests: XCTestCase {
 
 // MARK: - SigningKeyResponse Decoding Tests
 
-final class SigningKeyResponseDecodingTests: XCTestCase {
+final class SigningKeyResponseDecodingTests: LicenseSeatTestCase {
 
     private let decoder: JSONDecoder = {
         let d = JSONDecoder()
@@ -377,7 +377,7 @@ final class SigningKeyResponseDecodingTests: XCTestCase {
 
 // MARK: - HealthResponse Decoding Tests
 
-final class HealthResponseDecodingTests: XCTestCase {
+final class HealthResponseDecodingTests: LicenseSeatTestCase {
 
     private let decoder: JSONDecoder = {
         let d = JSONDecoder()
@@ -406,7 +406,7 @@ final class HealthResponseDecodingTests: XCTestCase {
 
 // MARK: - Entitlement Decoding Tests
 
-final class EntitlementDecodingTests: XCTestCase {
+final class EntitlementDecodingTests: LicenseSeatTestCase {
 
     private let decoder: JSONDecoder = {
         let d = JSONDecoder()
@@ -459,7 +459,7 @@ final class EntitlementDecodingTests: XCTestCase {
 
 // MARK: - Configuration Tests
 
-final class ConfigurationTests: XCTestCase {
+final class ConfigurationTests: LicenseSeatTestCase {
 
     func testProductionAPIBaseURLConstant() {
         XCTAssertEqual(LicenseSeatConfig.productionAPIBaseURL, "https://licenseseat.com/api/v1")
@@ -511,7 +511,7 @@ final class ConfigurationTests: XCTestCase {
 
 // MARK: - APIError Tests
 
-final class APIErrorDecodingTests: XCTestCase {
+final class APIErrorDecodingTests: LicenseSeatTestCase {
 
     func testParsesNewErrorFormat() {
         let errorJSON: [String: Any] = [
@@ -628,7 +628,7 @@ final class APIErrorDecodingTests: XCTestCase {
 
 // MARK: - Type-erased metadata equality
 
-final class AnyCodableEqualityTests: XCTestCase {
+final class AnyCodableEqualityTests: LicenseSeatTestCase {
     func testNestedJSONValuesCompareRecursively() {
         let lhs = AnyCodable([
             "array": [1, true, "value", NSNull()] as [Any],

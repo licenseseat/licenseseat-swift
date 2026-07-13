@@ -1,7 +1,7 @@
 import XCTest
 @testable import LicenseSeat
 
-final class Base64URLTests: XCTestCase {
+final class Base64URLTests: LicenseSeatTestCase {
     func testRoundTripUsesUnpaddedURLSafeEncoding() throws {
         let data = Data([0xfb, 0xff, 0xef])
         let encoded = Base64URL.encode(data)

@@ -14,7 +14,7 @@ import CryptoKit
 import Crypto
 #endif
 
-private struct OfflineVerificationFailure: Error {
+struct OfflineVerificationFailure: Error {
     let code: String
 }
 
@@ -181,7 +181,7 @@ extension LicenseSeat {
         return Int(min(configuredClockSkew / 1_000, Double(Int.max - nowUnix)))
     }
 
-    private func validateOfflineTimeClaims(
+    func validateOfflineTimeClaims(
         _ token: OfflineTokenResponse.TokenPayload,
         nowUnix: Int,
         clockSkewSeconds: Int
@@ -189,7 +189,7 @@ extension LicenseSeat {
         guard token.iat <= nowUnix + clockSkewSeconds else {
             throw OfflineVerificationFailure(code: "clock_tamper")
         }
-        guard nowUnix <= token.exp else {
+        guard nowUnix < token.exp else {
             throw OfflineVerificationFailure(code: "token_expired")
         }
         guard token.iat <= token.nbf, token.nbf <= token.exp else {
@@ -198,7 +198,7 @@ extension LicenseSeat {
         guard nowUnix + clockSkewSeconds >= token.nbf else {
             throw OfflineVerificationFailure(code: "token_not_yet_valid")
         }
-        if let licenseExpiresAt = token.licenseExpiresAt, nowUnix > licenseExpiresAt {
+        if let licenseExpiresAt = token.licenseExpiresAt, nowUnix >= licenseExpiresAt {
             throw OfflineVerificationFailure(code: "license_expired")
         }
     }
