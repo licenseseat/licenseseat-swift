@@ -64,6 +64,17 @@ jobs:
       - name: Swift version
         run: swift --version
 
+      # The repository lockfile stays on SwiftASN1 1.4.x so the Swift 5.10
+      # compiler-floor lane can load it. Exercise the current exact dependency
+      # surface here as well; downstream package consumers resolve according to
+      # their own root lockfiles.
+      - name: Resolve current SwiftASN1
+        run: |
+          rm Package.resolved
+          swift package resolve
+          swift package show-dependencies --format text \
+            | grep -Fq 'swift-asn1<https://github.com/apple/swift-asn1.git@1.7.1>'
+
       - name: Strict production build
         run: >-
           swift build
