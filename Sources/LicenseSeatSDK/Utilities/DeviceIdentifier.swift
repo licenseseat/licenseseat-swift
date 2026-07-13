@@ -40,6 +40,23 @@ enum DeviceIdentifier {
         return identifier
     }
 
+    /// Preserve the exact installation identity already bound to a cached
+    /// activation. This lets clients stop supplying a legacy hardware-derived
+    /// override without consuming a new seat after that activation is later
+    /// deactivated or replaced.
+    static func adoptCachedLicenseIdentifier(
+        _ identifier: String,
+        userDefaults: UserDefaults = .standard,
+        keychainServiceSuffix: String = ""
+    ) {
+        guard !identifier.isEmpty else { return }
+        cacheIdentifier(
+            identifier,
+            userDefaults: userDefaults,
+            keychainServiceSuffix: keychainServiceSuffix
+        )
+    }
+
     private static var platformPrefix: String {
         #if os(macOS)
         return "mac"
@@ -93,10 +110,12 @@ enum DeviceIdentifier {
         keychainServiceSuffix: String
     ) {
         #if canImport(Security)
-        if !storeKeychainIdentifier(
+        if storeKeychainIdentifier(
             identifier,
             keychainServiceSuffix: keychainServiceSuffix
         ) {
+            userDefaults.removeObject(forKey: cacheKey)
+        } else {
             // A usable installation identity is more important than silently
             // changing fingerprints on every launch when Keychain is
             // unavailable or misconfigured.

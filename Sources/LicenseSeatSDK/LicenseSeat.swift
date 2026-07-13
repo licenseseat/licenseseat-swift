@@ -197,6 +197,9 @@ public final class LicenseSeat {
 
         // Check for cached license
         if let cachedLicense = cache.getLicense() {
+            if config.deviceIdentifier == nil {
+                DeviceIdentifier.adoptCachedLicenseIdentifier(cachedLicense.deviceId)
+            }
             eventBus.emit("license:loaded", cachedLicense)
 
             // Complete local verification before starting the online request.

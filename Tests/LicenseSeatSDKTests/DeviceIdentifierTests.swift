@@ -91,6 +91,32 @@ final class DeviceIdentifierTests: LicenseSeatTestCase {
         XCTAssertEqual(generateIdentifier(), first)
     }
 
+    func testCachedActivationIdentifierCanSeedProtectedInstallationIdentity() {
+        let cachedActivationIdentifier = "mac-existing-activation"
+
+        DeviceIdentifier.adoptCachedLicenseIdentifier(
+            cachedActivationIdentifier,
+            userDefaults: defaults,
+            keychainServiceSuffix: keychainServiceSuffix
+        )
+
+        XCTAssertEqual(generateIdentifier(), cachedActivationIdentifier)
+    }
+
+    func testCachedActivationRemainsAuthoritativeOverConflictingGeneratedIdentity() {
+        let generatedIdentifier = generateIdentifier()
+        let cachedActivationIdentifier = "mac-existing-activation"
+
+        DeviceIdentifier.adoptCachedLicenseIdentifier(
+            cachedActivationIdentifier,
+            userDefaults: defaults,
+            keychainServiceSuffix: keychainServiceSuffix
+        )
+
+        XCTAssertNotEqual(generatedIdentifier, cachedActivationIdentifier)
+        XCTAssertEqual(generateIdentifier(), cachedActivationIdentifier)
+    }
+
     func testGenerateProducesPlatformPrefixedString() {
         let id = generateIdentifier()
 

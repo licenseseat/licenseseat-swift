@@ -40,6 +40,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Recover malformed or isolated valid-length signing-key cache corruption by fetching and verifying the authoritative key exactly once before replacing it
 - Preserve the 0.4.1 `LicenseSeatStore.configure` signature as a compatibility overload while adding the explicit-product form, avoiding a source break in this patch release
 - Keep invalid base-URL/path configuration errors from masquerading as connectivity loss while consistently treating HTTP 408 as a transport-offline signal
+- Adopt a cached activation's existing fingerprint into protected installation-identity storage when the host removes a legacy custom identifier, preventing a later deactivation/reactivation from consuming a new seat
 
 ### Changed
 
