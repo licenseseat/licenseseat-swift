@@ -370,7 +370,7 @@ if result.valid {
 | `productSlug`               | `String?`             | `nil`                              | Product identifier (required)            |
 | `storagePrefix`             | `String`              | `licenseseat_`                     | Prefix for cache keys                    |
 | `deviceIdentifier`          | `String?`             | Auto-generated                     | Custom device ID                         |
-| `autoValidateInterval`      | `TimeInterval`        | `3600` (1 hour)                    | Background validation interval           |
+| `autoValidateInterval`      | `TimeInterval`        | `3600` (1 hour)                    | Launch and periodic online validation interval (`≤ 0` disables both; local signed-cache verification remains enabled) |
 | `heartbeatInterval`         | `TimeInterval`        | `300` (5 min)                      | Standalone heartbeat ping interval       |
 | `networkRecheckInterval`    | `TimeInterval`        | `30`                               | Offline connectivity check interval      |
 | `maxRetries`                | `Int`                 | `3`                                | API retry attempts                       |

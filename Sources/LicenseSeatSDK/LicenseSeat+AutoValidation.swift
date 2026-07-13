@@ -20,8 +20,7 @@ extension LicenseSeat {
         let interval = config.autoValidateInterval
 
         // Don't start auto-validation if interval is 0 or negative
-        guard interval.isFinite, interval > 0,
-              interval <= Double(UInt64.max) / 1_000_000_000 else {
+        guard config.automaticValidationEnabled else {
             log("Auto-validation disabled (interval: \(interval))")
             return
         }

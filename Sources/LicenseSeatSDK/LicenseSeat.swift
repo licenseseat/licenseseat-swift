@@ -224,33 +224,42 @@ public final class LicenseSeat {
                 startHeartbeat()
                 scheduleOfflineRefresh()
 
-                // Background validation
-                backgroundValidationTask?.cancel()
-                backgroundValidationTask = Task { @MainActor [weak self] in
-                    // Keep network I/O in an unstructured child. Cancelling this
-                    // scheduler during reset must not propagate into
-                    // FoundationNetworking while URLSession is completing.
-                    let operation = Task { @MainActor [weak self] in
-                        guard let self else { return }
-                        do {
-                            _ = try await self.validate(licenseKey: cachedLicense.licenseKey)
-                        } catch {
-                            self.log("Background validation failed:", error)
-
-                            if let apiError = error as? APIError,
-                               apiError.status == 401 || apiError.status == 501 {
-                                self.log("Authentication issue during validation, using cached license data")
-                                self.eventBus.emit("validation:auth-failed", [
-                                    "licenseKey": cachedLicense.licenseKey,
-                                    "error": error,
-                                    "cached": true
-                                ])
-                            }
-                        }
-                    }
-                    await operation.value
+                // Launch-time online validation follows the same opt-out as
+                // periodic validation. Hosts that set the interval to zero own
+                // the online cadence; local signed-cache verification above,
+                // heartbeat, and offline-token refresh remain independent.
+                if config.automaticValidationEnabled {
+                    startBackgroundValidation(for: cachedLicense)
                 }
             }
+        }
+    }
+
+    /// Start the opt-in launch validation without making initialization own
+    /// URLSession cancellation. FoundationNetworking can otherwise be left
+    /// completing a request while reset tears down its scheduler task.
+    private func startBackgroundValidation(for cachedLicense: License) {
+        backgroundValidationTask?.cancel()
+        backgroundValidationTask = Task { @MainActor [weak self] in
+            let operation = Task { @MainActor [weak self] in
+                guard let self else { return }
+                do {
+                    _ = try await self.validate(licenseKey: cachedLicense.licenseKey)
+                } catch {
+                    self.log("Background validation failed:", error)
+
+                    if let apiError = error as? APIError,
+                       apiError.status == 401 || apiError.status == 501 {
+                        self.log("Authentication issue during validation, using cached license data")
+                        self.eventBus.emit("validation:auth-failed", [
+                            "licenseKey": cachedLicense.licenseKey,
+                            "error": error,
+                            "cached": true
+                        ])
+                    }
+                }
+            }
+            await operation.value
         }
     }
 

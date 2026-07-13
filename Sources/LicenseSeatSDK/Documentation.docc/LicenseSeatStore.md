@@ -105,6 +105,9 @@ let store = LicenseSeatStore(config: config, urlSession: testSession)
 ```
 
 A detached store does not replace the process-wide singleton.
+An `autoValidateInterval` of zero disables both launch-time and periodic online
+validation, which lets a host or test own the online cadence without disabling
+local signed-cache verification.
 
 ## Diagnostics
 

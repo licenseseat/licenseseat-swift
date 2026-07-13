@@ -135,4 +135,53 @@ final class AutoValidationTests: LicenseSeatTestCase {
 
         await assertFulfillment(of: [fired], timeout: 1.0)
     }
+
+    @MainActor
+    func testDisabledAutoValidationDoesNotSendLaunchRequestForCachedLicense() async {
+        let unexpectedRequest = expectation(description: "No automatic online request")
+        unexpectedRequest.isInverted = true
+
+        MockURLProtocol.requestHandler = { request in
+            unexpectedRequest.fulfill()
+            let url = try XCTUnwrap(request.url)
+            let response = try XCTUnwrap(HTTPURLResponse(
+                url: url,
+                statusCode: 500,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            ))
+            return (response, Data("{}".utf8))
+        }
+
+        let sessionConfiguration = URLSessionConfiguration.ephemeral
+        sessionConfiguration.protocolClasses = [MockURLProtocol.self]
+        let session = URLSession(configuration: sessionConfiguration)
+        let config = LicenseSeatConfig(
+            apiBaseUrl: "https://example.com",
+            apiKey: "test-api-key",
+            productSlug: Self.testProductSlug,
+            storagePrefix: "disabled_auto_validation_test_\(UUID().uuidString)_",
+            deviceIdentifier: "test-device",
+            autoValidateInterval: 0,
+            heartbeatInterval: 0,
+            offlineTokenRefreshInterval: 0
+        )
+
+        // The initialization task is main-actor isolated, so this synchronous
+        // seed deterministically precedes its first read of protected storage.
+        sdk = LicenseSeat(config: config, urlSession: session)
+        XCTAssertTrue(sdk.cache.setLicense(License(
+            licenseKey: "CACHED-LICENSE",
+            deviceId: "test-device",
+            activationId: "cached-activation",
+            activatedAt: Date(timeIntervalSince1970: 1_700_000_000),
+            lastValidated: Date(timeIntervalSince1970: 1_700_000_100)
+        )))
+
+        await sdk.waitForInitialization()
+
+        XCTAssertNil(sdk.validationTask)
+        XCTAssertNil(sdk.backgroundValidationTask)
+        await assertFulfillment(of: [unexpectedRequest], timeout: 0.2)
+    }
 }

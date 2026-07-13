@@ -48,6 +48,12 @@ LicenseSeat.configure(
 
 `maxOfflineDays` adds an application-side maximum age measured from the signed `iat` claim. Zero removes this extra cap; token expiry and the underlying license expiry are still enforced.
 
+Set `autoValidateInterval` to zero or a negative value when the host application
+owns the online-validation cadence. This disables both the launch-time online
+request and the periodic validation task. It does not disable launch-time local
+verification of a cached signed offline grant, heartbeat, or offline-token
+refresh; configure those independent intervals separately when needed.
+
 ## Activate
 
 ```swift

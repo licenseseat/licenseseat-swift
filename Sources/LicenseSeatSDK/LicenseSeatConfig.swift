@@ -47,8 +47,21 @@ public struct LicenseSeatConfig {
     /// Custom device identifier (optional)
     public var deviceIdentifier: String?
 
-    /// Interval for automatic validation (in seconds)
+    /// Interval for automatic online validation (in seconds).
+    /// Set to 0 or negative to disable both launch-time and periodic online
+    /// validation. Local verification of a cached signed offline grant is
+    /// unaffected, so hosts can own their validation cadence without weakening
+    /// offline enforcement.
     public var autoValidateInterval: TimeInterval
+
+    /// A single policy predicate shared by launch-time and periodic scheduling.
+    /// The upper bound prevents conversion overflow when the interval is
+    /// converted to nanoseconds for `Task.sleep`.
+    internal var automaticValidationEnabled: Bool {
+        autoValidateInterval.isFinite &&
+            autoValidateInterval > 0 &&
+            autoValidateInterval <= Double(UInt64.max) / 1_000_000_000
+    }
 
     /// Interval for standalone heartbeat pings (in seconds).
     /// Independent from auto-validation; provides more frequent liveness updates.

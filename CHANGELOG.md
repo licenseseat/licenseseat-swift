@@ -36,6 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Preserve explicit `expires_at: null` claims while reconstructing Ruby-signed canonical entitlement payloads
 - Surface an unexpectedly empty typed HTTP success as a decoding error instead of trapping in a generic force cast
 - Advance the protected rollback watermark after successful heartbeats, including deployments that disable periodic validation
+- Honor disabled automatic validation for both launch-time and periodic online requests, while retaining local signed-cache verification and independently configured heartbeat/offline refresh
 - Recover malformed or isolated valid-length signing-key cache corruption by fetching and verifying the authoritative key exactly once before replacing it
 - Preserve the 0.4.1 `LicenseSeatStore.configure` signature as a compatibility overload while adding the explicit-product form, avoiding a source break in this patch release
 - Keep invalid base-URL/path configuration errors from masquerading as connectivity loss while consistently treating HTTP 408 as a transport-offline signal
