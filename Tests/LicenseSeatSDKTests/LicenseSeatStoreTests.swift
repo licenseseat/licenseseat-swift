@@ -234,20 +234,34 @@ final class LicenseSeatStoreTests: LicenseSeatTestCase {
             }
             .store(in: &cancellables)
 
-        // Trigger activation (which schedules auto-validation)
+        // Trigger activation (which schedules auto-validation). Bound the
+        // scheduler's wall-clock sample between two timestamps instead of
+        // asserting that the published date is still in the future: a slow CI
+        // executor can legitimately deliver a 200 ms test interval after it
+        // has elapsed.
+        let activationStartedAt = Date()
         _ = try await store.activate("LICENSE-TEST-123")
 
         await assertFulfillment(of: [exp], timeout: 2.0)
+        let observationCompletedAt = Date()
 
         guard let nextRun = store.nextAutoValidationAt else {
             XCTFail("nextAutoValidationAt should not be nil after activation")
             return
         }
 
-        // The next run should be roughly interval seconds in the future.
-        let delta = nextRun.timeIntervalSinceNow
-        XCTAssertGreaterThan(delta, 0)
-        XCTAssertLessThanOrEqual(delta, interval + 0.3) // Allow some scheduling slop
+        // `startAutoValidation` samples Date() after activation starts and no
+        // later than the observation above, then adds the configured interval.
+        // These bounds prove the propagated value without depending on runner
+        // speed or requiring the deliberately tiny interval to remain pending.
+        XCTAssertGreaterThanOrEqual(
+            nextRun,
+            activationStartedAt.addingTimeInterval(interval)
+        )
+        XCTAssertLessThanOrEqual(
+            nextRun,
+            observationCompletedAt.addingTimeInterval(interval)
+        )
     }
     #endif
 
