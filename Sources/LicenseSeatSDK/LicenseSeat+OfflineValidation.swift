@@ -229,6 +229,9 @@ extension LicenseSeat {
            now.timeIntervalSince1970 + Double(clockSkewSeconds) < lastSeen {
             throw OfflineVerificationFailure(code: "clock_tamper")
         }
+        // An offline success may only ratchet the watermark forward — a
+        // rolled-back clock must never lower it. Authoritative online
+        // successes re-anchor via `anchorLastSeenTimestamp(_:)` instead.
         guard cache.setLastSeenTimestamp(now.timeIntervalSince1970) else {
             throw OfflineVerificationFailure(code: "cache_error")
         }

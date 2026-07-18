@@ -167,7 +167,12 @@ private extension LicenseSeat {
         }
 
         if result.valid {
-            guard cache.setLastSeenTimestamp(Date().timeIntervalSince1970) else {
+            // The server just accepted an authenticated validation, so the
+            // current local time is the best available trust anchor.
+            // Re-anchoring (possibly lowering) recovers a watermark poisoned
+            // by a transiently future-set clock. See
+            // `LicenseCache.anchorLastSeenTimestamp(_:)`.
+            guard cache.anchorLastSeenTimestamp(Date().timeIntervalSince1970) else {
                 throw LicenseSeatError.cacheError
             }
             eventBus.emit("validation:success", result)

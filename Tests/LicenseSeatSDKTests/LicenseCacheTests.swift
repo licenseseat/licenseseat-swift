@@ -79,7 +79,10 @@ final class LicenseCacheTests: LicenseSeatTestCase {
         cache.clear()
         XCTAssertNil(cache.getOfflineToken())
         XCTAssertNil(cache.getPublicKey("kid-1"))
-        XCTAssertNil(cache.getLastSeenTimestamp())
+        // The clock-rollback watermark deliberately survives clear(), like
+        // the installation identifier: a reset combined with a clock rollback
+        // and re-imported artifact files must not extend an offline window.
+        XCTAssertEqual(cache.getLastSeenTimestamp() ?? 0, timestamp, accuracy: 0.001)
     }
 
     func testMigratesLegacyClockTimestamp() {
@@ -97,6 +100,46 @@ final class LicenseCacheTests: LicenseSeatTestCase {
         XCTAssertTrue(cache.setLastSeenTimestamp(1_000))
 
         XCTAssertEqual(cache.getLastSeenTimestamp(), 2_000)
+    }
+
+    func testClearPreservesClockRollbackWatermark() {
+        XCTAssertTrue(cache.setLastSeenTimestamp(1_700_000_000))
+
+        cache.clear()
+
+        XCTAssertEqual(
+            cache.getLastSeenTimestamp(),
+            1_700_000_000,
+            "clear/reset must preserve the rollback watermark like the installation identifier"
+        )
+    }
+
+    func testAuthoritativeAnchorMayLowerWatermark() {
+        // A transiently future-set clock poisoned the ratcheting watermark.
+        XCTAssertTrue(cache.setLastSeenTimestamp(4_102_444_800))
+
+        XCTAssertTrue(cache.anchorLastSeenTimestamp(1_700_000_000))
+        XCTAssertEqual(cache.getLastSeenTimestamp(), 1_700_000_000)
+
+        XCTAssertFalse(cache.anchorLastSeenTimestamp(0))
+        XCTAssertFalse(cache.anchorLastSeenTimestamp(-5))
+        XCTAssertEqual(cache.getLastSeenTimestamp(), 1_700_000_000)
+
+        // The offline ratchet still refuses to move backward after an anchor.
+        XCTAssertTrue(cache.setLastSeenTimestamp(100))
+        XCTAssertEqual(cache.getLastSeenTimestamp(), 1_700_000_000)
+    }
+
+    func testAnchorRemovesStaleLegacyWatermarkSoRatchetCannotRepoisonIt() {
+        // The 0.4.x plaintext slot may still hold the poisoned future value.
+        defaults.set(4_102_444_800.0, forKey: prefix + "last_seen_ts")
+
+        XCTAssertTrue(cache.anchorLastSeenTimestamp(1_700_000_000))
+        XCTAssertEqual(cache.getLastSeenTimestamp(), 1_700_000_000)
+
+        // A later ratcheting write must not resurrect the stale legacy value.
+        XCTAssertTrue(cache.setLastSeenTimestamp(1_700_000_100))
+        XCTAssertEqual(cache.getLastSeenTimestamp(), 1_700_000_100)
     }
 
     func testClearPreservesOtherValuesSharingTheStoragePrefix() {

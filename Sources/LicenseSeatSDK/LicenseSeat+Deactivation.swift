@@ -146,7 +146,10 @@ public extension LicenseSeat {
                     reason: "A newer heartbeat request superseded this response."
                 )
             }
-            guard cache.setLastSeenTimestamp(Date().timeIntervalSince1970) else {
+            // Heartbeat acceptance is an authoritative online contact:
+            // re-anchor (possibly lower) the clock watermark. See
+            // `LicenseCache.anchorLastSeenTimestamp(_:)`.
+            guard cache.anchorLastSeenTimestamp(Date().timeIntervalSince1970) else {
                 throw LicenseSeatError.cacheError
             }
 

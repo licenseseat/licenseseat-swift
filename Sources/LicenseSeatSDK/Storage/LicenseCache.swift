@@ -19,7 +19,18 @@ final class LicenseCache {
         static let publicKeys = "public_keys"
         static let lastSeenTimestamp = "last_seen_ts"
 
-        static let all = [license, offlineToken, publicKeys, lastSeenTimestamp]
+        /// Records deleted by `clear()`.
+        ///
+        /// The clock-rollback watermark (`lastSeenTimestamp`) deliberately
+        /// survives `clear()`/reset, exactly like the installation identifier:
+        /// a local reset combined with a clock rollback and re-imported,
+        /// previously exported signed artifact files must not extend an
+        /// offline window. License and artifact grants die here, so keeping
+        /// the watermark costs nothing; it is re-anchored (and may move
+        /// backward) only by an authoritative online operation — see
+        /// `anchorLastSeenTimestamp(_:)`. This contract is shared with the
+        /// other LicenseSeat SDKs.
+        static let clearedOnReset = [license, offlineToken, publicKeys]
     }
 
     private let prefix: String
@@ -174,13 +185,17 @@ final class LicenseCache {
         return legacyValue
     }
 
+    /// Advance the clock-tamper watermark (ratchet only — never lowers).
+    ///
+    /// Offline verification success must use this method so a rolled-back
+    /// clock can never lower the watermark. Authoritative online successes
+    /// use ``anchorLastSeenTimestamp(_:)`` instead.
     @discardableResult
     func setLastSeenTimestamp(_ timestamp: TimeInterval) -> Bool {
         guard timestamp.isFinite, timestamp > 0 else { return false }
 
-        // A successful online request must never move the clock-tamper
-        // watermark backwards. Preserve the highest protected or legacy value
-        // so a temporary clock rollback cannot extend an offline grant.
+        // Preserve the highest protected or legacy value so a temporary
+        // clock rollback cannot extend an offline grant.
         let protectedValue = readProtectedData(forKey: Key.lastSeenTimestamp)
             .flatMap { String(data: $0, encoding: .utf8) }
             .flatMap(TimeInterval.init)
@@ -198,11 +213,39 @@ final class LicenseCache {
         removeLegacyData(forKey: Key.lastSeenTimestamp)
         return true
     }
-    
+
+    /// Re-anchor the clock-rollback watermark to an authoritative observation.
+    ///
+    /// Unlike ``setLastSeenTimestamp(_:)``, this may LOWER the stored value.
+    /// It must only be called when the server has just accepted an
+    /// authenticated request (activation commit, online validation success,
+    /// heartbeat success): the server accepted the request as valid *now*, so
+    /// the current local time is the best available trust anchor.
+    /// Re-anchoring recovers installations whose watermark was poisoned by a
+    /// transiently future-set clock, while rollback detection continues to
+    /// protect the offline windows between authoritative contacts. This
+    /// contract is shared with the other LicenseSeat SDKs.
+    @discardableResult
+    func anchorLastSeenTimestamp(_ timestamp: TimeInterval) -> Bool {
+        guard timestamp.isFinite, timestamp > 0 else { return false }
+        guard let data = String(timestamp).data(using: .utf8),
+              storeProtectedData(data, forKey: Key.lastSeenTimestamp) else {
+            return false
+        }
+        // The stale (possibly higher) 0.4.x plaintext value must not survive:
+        // the next ratcheting write would max() against it and re-poison the
+        // watermark that was just re-anchored.
+        removeLegacyData(forKey: Key.lastSeenTimestamp)
+        return true
+    }
+
     // MARK: - Clear All
-    
+
+    /// Clear license grants and derived artifacts while preserving the
+    /// clock-rollback watermark (`last_seen_ts`), which only authoritative
+    /// online operations may re-anchor — see `Key.clearedOnReset`.
     func clear() {
-        for key in Key.all {
+        for key in Key.clearedOnReset {
             deleteProtectedData(forKey: key)
             // Remove the matching 0.4.x plaintext representation without
             // deleting other components' values that happen to share the
@@ -211,7 +254,7 @@ final class LicenseCache {
             // consume another licensed seat.
             userDefaults.removeObject(forKey: prefixed(key))
         }
-        
+
         // Clear file storage
         if let url = licenseFileURL {
             try? fileManager.removeItem(at: url)

@@ -140,8 +140,12 @@ private extension LicenseSeat {
         stopHeartbeat()
         stopOfflineRefresh()
 
+        // A committed activation is an authoritative online acceptance, so the
+        // clock watermark is re-anchored (possibly lowered) to the observed
+        // commit time rather than max()-advanced. See
+        // `LicenseCache.anchorLastSeenTimestamp(_:)`.
         guard cache.setLicense(license),
-              cache.setLastSeenTimestamp(onlineTimestamp.timeIntervalSince1970) else {
+              cache.anchorLastSeenTimestamp(onlineTimestamp.timeIntervalSince1970) else {
             cache.clear()
             throw LicenseSeatError.cacheError
         }
