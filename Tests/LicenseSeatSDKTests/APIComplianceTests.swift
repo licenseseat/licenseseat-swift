@@ -340,6 +340,43 @@ final class OfflineTokenResponseDecodingTests: LicenseSeatTestCase {
         XCTAssertEqual(result.signature.value, "base64-signature-value")
         XCTAssertFalse(result.canonical.isEmpty)
     }
+
+    func testOfflineTokenPayloadIgnoresDeviceBindingAliases() throws {
+        // The signed offline payload accepts only the canonical `fingerprint`
+        // spelling (what the Ruby signer emits). `device_id` and
+        // `device_fingerprint` are online-response aliases; honoring them
+        // here would advertise compatibility the canonical equivalence check
+        // does not grant, so decode must drop them.
+        let json = """
+        {
+            "schema_version": 1,
+            "license_key": "LS-PRO-2025",
+            "product_slug": "my-app",
+            "plan_key": "pro_annual",
+            "mode": "hardware_locked",
+            "seat_limit": 5,
+            "device_id": "device-abc-123",
+            "device_fingerprint": "device-abc-123",
+            "iat": 1737504000,
+            "exp": 1740096000,
+            "nbf": 1737504000,
+            "license_expires_at": null,
+            "kid": "org-xxx-offline-v1",
+            "entitlements": [],
+            "metadata": null
+        }
+        """
+
+        let payload = try decoder.decode(
+            OfflineTokenResponse.TokenPayload.self,
+            from: Data(json.utf8)
+        )
+
+        XCTAssertNil(
+            payload.deviceId,
+            "Alias-keyed device bindings must not decode; only `fingerprint` is honored"
+        )
+    }
 }
 
 // MARK: - SigningKeyResponse Decoding Tests

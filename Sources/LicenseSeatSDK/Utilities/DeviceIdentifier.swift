@@ -20,11 +20,26 @@ import Security
 enum DeviceIdentifier {
     private static let cacheKey = "licenseseat_device_identifier"
 
+    #if canImport(Security) && DEBUG
+    /// Test-only override for the `SecItemCopyMatching` status so unit tests
+    /// can simulate a locked or denied Keychain (`errSecInteractionNotAllowed`,
+    /// `errSecAuthFailed`, ...) without entitlement-dependent state.
+    nonisolated(unsafe) static var keychainReadStatusOverrideForTesting: OSStatus?
+    #endif
+
+    /// Return the stable installation identifier, creating one only when no
+    /// identity exists yet.
+    ///
+    /// - Throws: ``LicenseSeatError/deviceIdentifierError`` when a protected
+    ///   identity may exist but is temporarily unreadable (for example a
+    ///   locked Keychain). Callers must surface this as a recoverable
+    ///   condition — generating a replacement UUID instead would rotate the
+    ///   installation fingerprint and consume another licensed seat.
     static func generate(
         userDefaults: UserDefaults = .standard,
         keychainServiceSuffix: String = ""
-    ) -> String {
-        if let cached = getCachedIdentifier(
+    ) throws -> String {
+        if let cached = try getCachedIdentifier(
             userDefaults: userDefaults,
             keychainServiceSuffix: keychainServiceSuffix
         ) {
@@ -32,7 +47,7 @@ enum DeviceIdentifier {
         }
 
         let identifier = "\(platformPrefix)-\(UUID().uuidString.lowercased())"
-        cacheIdentifier(
+        try cacheIdentifier(
             identifier,
             userDefaults: userDefaults,
             keychainServiceSuffix: keychainServiceSuffix
@@ -50,7 +65,11 @@ enum DeviceIdentifier {
         keychainServiceSuffix: String = ""
     ) {
         guard !identifier.isEmpty else { return }
-        cacheIdentifier(
+        // Best effort: the identity source is the cached activation itself,
+        // so a transiently denied Keychain write cannot rotate anything.
+        // Adoption re-runs on the next launch; it must never fail SDK
+        // initialization.
+        try? cacheIdentifier(
             identifier,
             userDefaults: userDefaults,
             keychainServiceSuffix: keychainServiceSuffix
@@ -72,9 +91,9 @@ enum DeviceIdentifier {
     private static func getCachedIdentifier(
         userDefaults: UserDefaults,
         keychainServiceSuffix: String
-    ) -> String? {
+    ) throws -> String? {
         #if canImport(Security)
-        if let protectedIdentifier = readKeychainIdentifier(
+        if let protectedIdentifier = try readKeychainIdentifier(
             keychainServiceSuffix: keychainServiceSuffix
         ) {
             return protectedIdentifier
@@ -87,7 +106,7 @@ enum DeviceIdentifier {
             if storeKeychainIdentifier(
                 legacyIdentifier,
                 keychainServiceSuffix: keychainServiceSuffix
-            ) {
+            ) == errSecSuccess {
                 userDefaults.removeObject(forKey: cacheKey)
             }
             return legacyIdentifier
@@ -108,17 +127,26 @@ enum DeviceIdentifier {
         _ identifier: String,
         userDefaults: UserDefaults,
         keychainServiceSuffix: String
-    ) {
+    ) throws {
         #if canImport(Security)
-        if storeKeychainIdentifier(
+        switch storeKeychainIdentifier(
             identifier,
             keychainServiceSuffix: keychainServiceSuffix
         ) {
+        case errSecSuccess:
             userDefaults.removeObject(forKey: cacheKey)
-        } else {
-            // A usable installation identity is more important than silently
-            // changing fingerprints on every launch when Keychain is
-            // unavailable or misconfigured.
+        case errSecInteractionNotAllowed, errSecAuthFailed, errSecUserCanceled:
+            // The Keychain exists but temporarily refused the write (locked
+            // keychain, denied prompt). Falling back to UserDefaults here
+            // would mint an identity that the protected copy later
+            // contradicts, rotating the fingerprint and consuming another
+            // seat. Fail so the caller can retry once the keychain unlocks.
+            throw LicenseSeatError.deviceIdentifierError
+        default:
+            // Keychain genuinely unavailable or misconfigured for this
+            // process (for example a missing entitlement in a CI sandbox).
+            // A deterministic UserDefaults identity is more important than
+            // silently changing fingerprints on every launch.
             userDefaults.set(identifier, forKey: cacheKey)
         }
         #else
@@ -151,43 +179,70 @@ enum DeviceIdentifier {
         ]
     }
 
+    /// Read the protected installation identifier.
+    ///
+    /// Only `errSecItemNotFound` means "no identity exists yet". Any other
+    /// failure (locked keychain: `errSecInteractionNotAllowed`, failed
+    /// authorization: `errSecAuthFailed`, ...) means an identity may exist
+    /// but is temporarily unreadable — treating it as absent would generate
+    /// a replacement UUID, rotate the installation fingerprint, and consume
+    /// another licensed seat. Identity acquisition fails instead so the host
+    /// app can ask the user to unlock the keychain and retry.
     private static func readKeychainIdentifier(
         keychainServiceSuffix: String
-    ) -> String? {
+    ) throws -> String? {
         var query = keychainQuery(keychainServiceSuffix: keychainServiceSuffix)
         query[kSecReturnData] = true
         query[kSecMatchLimit] = kSecMatchLimitOne
 
         var result: CFTypeRef?
-        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
-              let data = result as? Data,
-              let identifier = String(data: data, encoding: .utf8),
-              !identifier.isEmpty else {
-            return nil
+        let status: OSStatus
+        #if DEBUG
+        if let override = keychainReadStatusOverrideForTesting {
+            status = override
+        } else {
+            status = SecItemCopyMatching(query as CFDictionary, &result)
         }
-        return identifier
+        #else
+        status = SecItemCopyMatching(query as CFDictionary, &result)
+        #endif
+
+        switch status {
+        case errSecSuccess:
+            guard let data = result as? Data,
+                  let identifier = String(data: data, encoding: .utf8),
+                  !identifier.isEmpty else {
+                // A readable-but-malformed record is corruption, not a
+                // transient denial; regenerating is the only way forward.
+                return nil
+            }
+            return identifier
+        case errSecItemNotFound:
+            return nil
+        default:
+            throw LicenseSeatError.deviceIdentifierError
+        }
     }
 
-    @discardableResult
     private static func storeKeychainIdentifier(
         _ identifier: String,
         keychainServiceSuffix: String
-    ) -> Bool {
+    ) -> OSStatus {
         guard !identifier.isEmpty,
-              let data = identifier.data(using: .utf8) else { return false }
+              let data = identifier.data(using: .utf8) else { return errSecParam }
 
         let query = keychainQuery(keychainServiceSuffix: keychainServiceSuffix)
         let updateStatus = SecItemUpdate(
             query as CFDictionary,
             [kSecValueData: data] as CFDictionary
         )
-        if updateStatus == errSecSuccess { return true }
-        guard updateStatus == errSecItemNotFound else { return false }
+        if updateStatus == errSecSuccess { return updateStatus }
+        guard updateStatus == errSecItemNotFound else { return updateStatus }
 
         var newItem = query
         newItem[kSecValueData] = data
         newItem[kSecAttrAccessible] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-        return SecItemAdd(newItem as CFDictionary, nil) == errSecSuccess
+        return SecItemAdd(newItem as CFDictionary, nil)
     }
     #endif
 }

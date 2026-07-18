@@ -32,7 +32,17 @@ public extension LicenseSeat {
             throw LicenseSeatError.productSlugRequired
         }
 
-        let deviceId = options.deviceId ?? config.deviceIdentifier ?? DeviceIdentifier.generate()
+        let deviceId: String
+        do {
+            deviceId = try options.deviceId ?? config.deviceIdentifier ?? DeviceIdentifier.generate()
+        } catch {
+            // Identity acquisition failed (for example a locked Keychain).
+            // Propagating the typed error lets the host app ask the user to
+            // unlock and retry, instead of silently rotating the installation
+            // fingerprint and consuming another licensed seat.
+            eventBus.emit("activation:error", ["licenseKey": licenseKey, "error": error])
+            throw error
+        }
         eventBus.emit("activation:start", ["licenseKey": licenseKey, "deviceId": deviceId])
 
         do {

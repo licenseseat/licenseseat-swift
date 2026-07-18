@@ -44,9 +44,15 @@ public struct OfflineTokenResponse: Codable, Equatable, Sendable {
             case planKey = "plan_key"
             case mode
             case seatLimit = "seat_limit"
+            // The signed payload accepts ONLY the canonical `fingerprint`
+            // spelling, which is exactly what the Ruby signer emits.
+            // Decode-only aliases (`device_id`/`device_fingerprint`) would
+            // advertise compatibility the verifier does not grant: encoding
+            // always re-emits `fingerprint`, so an alias-keyed canonical
+            // fails `canonicalPayloadMatchesToken` despite a valid
+            // signature. Alias handling for ONLINE responses stays in
+            // DecodingCompatibility.swift.
             case fingerprint
-            case deviceId = "device_id"
-            case deviceFingerprint = "device_fingerprint"
             case iat, exp, nbf
             case licenseExpiresAt = "license_expires_at"
             case kid
@@ -94,9 +100,7 @@ public struct OfflineTokenResponse: Codable, Equatable, Sendable {
             planKey = try container.decode(String.self, forKey: .planKey)
             mode = try container.decode(String.self, forKey: .mode)
             seatLimit = try container.decodeIfPresent(Int.self, forKey: .seatLimit)
-            deviceId = try container.decodeFirstPresentStringIfPresent(
-                forKeys: [.fingerprint, .deviceId, .deviceFingerprint]
-            )
+            deviceId = try container.decodeIfPresent(String.self, forKey: .fingerprint)
             iat = try container.decode(Int.self, forKey: .iat)
             exp = try container.decode(Int.self, forKey: .exp)
             nbf = try container.decode(Int.self, forKey: .nbf)

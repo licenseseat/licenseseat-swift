@@ -31,6 +31,15 @@ final class OfflineValidationTests: LicenseSeatTestCase {
     nonisolated private static let testLicenseKey = "TEST-LICENSE-KEY"
 
     override func setUp() async throws {
+        _ = URLProtocol.registerClass(MockURLProtocol.self)
+        MockURLProtocol.reset()
+        // Hermetic by default: any request a test does not explicitly stub
+        // behaves like a genuinely offline device instead of hitting live
+        // DNS for the placeholder host.
+        MockURLProtocol.requestHandler = { _ in
+            throw URLError(.notConnectedToInternet)
+        }
+
         let config = LicenseSeatConfig(
             apiBaseUrl: "https://api.test.com",
             productSlug: Self.testProductSlug,
@@ -40,7 +49,7 @@ final class OfflineValidationTests: LicenseSeatTestCase {
             maxOfflineDays: 7,
             maxClockSkewMs: 300000
         )
-        sdk = LicenseSeat(config: config)
+        sdk = LicenseSeat(config: config, urlSession: Self.makeMockedSession())
         sdk.cache.clear()
     }
 
@@ -48,8 +57,16 @@ final class OfflineValidationTests: LicenseSeatTestCase {
         MainActor.assumeIsolated {
             sdk.reset()
             sdk = nil
+            MockURLProtocol.reset()
+            URLProtocol.unregisterClass(MockURLProtocol.self)
         }
         super.tearDown()
+    }
+
+    nonisolated private static func makeMockedSession() -> URLSession {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [MockURLProtocol.self]
+        return URLSession(configuration: configuration)
     }
 
     /// Helper to create an offline token with given parameters and sign it
@@ -170,7 +187,7 @@ final class OfflineValidationTests: LicenseSeatTestCase {
             offlineFallbackMode: .always,
             maxOfflineDays: 0
         )
-        let crossLanguageSDK = LicenseSeat(config: config)
+        let crossLanguageSDK = LicenseSeat(config: config, urlSession: Self.makeMockedSession())
         defer { crossLanguageSDK.reset() }
 
         XCTAssertTrue(crossLanguageSDK.cache.setOfflineToken(fixture.offlineToken))
@@ -621,11 +638,134 @@ final class OfflineValidationTests: LicenseSeatTestCase {
         // Don't cache public key
         cacheTestLicense()
 
-        // When
+        // When: the signing-key fetch fails (mock transport is offline)
         let result = await sdk.verifyCachedOffline()
 
         // Then
         XCTAssertFalse(result.valid)
         XCTAssertEqual(result.code, "no_public_key")
+    }
+
+    func testAliasKeyedCanonicalIsRejectedAsPayloadMismatch() async throws {
+        // The offline-token payload accepts only the canonical `fingerprint`
+        // spelling. A producer that used a decode-only alias would carry a
+        // VALID signature over its alias-keyed canonical, yet the verifier's
+        // re-encoded payload emits `fingerprint` — so the equivalence check
+        // must reject the token as token_payload_mismatch. This documents
+        // that the aliases removed from TokenPayload never granted real
+        // compatibility.
+        let privateKey = Curve25519.Signing.PrivateKey()
+        let signedToken = try makeOfflineToken(privateKey: privateKey)
+        let aliasCanonical = signedToken.canonical.replacingOccurrences(
+            of: "\"fingerprint\"",
+            with: "\"device_id\""
+        )
+        XCTAssertNotEqual(aliasCanonical, signedToken.canonical)
+
+        // Decoding the alias-keyed payload drops the device binding entirely.
+        let aliasPayload = try JSONDecoder().decode(
+            OfflineTokenResponse.TokenPayload.self,
+            from: Data(aliasCanonical.utf8)
+        )
+        XCTAssertNil(aliasPayload.deviceId)
+
+        let aliasSignature = try privateKey.signature(for: Data(aliasCanonical.utf8))
+        let aliasToken = OfflineTokenResponse(
+            object: "offline_token",
+            token: aliasPayload,
+            signature: .init(
+                algorithm: "Ed25519",
+                keyId: "test-key-id",
+                value: Base64URL.encode(aliasSignature)
+            ),
+            canonical: aliasCanonical
+        )
+
+        sdk.cache.setOfflineToken(aliasToken)
+        sdk.cache.setPublicKey(
+            "test-key-id",
+            Base64URL.encode(privateKey.publicKey.rawRepresentation)
+        )
+        cacheTestLicense()
+
+        let result = await sdk.verifyCachedOffline()
+
+        XCTAssertFalse(result.valid)
+        XCTAssertEqual(result.code, "token_payload_mismatch")
+    }
+
+    func testAuthoritativeOnlineValidationRecoversPoisonedWatermark() async throws {
+        // Given: a valid offline token, its signing key, and a cached license
+        let privateKey = Curve25519.Signing.PrivateKey()
+        let offlineToken = try makeOfflineToken(privateKey: privateKey)
+        sdk.cache.setOfflineToken(offlineToken)
+        sdk.cache.setPublicKey(
+            "test-key-id",
+            Base64URL.encode(privateKey.publicKey.rawRepresentation)
+        )
+        cacheTestLicense()
+
+        // And: a watermark poisoned by a transiently future-set clock
+        let poisoned = Date().addingTimeInterval(3_600).timeIntervalSince1970
+        sdk.cache.setLastSeenTimestamp(poisoned)
+
+        let poisonedResult = await sdk.verifyCachedOffline()
+        XCTAssertFalse(poisonedResult.valid)
+        XCTAssertEqual(poisonedResult.code, "clock_tamper")
+
+        // When: the server accepts an authenticated validation request
+        let validationBody = try JSONSerialization.data(withJSONObject: [
+            "object": "validation_result",
+            "valid": true,
+            "code": NSNull(),
+            "message": NSNull(),
+            "warnings": NSNull(),
+            "license": [
+                "object": "license",
+                "key": Self.testLicenseKey,
+                "status": "active",
+                "starts_at": NSNull(),
+                "expires_at": NSNull(),
+                "mode": "hardware_locked",
+                "plan_key": "pro",
+                "seat_limit": 5,
+                "active_seats": 1,
+                "active_entitlements": [],
+                "metadata": NSNull(),
+                "product": ["slug": Self.testProductSlug, "name": "Test App"]
+            ],
+            "activation": NSNull()
+        ] as [String: Any])
+        MockURLProtocol.requestHandler = { request in
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, validationBody)
+        }
+
+        let onlineResult = try await sdk.validate(licenseKey: Self.testLicenseKey)
+        XCTAssertTrue(onlineResult.valid)
+
+        // Then: the authoritative success re-anchored (lowered) the watermark
+        let anchored = try XCTUnwrap(sdk.cache.getLastSeenTimestamp())
+        XCTAssertLessThan(anchored, poisoned)
+        XCTAssertEqual(anchored, Date().timeIntervalSince1970, accuracy: 30)
+
+        // And: offline validation of the still-valid token works again
+        let recovered = await sdk.verifyCachedOffline()
+        XCTAssertTrue(recovered.valid)
+        XCTAssertNil(recovered.code)
+
+        // And: the offline ratchet still refuses to move backward
+        let current = try XCTUnwrap(sdk.cache.getLastSeenTimestamp())
+        sdk.cache.setLastSeenTimestamp(current - 3_000)
+        XCTAssertEqual(
+            try XCTUnwrap(sdk.cache.getLastSeenTimestamp()),
+            current,
+            accuracy: 0.001
+        )
     }
 }

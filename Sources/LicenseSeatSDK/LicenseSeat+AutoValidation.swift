@@ -87,7 +87,7 @@ extension LicenseSeat {
                     do {
                         try await self.heartbeat()
                     } catch {
-                        self.log("Standalone heartbeat failed:", error)
+                        self.log("Standalone heartbeat failed:", LogRedaction.describe(error))
                     }
                 }
                 await operation.value
@@ -106,7 +106,7 @@ extension LicenseSeat {
         do {
             _ = try await validate(licenseKey: licenseKey)
         } catch {
-            log("Auto-validation failed:", error)
+            log("Auto-validation failed:", LogRedaction.describe(error))
             eventBus.emit("validation:auto-failed", [
                 "licenseKey": licenseKey,
                 "error": error
@@ -230,7 +230,7 @@ extension LicenseSeat {
                apiError.invalidatesCachedLicense {
                 handleAuthoritativeInvalidation(apiError, expectedIdentity: requestedIdentity)
             }
-            log("Failed to sync offline assets:", error)
+            log("Failed to sync offline assets:", LogRedaction.describe(error))
             eventBus.emit("offlineToken:fetchError", [
                 "licenseKey": requestedLicense.licenseKey,
                 "error": error

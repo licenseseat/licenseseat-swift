@@ -249,7 +249,7 @@ public final class LicenseSeat {
                 do {
                     _ = try await self.validate(licenseKey: cachedLicense.licenseKey)
                 } catch {
-                    self.log("Background validation failed:", error)
+                    self.log("Background validation failed:", LogRedaction.describe(error))
 
                     if let apiError = error as? APIError,
                        apiError.status == 401 || apiError.status == 501 {

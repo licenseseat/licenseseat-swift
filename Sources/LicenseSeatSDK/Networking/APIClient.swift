@@ -14,6 +14,31 @@ import FoundationNetworking
 /// Empty response placeholder for endpoints that return no body
 struct EmptyResponse: Decodable {}
 
+/// Debug-log sanitizer for errors that can carry request URLs.
+///
+/// The license key is a URL path segment by API design, so a `URLError`'s
+/// failing-URL metadata (or any interpolated error text containing the
+/// request URL) would leak the key into debug logs. Transport errors are
+/// reduced to their domain and code; every other error has absolute URLs
+/// stripped from its description before interpolation.
+enum LogRedaction {
+    static func describe(_ error: Error) -> String {
+        if let urlError = error as? URLError {
+            return "URLError(code: \(urlError.code.rawValue))"
+        }
+        return redactingURLs(from: String(describing: error))
+    }
+
+    /// Replace every absolute URL in `text` with a placeholder.
+    static func redactingURLs(from text: String) -> String {
+        text.replacingOccurrences(
+            of: #"[A-Za-z][A-Za-z0-9+.-]*://[^\s"'<>)\]]+"#,
+            with: "<redacted-url>",
+            options: .regularExpression
+        )
+    }
+}
+
 /// API client with retry logic and exponential backoff
 @MainActor
 final class APIClient {
@@ -223,7 +248,7 @@ final class APIClient {
         let exponentialDelay = baseDelay * pow(2, Double(attempt))
         let maximumSleepSeconds = Double(UInt64.max / 1_000_000_000)
         let delay = min(exponentialDelay, maximumSleepSeconds)
-        log("Retry attempt \(attempt + 1) after \(delay)s for error: \(error)")
+        log("Retry attempt \(attempt + 1) after \(delay)s for error: \(LogRedaction.describe(error))")
         guard delay.isFinite, delay > 0 else { return }
         try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
     }
