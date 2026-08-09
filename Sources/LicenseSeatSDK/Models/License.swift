@@ -185,7 +185,7 @@ public struct OfflineTokenResponse: Codable, Equatable, Sendable {
         public let planKey: String
         public let mode: String
         public let seatLimit: Int?
-        public let deviceId: String?
+        public let fingerprint: String
         public let iat: Int
         public let exp: Int
         public let nbf: Int
@@ -201,7 +201,7 @@ public struct OfflineTokenResponse: Codable, Equatable, Sendable {
             case planKey = "plan_key"
             case mode
             case seatLimit = "seat_limit"
-            case deviceId = "device_id"
+            case fingerprint
             case iat, exp, nbf
             case licenseExpiresAt = "license_expires_at"
             case kid
@@ -218,6 +218,19 @@ public struct OfflineTokenResponse: Codable, Equatable, Sendable {
         enum CodingKeys: String, CodingKey {
             case key
             case expiresAt = "expires_at"
+        }
+
+        public func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encode(key, forKey: .key)
+            if let expiresAt {
+                try container.encode(expiresAt, forKey: .expiresAt)
+            } else {
+                // The Ruby API's signed v1 contract includes this member as
+                // explicit JSON null. Preserve it when reconstructing the
+                // visible payload for signed-claim equality checks.
+                try container.encodeNil(forKey: .expiresAt)
+            }
         }
     }
 

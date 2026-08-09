@@ -133,6 +133,7 @@ final class EventBusTests: XCTestCase {
     func testCancellableDeallocationTriggersCancellation() {
         var cancellable: AnyCancellable? = eventBus.on("dealloc:test") { _ in }
 
+        XCTAssertNotNil(cancellable)
         XCTAssertEqual(eventBus.subscriptionCount(for: "dealloc:test"), 1)
 
         // Deallocate the cancellable

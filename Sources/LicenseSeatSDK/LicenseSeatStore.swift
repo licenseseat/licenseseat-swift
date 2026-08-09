@@ -119,7 +119,10 @@ public final class LicenseSeatStore {
         guard let seat else { throw LicenseSeatStoreError.notConfigured }
         let license = try await seat.activate(licenseKey: key, options: options)
         // Immediately refresh local status so callers don't depend on Combine delivery timing.
-        self.status = seat.getStatus()
+        let currentStatus = seat.getStatus()
+        if status != currentStatus {
+            status = currentStatus
+        }
         return license
     }
     
@@ -163,6 +166,7 @@ public final class LicenseSeatStore {
         #if canImport(Combine)
         seat?.statusPublisher
             .receive(on: RunLoop.main)
+            .filter { [weak self] status in self?.status != status }
             .assign(to: &$status)
         
         // Listen for auto-validation cycles to keep `nextAutoValidationAt` in sync.
@@ -183,19 +187,28 @@ public final class LicenseSeatStore {
     public func debugReport() -> [String: Any] {
         var report: [String: Any] = [
             "sdk_version": LicenseSeatConfig.sdkVersion,
-            "status": String(describing: status),
+            "status": redactedStatusName,
             "has_seat": seat != nil,
             "next_validation": nextAutoValidationAt?.timeIntervalSince1970 ?? "none"
         ]
         
         if let license = seat?.currentLicense() {
-            report["license_key_prefix"] = String(license.licenseKey.prefix(8)) + "..."
-            report["device_id_hash"] = license.deviceId.hashValue
             report["activated_at"] = license.activatedAt.timeIntervalSince1970
             report["last_validated"] = license.lastValidated.timeIntervalSince1970
         }
         
         return report
+    }
+
+    private var redactedStatusName: String {
+        switch status {
+        case .inactive: return "inactive"
+        case .pending: return "pending"
+        case .invalid: return "invalid"
+        case .offlineInvalid: return "offline_invalid"
+        case .active: return "active"
+        case .offlineValid: return "offline_valid"
+        }
     }
 }
 
@@ -257,4 +270,4 @@ public enum LicenseSeatStoreError: LocalizedError {
 
 #if canImport(Combine)
 extension LicenseSeatStore: ObservableObject {}
-#endif 
+#endif

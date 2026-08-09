@@ -38,7 +38,8 @@ let package = Package(
         .testTarget(
             name: "LicenseSeatTests",
             dependencies: ["LicenseSeat"],
-            path: "Tests/LicenseSeatSDKTests"
+            path: "Tests/LicenseSeatSDKTests",
+            resources: [.copy("Fixtures")]
         ),
     ]
 )

@@ -26,7 +26,7 @@ final class LicenseSeatStoreTests: XCTestCase {
             apiBaseUrl: "https://api.test.com",
             apiKey: "test_key",
             productSlug: Self.testProductSlug,
-            storagePrefix: "store_test_",
+            storagePrefix: "store_test_\(UUID().uuidString)_",
             autoValidateInterval: 0, // Disable auto-validation by default
             debug: true
         )
@@ -43,6 +43,7 @@ final class LicenseSeatStoreTests: XCTestCase {
     override func tearDown() {
         // Stop any running auto-validation
         store?.seat?.stopAutoValidation()
+        LicenseSeatStore.shared.seat?.reset()
         store = nil
         
         URLProtocol.unregisterClass(MockURLProtocol.self)
@@ -58,15 +59,19 @@ final class LicenseSeatStoreTests: XCTestCase {
             let path = request.url!.path
             let headers = ["Content-Type": "application/json"]
 
-            // Extract license key from path for dynamic responses
-            let licenseKey = "LICENSE-TEST"
+            let body = request.httpBody.flatMap {
+                try? JSONSerialization.jsonObject(with: $0) as? [String: Any]
+            } ?? [:]
+            let licenseKey = body["license_key"] as? String ?? "LICENSE-TEST"
+            let fingerprint = body["fingerprint"] as? String ??
+                body["device_id"] as? String ?? "test-device"
 
             if path.contains("/activate") {
                 // Return v1 ActivationResponse
                 let payload: [String: Any] = [
                     "object": "activation",
                     "id": "act-12345-uuid",
-                    "device_id": "test-device",
+                    "device_id": fingerprint,
                     "device_name": "Test Device",
                     "license_key": licenseKey,
                     "activated_at": ISO8601DateFormatter().string(from: Date()),
@@ -128,7 +133,7 @@ final class LicenseSeatStoreTests: XCTestCase {
                 let data = try JSONSerialization.data(withJSONObject: result)
                 let resp = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: headers)!
                 return (resp, data)
-            } else if path.contains("/offline_token") {
+            } else if path.contains("/offline-token") {
                 // Return v1 OfflineTokenResponse
                 let offlineToken: [String: Any] = [
                     "object": "offline_token",
@@ -139,7 +144,7 @@ final class LicenseSeatStoreTests: XCTestCase {
                         "plan_key": "pro",
                         "mode": "hardware_locked",
                         "seat_limit": 5,
-                        "device_id": "test-device",
+                        "fingerprint": fingerprint,
                         "iat": Int(Date().timeIntervalSince1970),
                         "exp": Int(Date().timeIntervalSince1970) + 86400 * 30,
                         "nbf": Int(Date().timeIntervalSince1970),
@@ -178,14 +183,13 @@ final class LicenseSeatStoreTests: XCTestCase {
     // MARK: – Tests
 
     func testNextAutoValidationAtPropagation() async throws {
-        throw XCTSkip("Flaky timing-sensitive test skipped for release")
         // Create a new store with auto-validation enabled for this specific test
         let interval: TimeInterval = 0.2
         let config = LicenseSeatConfig(
             apiBaseUrl: "https://api.test.com",
             apiKey: "test_key",
             productSlug: Self.testProductSlug,
-            storagePrefix: "store_test_",
+            storagePrefix: "store_autovalidation_test_\(UUID().uuidString)_",
             autoValidateInterval: interval,
             debug: true
         )
@@ -227,15 +231,15 @@ final class LicenseSeatStoreTests: XCTestCase {
 
     #if canImport(SwiftUI)
     func testLicenseStatePropertyWrapper() async throws {
-        throw XCTSkip("Timing-sensitive Combine propagation; skipped for release")
         installStubHandlers()
 
         // Configure the shared store with the same mocked session so the property wrapper observes it.
         let conf = URLSessionConfiguration.ephemeral
         conf.protocolClasses = [MockURLProtocol.self]
         let session = URLSession(configuration: conf)
-        LicenseSeatStore.shared.configure(apiKey: "test_key", apiBaseURL: URL(string: "https://api.test.com")!, urlSession: session) { cfg in
+        LicenseSeatStore.shared.configure(apiKey: "test_key", apiBaseURL: URL(string: "https://api.test.com")!, force: true, urlSession: session) { cfg in
             cfg.productSlug = Self.testProductSlug
+            cfg.storagePrefix = "shared_license_state_test_\(UUID().uuidString)_"
             cfg.autoValidateInterval = 0 // Disable auto-validation
             cfg.debug = true
         }
@@ -252,22 +256,23 @@ final class LicenseSeatStoreTests: XCTestCase {
 
         let view = WrapperView()
         switch view.status {
-        case .active:
-            // success
+        case .pending:
+            // Activation is cached, but authorization remains fail-closed until validation.
             break
         default:
-            XCTFail("Expected status to be active after activation")
+            XCTFail("Expected status to be pending after activation")
         }
     }
     #endif
 
-    func testStoreNotConfiguredError() async throws {
-        throw XCTSkip("No longer applicable after constructor changes; skipped for release")
-    }
-    
     func testEntitlementWithNoLicense() throws {
-        throw XCTSkip("Storage interference; skipped for release")
-        let unconfiguredStore = LicenseSeatStore()
+        let config = LicenseSeatConfig(
+            apiBaseUrl: "https://api.test.com",
+            productSlug: Self.testProductSlug,
+            storagePrefix: "no_license_test_\(UUID().uuidString)_",
+            autoValidateInterval: 0
+        )
+        let unconfiguredStore = LicenseSeatStore(config: config)
         let status = unconfiguredStore.entitlement("test-feature")
         
         XCTAssertFalse(status.active)
@@ -319,15 +324,13 @@ final class LicenseSeatStoreTests: XCTestCase {
         XCTAssertEqual(report["has_seat"] as? Bool, true)
         
         // Check redacted license info
-        XCTAssertNotNil(report["license_key_prefix"] as? String)
-        XCTAssertTrue((report["license_key_prefix"] as? String)?.hasSuffix("...") == true)
-        XCTAssertNotNil(report["device_id_hash"])
+        XCTAssertNil(report["license_key_prefix"])
+        XCTAssertNil(report["device_id_hash"])
         XCTAssertNotNil(report["activated_at"])
         XCTAssertNotNil(report["last_validated"])
     }
     
     func testStatusPublisherUpdates() async throws {
-        throw XCTSkip("Timing-sensitive; skipped for release")
         installStubHandlers()
         
         var receivedStatuses: [LicenseStatus] = []
@@ -354,10 +357,10 @@ final class LicenseSeatStoreTests: XCTestCase {
             XCTFail("First status should be inactive")
         }
         
-        if case .active = receivedStatuses[1] {
-            // Expected after activation
+        if case .pending = receivedStatuses[1] {
+            // Expected after activation but before validation
         } else {
-            XCTFail("Second status should be active")
+            XCTFail("Second status should be pending")
         }
     }
     
@@ -499,9 +502,13 @@ final class LicenseSeatStoreTests: XCTestCase {
         LicenseSeatStore.shared.configure(
             apiKey: "test_key",
             apiBaseURL: URL(string: "https://api.test.com")!,
+            force: true,
             urlSession: session
         ) { cfg in
             cfg.productSlug = Self.testProductSlug
+            cfg.storagePrefix = "shared_entitlement_state_test_\(UUID().uuidString)_"
+            cfg.autoValidateInterval = 0
+            cfg.heartbeatInterval = 0
         }
         
         _ = try await LicenseSeatStore.shared.activate("LICENSE-ENT-TEST")
@@ -522,4 +529,4 @@ final class LicenseSeatStoreTests: XCTestCase {
         XCTAssertNotNil(fullStatus.reason)
     }
     #endif
-} 
+}

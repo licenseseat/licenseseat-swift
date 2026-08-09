@@ -19,7 +19,7 @@ final class EntitlementTests: XCTestCase {
         super.setUp()
         let config = LicenseSeatConfig(
             productSlug: Self.testProductSlug,
-            storagePrefix: Self.testPrefix
+            storagePrefix: "\(Self.testPrefix)\(UUID().uuidString)_"
         )
         sdk = LicenseSeat(config: config)
         sdk?.cache.clear()

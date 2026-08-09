@@ -13,7 +13,6 @@ disabled_rules:
   - implicitly_unwrapped_optional
   - trailing_whitespace # Allow minor whitespace noise
   - trailing_newline # Handled by formatter
-  - colon_spacing # Handled by formatter
 
 # Adjust rule thresholds to better match project style
 function_body_length:

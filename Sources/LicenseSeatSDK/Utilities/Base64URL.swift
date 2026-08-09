@@ -24,8 +24,35 @@ enum Base64URL {
     
     /// Decode Base64URL string to data
     static func decode(_ string: String) throws -> Data {
-        // Convert from Base64URL to Base64
-        var base64 = string
+        guard !string.isEmpty,
+              string.utf8.count <= 1_500_000,
+              string.unicodeScalars.allSatisfy({ $0.isASCII }) else {
+            throw Base64URLError.invalidInput
+        }
+
+        let usesURLAlphabet = string.contains("-") || string.contains("_")
+        let usesStandardAlphabet = string.contains("+") || string.contains("/")
+        guard !(usesURLAlphabet && usesStandardAlphabet) else {
+            throw Base64URLError.invalidInput
+        }
+
+        let unpadded = string.trimmingCharacters(in: CharacterSet(charactersIn: "="))
+        let paddingCount = string.count - unpadded.count
+        guard paddingCount <= 2,
+              !unpadded.contains("="),
+              unpadded.count % 4 != 1 else {
+            throw Base64URLError.invalidInput
+        }
+
+        let allowed = usesURLAlphabet
+            ? "^[A-Za-z0-9_-]+={0,2}$"
+            : "^[A-Za-z0-9+/]+={0,2}$"
+        guard string.range(of: allowed, options: .regularExpression) != nil else {
+            throw Base64URLError.invalidInput
+        }
+
+        // Convert from Base64URL to standard Base64 for Foundation.
+        var base64 = unpadded
             .replacingOccurrences(of: "-", with: "+")
             .replacingOccurrences(of: "_", with: "/")
         
@@ -39,6 +66,21 @@ enum Base64URL {
             throw Base64URLError.invalidInput
         }
         
+        let canonicalStandard = data.base64EncodedString()
+        if usesURLAlphabet {
+            let canonicalURL = encode(data)
+            let paddedURL = canonicalStandard
+                .replacingOccurrences(of: "+", with: "-")
+                .replacingOccurrences(of: "/", with: "_")
+            guard string == canonicalURL || string == paddedURL else {
+                throw Base64URLError.invalidInput
+            }
+        } else {
+            guard string == canonicalStandard || string == canonicalStandard.trimmingCharacters(in: CharacterSet(charactersIn: "=")) else {
+                throw Base64URLError.invalidInput
+            }
+        }
+
         return data
     }
 }
@@ -53,4 +95,4 @@ enum Base64URLError: LocalizedError {
             return "Invalid Base64URL input"
         }
     }
-} 
+}

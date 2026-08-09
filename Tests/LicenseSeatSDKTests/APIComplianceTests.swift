@@ -300,7 +300,7 @@ final class OfflineTokenResponseDecodingTests: XCTestCase {
                 "plan_key": "pro_annual",
                 "mode": "hardware_locked",
                 "seat_limit": 5,
-                "device_id": "device-abc-123",
+                "fingerprint": "device-abc-123",
                 "iat": 1737504000,
                 "exp": 1740096000,
                 "nbf": 1737504000,
@@ -328,7 +328,7 @@ final class OfflineTokenResponseDecodingTests: XCTestCase {
         XCTAssertEqual(result.token.productSlug, "my-app")
         XCTAssertEqual(result.token.mode, "hardware_locked")
         XCTAssertEqual(result.token.seatLimit, 5)
-        XCTAssertEqual(result.token.deviceId, "device-abc-123")
+        XCTAssertEqual(result.token.fingerprint, "device-abc-123")
         XCTAssertEqual(result.token.iat, 1737504000)
         XCTAssertEqual(result.token.exp, 1740096000)
         XCTAssertEqual(result.token.kid, "org-xxx-offline-v1")

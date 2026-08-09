@@ -20,19 +20,22 @@ extension LicenseSeat {
         let interval = config.autoValidateInterval
 
         // Don't start auto-validation if interval is 0 or negative
-        guard interval > 0 else {
+        guard validScheduledInterval(interval) else {
             log("Auto-validation disabled (interval: \(interval))")
             return
         }
 
         // Schedule validation using a detached Task so we are not tied to a RunLoop.
         validationTask = Task.detached { [weak self] in
-            guard let self else { return }
             // Emit first cycle information immediately so the UI can show when the next run will be.
-            await MainActor.run {
-                self.eventBus.emit("autovalidation:cycle", [
-                    "nextRunAt": Date().addingTimeInterval(interval)
-                ])
+            if let initialSelf = self {
+                await MainActor.run {
+                    initialSelf.eventBus.emit("autovalidation:cycle", [
+                        "nextRunAt": Date().addingTimeInterval(interval)
+                    ])
+                }
+            } else {
+                return
             }
 
             // Continuous loop until cancelled.
@@ -44,12 +47,8 @@ extension LicenseSeat {
                     break
                 }
 
-                await MainActor.run {
-                    Task { @MainActor [weak self] in
-                        guard let self else { return }
-                        await self.performAutoValidation(licenseKey: licenseKey)
-                    }
-                }
+                guard let strongSelf = self else { break }
+                await strongSelf.performAutoValidation(licenseKey: licenseKey)
             }
         }
     }
@@ -73,7 +72,7 @@ extension LicenseSeat {
         stopHeartbeat()
 
         let interval = config.heartbeatInterval
-        guard interval > 0 else {
+        guard validScheduledInterval(interval) else {
             log("Standalone heartbeat disabled (interval: \(interval))")
             return
         }
@@ -87,14 +86,10 @@ extension LicenseSeat {
                 }
 
                 guard let strongSelf = self else { break }
-                await MainActor.run {
-                    Task { @MainActor in
-                        do {
-                            try await strongSelf.heartbeat()
-                        } catch {
-                            strongSelf.log("Standalone heartbeat failed:", error)
-                        }
-                    }
+                do {
+                    try await strongSelf.heartbeat()
+                } catch {
+                    await strongSelf.log("Standalone heartbeat failed (\(String(describing: type(of: error))))")
                 }
             }
         }
@@ -129,6 +124,10 @@ extension LicenseSeat {
             ])
         }
     }
+
+    private func validScheduledInterval(_ interval: TimeInterval) -> Bool {
+        interval.isFinite && interval > 0 && interval <= 366 * 86_400
+    }
 }
 
 // MARK: - Connectivity Polling
@@ -138,6 +137,12 @@ extension LicenseSeat {
     /// Start connectivity polling (fallback when Network framework unavailable)
     func startConnectivityPolling() {
         guard connectivityTimer == nil else { return }
+        guard config.networkRecheckInterval.isFinite,
+              config.networkRecheckInterval >= 0.1,
+              config.networkRecheckInterval <= 86_400 else {
+            log("Connectivity polling disabled due to invalid interval")
+            return
+        }
 
         connectivityTimer = Timer.scheduledTimer(
             withTimeInterval: config.networkRecheckInterval,
@@ -180,34 +185,33 @@ extension LicenseSeat {
     /// Downloads the offline token and its corresponding public signing key, caching both locally.
     /// Emits `offlineToken:ready` on success or `offlineToken:fetchError` on failure.
     public func syncOfflineAssets() async {
+        guard (1...36_600).contains(config.maxOfflineDays) else {
+            stopOfflineRefresh()
+            return
+        }
         do {
             let offlineToken = try await getOfflineToken()
-            cache.setOfflineToken(offlineToken)
 
             // Extract key ID from token
             let kid = offlineToken.token.kid
-            // Check if we already have this key
-            if cache.getPublicKey(kid) == nil {
-                let publicKey = try await getSigningKey(keyId: kid)
-                cache.setPublicKey(kid, publicKey)
+            // Refresh and verify the key before persisting any newly received
+            // offline authority. A stale or locally poisoned cached key must
+            // not make sync permanently unusable.
+            let publicKey = try await getSigningKey(keyId: kid)
+            let offlineResult = await evaluateOfflineToken(offlineToken, publicKeyB64: publicKey)
+            guard offlineResult.valid else {
+                throw LicenseSeatError.invalidOfflineToken
             }
+            cache.setPublicKey(kid, publicKey)
+            cache.setOfflineToken(offlineToken)
+            cache.updateValidation(offlineResult, markValidatedOnline: false)
 
             eventBus.emit("offlineToken:ready", [
                 "kid": kid,
                 "exp": offlineToken.token.exp
             ])
 
-            // Immediately verify offline token locally so that
-            // active entitlements (and other validation fields) are
-            // cached and available even when we are online.
-            if let offlineResult = await quickVerifyCachedOfflineLocal() {
-                cache.updateValidation(offlineResult)
-                if offlineResult.valid {
-                    eventBus.emit("validation:offline-success", offlineResult)
-                } else {
-                    eventBus.emit("validation:offline-failed", offlineResult)
-                }
-            }
+            eventBus.emit("validation:offline-success", offlineResult)
 
         } catch {
             log("Failed to sync offline assets:", error)
@@ -217,6 +221,14 @@ extension LicenseSeat {
     /// Schedule periodic offline refresh
     func scheduleOfflineRefresh() {
         stopOfflineRefresh()
+
+        guard (1...36_600).contains(config.maxOfflineDays),
+              config.offlineTokenRefreshInterval.isFinite,
+              config.offlineTokenRefreshInterval >= 1,
+              config.offlineTokenRefreshInterval <= 366 * 86_400 else {
+            log("Offline refresh disabled due to invalid interval")
+            return
+        }
 
         offlineRefreshTimer = Timer.scheduledTimer(
             withTimeInterval: config.offlineTokenRefreshInterval,
@@ -245,16 +257,16 @@ extension LicenseSeat {
             eventBus.emit("sdk:error", ["message": error.localizedDescription])
             throw error
         }
+        try validateRequestIdentity(productSlug: productSlug, licenseKey: license.licenseKey)
 
         eventBus.emit("offlineToken:fetching", ["licenseKey": license.licenseKey])
 
         do {
-            var body: [String: Any] = [:]
+            var body: [String: Any] = ["license_key": license.licenseKey]
             body["device_id"] = license.deviceId
 
-            // POST /products/{slug}/licenses/{key}/offline_token
             let response: OfflineTokenResponse = try await apiClient.post(
-                path: "/products/\(productSlug)/licenses/\(license.licenseKey)/offline_token",
+                path: "/products/\(productSlug)/licenses/offline-token",
                 body: body
             )
 
@@ -265,7 +277,7 @@ extension LicenseSeat {
             return response
 
         } catch {
-            log("Failed to get offline token for \(license.licenseKey):", error)
+            log("Failed to get offline token (\(String(describing: type(of: error))))")
             eventBus.emit("offlineToken:fetchError", [
                 "licenseKey": license.licenseKey,
                 "error": error
@@ -276,7 +288,8 @@ extension LicenseSeat {
 
     /// Get signing key (public key) from server
     internal func getSigningKey(keyId: String) async throws -> String {
-        guard !keyId.isEmpty else {
+        guard keyId.utf8.count <= 255,
+              keyId.range(of: "^[A-Za-z0-9][A-Za-z0-9._:-]*$", options: .regularExpression) != nil else {
             throw LicenseSeatError.invalidKeyId
         }
 
@@ -287,7 +300,12 @@ extension LicenseSeat {
             path: "/signing_keys/\(keyId)"
         )
 
-        guard !response.publicKey.isEmpty else {
+        guard response.object == "signing_key",
+              response.keyId == keyId,
+              response.algorithm == "Ed25519",
+              response.status == "active",
+              let keyData = try? Base64URL.decode(response.publicKey),
+              keyData.count == 32 else {
             throw LicenseSeatError.invalidPublicKey
         }
 

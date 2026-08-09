@@ -25,7 +25,7 @@ final class LicenseSeatSDKTests: XCTestCase {
             apiBaseUrl: "https://api.test.com",
             apiKey: "unit-test",
             productSlug: Self.testProductSlug,
-            storagePrefix: Self.testPrefix,
+            storagePrefix: "\(Self.testPrefix)\(UUID().uuidString)_",
             autoValidateInterval: 3600, // won't trigger in unit time
             offlineFallbackMode: .networkOnly // disable fallback for predictable behavior
         )
@@ -117,7 +117,7 @@ final class LicenseSeatSDKTests: XCTestCase {
             }
             requestSequence.append(url.path)
 
-            // New v1 API paths: /products/{slug}/licenses/{key}/activate|validate|deactivate
+            // Current v1 API paths keep the credential in the JSON body.
             if url.path.contains("/activate") {
                 let data = try JSONSerialization.data(withJSONObject: self.makeActivationResponse(licenseKey: licenseKey, deviceId: "test-device"))
                 guard let resp = HTTPURLResponse(url: url, statusCode: 201, httpVersion: nil, headerFields: ["Content-Type": "application/json"]) else {
@@ -173,9 +173,10 @@ final class LicenseSeatSDKTests: XCTestCase {
         // Ensure correct endpoints called in order
         XCTAssertGreaterThanOrEqual(requestSequence.count, 3)
         // Should be product-scoped URLs
-        XCTAssertTrue(requestSequence[0].contains("/products/\(Self.testProductSlug)/licenses/\(licenseKey)/activate"))
-        XCTAssertTrue(requestSequence[1].contains("/products/\(Self.testProductSlug)/licenses/\(licenseKey)/validate"))
-        XCTAssertTrue(requestSequence.last?.contains("/products/\(Self.testProductSlug)/licenses/\(licenseKey)/deactivate") ?? false)
+        XCTAssertEqual(requestSequence[0], "/products/\(Self.testProductSlug)/licenses/activate")
+        XCTAssertEqual(requestSequence[1], "/products/\(Self.testProductSlug)/licenses/validate")
+        XCTAssertEqual(requestSequence.last, "/products/\(Self.testProductSlug)/licenses/deactivate")
+        XCTAssertFalse(requestSequence.joined().contains(licenseKey))
     }
 
     func testProductSlugRequired() async {

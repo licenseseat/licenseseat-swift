@@ -22,7 +22,7 @@ import Foundation
 /// - `seat_limit_exceeded`: All seats are in use
 /// - `device_not_activated`: Device is not activated for this license
 /// - `parameter_missing`: Required parameter is missing
-public struct APIError: LocalizedError, Equatable, Sendable {
+public struct APIError: LocalizedError, Equatable, @unchecked Sendable {
     /// Machine-readable error code for programmatic handling
     public let code: String?
 
@@ -107,4 +107,4 @@ public struct APIError: LocalizedError, Equatable, Sendable {
         if [0, 408, 429].contains(status) { return true }
         return false
     }
-} 
+}

@@ -150,7 +150,7 @@ public final class LicenseSeat {
 
     /// Initialize SDK components
     private func initialize() async {
-        log("LicenseSeat SDK initialized", config)
+        log("LicenseSeat SDK initialized")
 
         // Set up network monitoring
         setupNetworkMonitoring()
@@ -162,7 +162,7 @@ public final class LicenseSeat {
             // Quick offline verification for instant UX
             Task {
                 if let offlineResult = await quickVerifyCachedOfflineLocal() {
-                    cache.updateValidation(offlineResult)
+                    cache.updateValidation(offlineResult, markValidatedOnline: false)
                     if offlineResult.valid {
                         eventBus.emit("validation:offline-success", offlineResult)
                     } else {
@@ -180,7 +180,7 @@ public final class LicenseSeat {
                 // Background validation
                 Task {
                     do {
-                        try await validate(licenseKey: cachedLicense.licenseKey)
+                        _ = try await validate(licenseKey: cachedLicense.licenseKey)
                     } catch {
                         log("Background validation failed:", error)
 
@@ -215,9 +215,12 @@ public final class LicenseSeat {
             throw LicenseSeatError.productSlugRequired
         }
 
+        try validateRequestIdentity(productSlug: productSlug, licenseKey: licenseKey)
+
         let deviceId = options.deviceId ?? config.deviceIdentifier ?? DeviceIdentifier.generate()
 
         var body: [String: Any] = [
+            "license_key": licenseKey,
             "device_id": deviceId
         ]
 
@@ -232,9 +235,9 @@ public final class LicenseSeat {
         eventBus.emit("activation:start", ["licenseKey": licenseKey, "deviceId": deviceId])
 
         do {
-            // POST /products/{slug}/licenses/{key}/activate
+            // Keep the license credential in the JSON body, never the URL.
             let activation: ActivationResponse = try await apiClient.post(
-                path: "/products/\(productSlug)/licenses/\(licenseKey)/activate",
+                path: "/products/\(productSlug)/licenses/activate",
                 body: body
             )
 
@@ -253,11 +256,13 @@ public final class LicenseSeat {
             startAutoValidation(licenseKey: licenseKey)
             startHeartbeat(licenseKey: licenseKey)
 
-            // Sync offline assets
-            Task {
-                await syncOfflineAssets()
+            // Fetch offline authority only when explicitly enabled by policy.
+            if (1...36_600).contains(config.maxOfflineDays) {
+                Task {
+                    await syncOfflineAssets()
+                }
+                scheduleOfflineRefresh()
             }
-            scheduleOfflineRefresh()
 
             eventBus.emit("activation:success", license)
             return license
@@ -282,20 +287,21 @@ public final class LicenseSeat {
             throw LicenseSeatError.productSlugRequired
         }
 
+        try validateRequestIdentity(productSlug: productSlug, licenseKey: licenseKey)
+
         eventBus.emit("validation:start", ["licenseKey": licenseKey])
 
         do {
             let deviceId = options.deviceId ?? cache.getDeviceId()
-            var body: [String: Any] = [:]
+            var body: [String: Any] = ["license_key": licenseKey]
 
             if let deviceId = deviceId {
                 body["device_id"] = deviceId
             }
 
-            // POST /products/{slug}/licenses/{key}/validate
             let result: ValidationResponse = try await apiClient.post(
-                path: "/products/\(productSlug)/licenses/\(licenseKey)/validate",
-                body: body.isEmpty ? nil : body
+                path: "/products/\(productSlug)/licenses/validate",
+                body: body
             )
 
             // Update cache
@@ -341,7 +347,7 @@ public final class LicenseSeat {
                 let offlineResult = await verifyCachedOffline()
                 if let cachedLicense = cache.getLicense(),
                    cachedLicense.licenseKey == licenseKey {
-                    cache.updateValidation(offlineResult)
+                    cache.updateValidation(offlineResult, markValidatedOnline: false)
                 }
 
                 if offlineResult.valid {
@@ -372,6 +378,7 @@ public final class LicenseSeat {
         guard let license = cache.getLicense() else {
             throw LicenseSeatError.noActiveLicense
         }
+        try validateRequestIdentity(productSlug: productSlug, licenseKey: license.licenseKey)
 
         eventBus.emit("deactivation:start", license)
 
@@ -399,10 +406,9 @@ public final class LicenseSeat {
         }
 
         do {
-            // POST /products/{slug}/licenses/{key}/deactivate
             let _: DeactivationResponse = try await apiClient.post(
-                path: "/products/\(productSlug)/licenses/\(license.licenseKey)/deactivate",
-                body: ["device_id": license.deviceId]
+                path: "/products/\(productSlug)/licenses/deactivate",
+                body: ["license_key": license.licenseKey, "device_id": license.deviceId]
             )
 
             completeLocalDeactivation()
@@ -429,13 +435,14 @@ public final class LicenseSeat {
             log("No active license for heartbeat")
             return
         }
+        try validateRequestIdentity(productSlug: productSlug, licenseKey: license.licenseKey)
 
         let deviceId = license.deviceId
 
-        let body: [String: Any] = ["device_id": deviceId]
+        let body: [String: Any] = ["license_key": license.licenseKey, "device_id": deviceId]
 
         let _: HeartbeatResponse = try await apiClient.post(
-            path: "/products/\(productSlug)/licenses/\(license.licenseKey)/heartbeat",
+            path: "/products/\(productSlug)/licenses/heartbeat",
             body: body
         )
 
@@ -586,8 +593,10 @@ public final class LicenseSeat {
             startAutoValidation(licenseKey: licenseKey)
         }
 
-        Task {
-            await syncOfflineAssets()
+        if (1...36_600).contains(config.maxOfflineDays) {
+            Task {
+                await syncOfflineAssets()
+            }
         }
     }
 
@@ -598,6 +607,7 @@ public final class LicenseSeat {
     }
 
     private func shouldFallbackToOffline(error: Error) -> Bool {
+        guard (1...36_600).contains(config.maxOfflineDays) else { return false }
         switch config.offlineFallbackMode {
         case .always:
             return true
@@ -618,6 +628,16 @@ public final class LicenseSeat {
         print("[LicenseSeat SDK]", message)
     }
 
+    internal func validateRequestIdentity(productSlug: String, licenseKey: String) throws {
+        guard productSlug.utf8.count <= 100,
+              productSlug.range(of: "^[a-z0-9]+(?:-[a-z0-9]+)*$", options: .regularExpression) != nil,
+              !licenseKey.isEmpty,
+              licenseKey.utf8.count <= 512,
+              licenseKey.unicodeScalars.allSatisfy({ $0.value > 31 && $0.value != 127 }) else {
+            throw LicenseSeatError.invalidConfiguration
+        }
+    }
+
     deinit {
         validationTimer?.invalidate()
         connectivityTimer?.invalidate()
@@ -633,7 +653,7 @@ public final class LicenseSeat {
 // MARK: - Supporting Types
 
 /// Options for license activation
-public struct ActivationOptions: Sendable {
+public struct ActivationOptions: @unchecked Sendable {
     public var deviceId: String?
     public var deviceName: String?
     public var metadata: [String: Any]?
