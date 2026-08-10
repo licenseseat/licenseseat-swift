@@ -1,257 +1,161 @@
 # Offline Validation
 
-Master offline license validation for air-gapped environments and network resilience.
+Use a previously activated, device-bound license during a temporary network or server outage without weakening revocation handling.
 
 ## Overview
 
-LicenseSeat provides cryptographically secure offline validation using Ed25519 signatures. This enables your application to validate licenses without network connectivity, perfect for air-gapped environments, temporary network outages, or performance-critical scenarios.
+The current Swift SDK uses the LicenseSeat legacy signed-token endpoint for offline compatibility. The backend's newer encrypted machine-file flow is not yet exposed by this SDK.
 
-## How Offline Validation Works
+After online activation, the SDK:
 
-1. **Initial Online Activation** - License must be activated online at least once
-2. **Offline License Download** - SDK automatically fetches signed offline license data
-3. **Public Key Caching** - Ed25519 public keys are cached for signature verification
-4. **Local Verification** - Licenses are verified using cryptographic signatures
-5. **Fallback Logic** - Automatic fallback when network is unavailable
+1. Requests a signed offline token for the activated fingerprint.
+2. Resolves the token's Ed25519 public key from `/signing_keys/{keyId}`.
+3. Verifies every signed claim before replacing a cached token.
+4. Stores the activation, token, public key, and clock state in Keychain on Apple platforms.
+5. Refreshes the token periodically and re-arms refresh after launch.
+
+The server requires an active seat for the same fingerprint before it issues an offline token. A suspended, revoked, expired, not-yet-active, or deactivated license cannot obtain a new grant.
 
 ## Configuration
 
 ```swift
-let config = LicenseSeatConfig(
-    // Enable strict offline fallback (network-only)
-    strictOfflineFallback: true,
-    
-    // Refresh offline license every 72 hours
-    offlineLicenseRefreshInterval: 259200,
-    
-    // Allow 7 days of offline usage
-    maxOfflineDays: 7,
-    
-    // Clock tamper tolerance
-    maxClockSkewMs: 300000 // 5 minutes
-)
-```
-
-## Offline Validation Flow
-
-### Automatic Fallback
-
-When network validation fails, the SDK automatically attempts offline validation:
-
-```swift
-do {
-    // This will use offline validation if network fails
-    let result = try await licenseSeat.validate(licenseKey: "KEY")
-    
-    if result.offline {
-        print("Validated offline")
-    }
-} catch {
-    print("Both online and offline validation failed")
+LicenseSeatStore.shared.configure(
+    apiKey: "pk_live_…",
+    productSlug: "my-product"
+) { config in
+    config.offlineFallbackMode = .networkOnly
+    config.offlineTokenRefreshInterval = 72 * 60 * 60
+    config.maxOfflineDays = 7
+    config.maxClockSkewMs = 5 * 60 * 1_000
 }
 ```
 
-### Manual Offline Check
+`networkOnly` is the production default. It allows fallback for transport failures, timeouts, and 5xx responses. An ordinary 401/403/404 request or scope error does not trigger fallback and does not erase a valid cache. Authoritative license-state responses—revoked, suspended, expired, not active, license not found, or device not activated—always invalidate cached grants.
 
-You can also explicitly check the offline status:
+`always` requests fallback for other nonterminal failures. It does not override authoritative license invalidation.
+
+Offline authority is disabled by default. `maxOfflineDays` must be in
+`1...36,600` to permit a cached signed token to grant access; it then applies an
+application-side cap measured from the token's signed `iat` claim. Zero,
+negative values, and values above that range fail closed and also disable
+launch-time verification and background offline-token refresh. The signed token
+`exp` and underlying `license_expires_at` are always enforced as additional
+upper bounds.
+
+Intervals that are zero, negative, non-finite, or too large for the scheduler disable their corresponding timer safely.
+
+## Manual Synchronization and Verification
+
+Pre-fetch a fresh token before an expected outage:
 
 ```swift
-// Get current status (may be offline-validated)
-let status = licenseSeat.getStatus()
+await LicenseSeat.shared.syncOfflineAssets()
+```
 
-switch status {
-case .offlineValid(let details):
-    print("Valid offline until next sync")
-case .offlineInvalid(let message):
-    print("Offline validation failed: \(message)")
-default:
-    break
+Verify the currently cached token:
+
+```swift
+let result = await LicenseSeat.shared.verifyCachedOffline()
+guard result.valid else {
+    print(result.code ?? "offline_validation_failed")
+    return
 }
 ```
 
-## Security Features
+`verifyCachedOffline()` may fetch a missing public key while online. Launch-time quick verification uses the same claim-validation implementation but never performs a network request.
 
-### Ed25519 Signature Verification
+During automatic fallback, a successful result updates the cached validation and exposes `LicenseStatus.offlineValid`. A later successful online validation clears the offline state.
 
-All offline licenses are signed with Ed25519:
+## Security Invariants
+
+Both quick and full verification enforce the same checks:
+
+- `signature.algorithm` is Ed25519.
+- `signature.key_id` equals the signed token `kid`.
+- The decoded sibling `token` exactly matches the signed `canonical` JSON.
+- The Ed25519 signature is valid for that canonical payload.
+- `schema_version` is supported.
+- The signed license key equals the protected cached activation.
+- The signed product slug equals the configured product.
+- A fingerprint is present and equals the activated fingerprint.
+- `iat`, `nbf`, and `exp` form a valid time window.
+- The token is not expired or not-yet-valid.
+- The underlying license expiry has not passed.
+- The optional maximum offline age from signed `iat` has not passed.
+- The local clock has not moved backward beyond `maxClockSkewMs`.
+- The token lifetime, text fields, entitlement count, metadata, signature, and
+  public key remain within documented structural bounds.
+- Each JSON object has unique decoded keys, including when two spellings differ
+  only through JSON escapes.
+
+The activation, validation, heartbeat, deactivation, and offline-token routes
+carry the license key and fingerprint in the authenticated JSON body rather than
+the URL. Signing-key IDs are the only dynamic licensing value in a GET path and
+are encoded as one bounded path component.
+
+The SDK verifies a newly downloaded token before it can replace the previous cache. A malformed or mismatched server response therefore cannot poison working offline recovery.
+
+An online `valid: false` response removes the old offline token before persisting the invalid state. This prevents a relaunch from resurrecting a license that the server already rejected. Entitlement checks also require the top-level validation result to be valid, even if an inconsistent payload contains entitlement objects.
+
+## Protected Storage
+
+On platforms with Security.framework, LicenseSeat uses generic-password Keychain items with `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly` for:
+
+- the activated license and validation state;
+- the signed offline token;
+- cached Ed25519 public keys;
+- the last-seen clock timestamp.
+- the default app-scoped installation identifier (stored separately from the grant cache).
+
+The storage prefix scopes Keychain account names. Existing 0.4.x UserDefaults and Application Support license files are migrated lazily. Plaintext is deleted only after the Keychain write succeeds, so an interrupted migration does not lose an activation.
+
+On platforms without Security.framework, the SDK retains its UserDefaults fallback because Keychain is unavailable.
+
+## Events
+
+Observe synchronization and fallback with the canonical event names:
 
 ```swift
-// Signature verification happens automatically
-// Payload structure:
-{
-    "lic_k": "LICENSE-KEY",
-    "exp_at": "2025-01-01T00:00:00Z",
-    "kid": "key-id-123",
-    "entitlements": [...]
+let ready = LicenseSeat.shared.on("offlineToken:ready") { payload in
+    print("Offline grant ready: \(payload)")
+}
+
+let offline = LicenseSeat.shared.on("validation:offline-success") { _ in
+    showOfflineBanner()
 }
 ```
 
-### Clock Tamper Detection
+Relevant events include:
 
-The SDK detects system clock manipulation:
+- `offlineToken:fetching`, `offlineToken:fetched`, `offlineToken:fetchError`
+- `offlineToken:verified`, `offlineToken:verificationFailed`, `offlineToken:ready`
+- `validation:offline-success`, `validation:offline-failed`
+- `license:revoked`
 
-```swift
-// If clock is set backwards beyond tolerance:
-// result.reasonCode == "clock_tamper"
-```
+Keep the returned cancellables alive for as long as the observation is needed.
 
-### Grace Period Enforcement
+## Failure Codes
 
-When no expiration is set, grace period applies:
+Offline `ValidationResponse.code` values are stable machine-readable diagnostics:
 
-```swift
-// License valid for maxOfflineDays since last online validation
-// After grace period: reasonCode == "grace_period_expired"
-```
+- `no_offline_token`, `no_public_key`
+- `signature_metadata_mismatch`, `signature_invalid`
+- `token_payload_mismatch`, `unsupported_schema`
+- `license_mismatch`, `product_mismatch`
+- `fingerprint_missing`, `fingerprint_mismatch`
+- `token_expired`, `token_not_yet_valid`, `invalid_time_window`
+- `license_expired`, `grace_period_expired`
+- `offline_disabled`
+- `clock_tamper`, `cache_error`, `verification_error`
 
-## Offline Scenarios
+Treat any code other than a valid result as unlicensed. Do not add a permissive local bypass around these checks.
 
-### Air-Gapped Installation
+## Operational Guidance
 
-```swift
-// 1. Activate on internet-connected machine
-let license = try await licenseSeat.activate(licenseKey: "KEY")
-
-// 2. Export offline license data
-let offlineData = licenseSeat.exportOfflineLicense()
-
-// 3. Import on air-gapped machine
-licenseSeat.importOfflineLicense(offlineData)
-
-// 4. Validate offline
-let status = licenseSeat.getStatus() // Works without internet
-```
-
-### Network Interruption Handling
-
-```swift
-// Monitor network status
-licenseSeat.on("network:offline") { _ in
-    showOfflineIndicator()
-}
-
-licenseSeat.on("validation:offline-success") { _ in
-    print("Continuing with offline validation")
-}
-```
-
-### Periodic Sync
-
-```swift
-// Offline licenses refresh automatically
-// Monitor refresh events:
-licenseSeat.on("offlineLicense:ready") { data in
-    if let expiry = data["exp_at"] as? String {
-        print("Offline license valid until: \(expiry)")
-    }
-}
-```
-
-## Best Practices
-
-### 1. Pre-fetch Offline Assets
-
-Ensure offline licenses are ready before network loss:
-
-```swift
-// Force sync on app launch
-Task {
-    await licenseSeat.syncOfflineAssets()
-}
-```
-
-### 2. Monitor Expiration
-
-Track offline license expiration:
-
-```swift
-licenseSeat.eventPublisher(for: "offlineLicense:fetched")
-    .sink { event in
-        if let data = event.data as? [String: Any],
-           let payload = data["payload"] as? [String: Any],
-           let expAt = payload["exp_at"] as? String {
-            scheduleExpirationWarning(expAt)
-        }
-    }
-    .store(in: &cancellables)
-```
-
-### 3. Handle Validation Failures
-
-```swift
-licenseSeat.on("validation:offline-failed") { data in
-    if let result = data as? LicenseValidationResult {
-        switch result.reasonCode {
-        case "expired":
-            showRenewalPrompt()
-        case "no_offline_license":
-            requireOnlineConnection()
-        case "clock_tamper":
-            showSecurityWarning()
-        default:
-            showGenericError()
-        }
-    }
-}
-```
-
-## Troubleshooting
-
-### Common Issues
-
-1. **"no_offline_license"** - SDK hasn't downloaded offline data yet
-   - Solution: Ensure at least one successful online validation
-
-2. **"no_public_key"** - Public key not cached
-   - Solution: SDK will fetch automatically when online
-
-3. **"signature_invalid"** - Cryptographic verification failed
-   - Solution: Ensure license hasn't been tampered with
-
-4. **"license_mismatch"** - Offline license doesn't match cached license
-   - Solution: Re-activate the license
-
-## Platform Notes
-
-- **macOS/iOS**: Uses system CryptoKit for Ed25519
-- **Linux**: Falls back to SwiftCrypto package
-- **Keychain**: Public keys stored in UserDefaults (consider Keychain for enhanced security)
-
-## Advanced Usage
-
-### Custom Offline Storage
-
-```swift
-// Export for custom storage
-let offlineData = licenseSeat.currentOfflineLicense()
-// Store in your secure storage
-
-// Later, restore:
-licenseSeat.importOfflineLicense(offlineData)
-```
-
-### Offline-First Architecture
-
-```swift
-class OfflineFirstLicenseManager {
-    private let sdk = LicenseSeat.shared
-    
-    func validateWithFallback() async -> Bool {
-        // Try offline first for instant response
-        if let cached = sdk.currentLicense(),
-           let validation = cached.validation,
-           validation.valid && validation.offline {
-            return true
-        }
-        
-        // Then try online
-        do {
-            let result = try await sdk.validate(licenseKey: cached?.licenseKey ?? "")
-            return result.valid
-        } catch {
-            // Network failed, already tried offline
-            return false
-        }
-    }
-}
-``` 
+- Activate and complete at least one successful offline-asset sync before testing an outage.
+- Keep `.networkOnly` unless a deliberate compatibility requirement justifies `.always`.
+- Set `maxOfflineDays` to the product's outage tolerance; leaving it at `0`
+  intentionally disables offline access. The configured window can be shorter
+  than the server token TTL.
+- Rotate Ed25519 keys by issuing a new unique key ID. Do not reuse a key ID for different key material.
+- On logout, account switching, or license removal, call `deactivate()` or `purgeCachedLicense()` so protected grants do not cross identities.

@@ -19,9 +19,6 @@ public enum LicenseSeatError: LocalizedError, Sendable, Equatable {
     /// Product slug is required but not configured
     case productSlugRequired
 
-    /// SDK configuration is malformed or unsafe
-    case invalidConfiguration
-
     /// Offline token data is malformed or missing required fields
     case invalidOfflineToken
     
@@ -57,8 +54,6 @@ public enum LicenseSeatError: LocalizedError, Sendable, Equatable {
             return "API key is required for this operation"
         case .productSlugRequired:
             return "Product slug is required for this operation"
-        case .invalidConfiguration:
-            return "LicenseSeat SDK configuration is invalid"
         case .invalidKeyId:
             return "Invalid key ID"
         case .invalidPublicKey:

@@ -8,6 +8,9 @@
 
 import Foundation
 
+// Wire-level child objects are intentionally namespaced under their response.
+// swiftlint:disable nesting
+
 // MARK: - Product
 
 /// Product information included in license responses
@@ -95,7 +98,9 @@ public struct ActivationResponse: Codable, Equatable, Sendable {
     enum CodingKeys: String, CodingKey {
         case object
         case id
+        case fingerprint
         case deviceId = "device_id"
+        case deviceFingerprint = "device_fingerprint"
         case deviceName = "device_name"
         case licenseKey = "license_key"
         case activatedAt = "activated_at"
@@ -103,6 +108,36 @@ public struct ActivationResponse: Codable, Equatable, Sendable {
         case ipAddress = "ip_address"
         case metadata
         case license
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        object = try container.decode(String.self, forKey: .object)
+        id = try container.decodeStringOrInteger(forKey: .id)
+        deviceId = try container.decodeFirstPresentString(
+            forKeys: [.fingerprint, .deviceId, .deviceFingerprint]
+        )
+        deviceName = try container.decodeIfPresent(String.self, forKey: .deviceName)
+        licenseKey = try container.decode(String.self, forKey: .licenseKey)
+        activatedAt = try container.decode(Date.self, forKey: .activatedAt)
+        deactivatedAt = try container.decodeIfPresent(Date.self, forKey: .deactivatedAt)
+        ipAddress = try container.decodeIfPresent(String.self, forKey: .ipAddress)
+        metadata = try container.decodeIfPresent([String: AnyCodable].self, forKey: .metadata)
+        license = try container.decode(LicenseResponse.self, forKey: .license)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(object, forKey: .object)
+        try container.encode(id, forKey: .id)
+        try container.encode(deviceId, forKey: .fingerprint)
+        try container.encodeIfPresent(deviceName, forKey: .deviceName)
+        try container.encode(licenseKey, forKey: .licenseKey)
+        try container.encode(activatedAt, forKey: .activatedAt)
+        try container.encodeIfPresent(deactivatedAt, forKey: .deactivatedAt)
+        try container.encodeIfPresent(ipAddress, forKey: .ipAddress)
+        try container.encodeIfPresent(metadata, forKey: .metadata)
+        try container.encode(license, forKey: .license)
     }
 }
 
@@ -119,6 +154,20 @@ public struct DeactivationResponse: Codable, Equatable, Sendable {
         case object
         case activationId = "activation_id"
         case deactivatedAt = "deactivated_at"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        object = try container.decode(String.self, forKey: .object)
+        activationId = try container.decodeStringOrInteger(forKey: .activationId)
+        deactivatedAt = try container.decode(Date.self, forKey: .deactivatedAt)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(object, forKey: .object)
+        try container.encode(activationId, forKey: .activationId)
+        try container.encode(deactivatedAt, forKey: .deactivatedAt)
     }
 }
 
@@ -156,7 +205,9 @@ public struct ValidationResponse: Codable, Equatable, Sendable {
 
         enum CodingKeys: String, CodingKey {
             case id
+            case fingerprint
             case deviceId = "device_id"
+            case deviceFingerprint = "device_fingerprint"
             case deviceName = "device_name"
             case licenseKey = "license_key"
             case activatedAt = "activated_at"
@@ -164,109 +215,32 @@ public struct ValidationResponse: Codable, Equatable, Sendable {
             case ipAddress = "ip_address"
             case metadata
         }
-    }
-}
 
-// MARK: - Offline Token (API Response)
-
-/// Offline token as returned by the API
-/// Response format: `{"object": "offline_token", "token": {...}, "signature": {...}, "canonical": "..."}`
-public struct OfflineTokenResponse: Codable, Equatable, Sendable {
-    public let object: String
-    public let token: TokenPayload
-    public let signature: Signature
-    public let canonical: String
-
-    /// Token payload containing license information
-    public struct TokenPayload: Codable, Equatable, Sendable {
-        public let schemaVersion: Int
-        public let licenseKey: String
-        public let productSlug: String
-        public let planKey: String
-        public let mode: String
-        public let seatLimit: Int?
-        public let fingerprint: String
-        public let iat: Int
-        public let exp: Int
-        public let nbf: Int
-        public let licenseExpiresAt: Int?
-        public let kid: String
-        public let entitlements: [TokenEntitlement]
-        public let metadata: [String: AnyCodable]?
-
-        enum CodingKeys: String, CodingKey {
-            case schemaVersion = "schema_version"
-            case licenseKey = "license_key"
-            case productSlug = "product_slug"
-            case planKey = "plan_key"
-            case mode
-            case seatLimit = "seat_limit"
-            case fingerprint
-            case iat, exp, nbf
-            case licenseExpiresAt = "license_expires_at"
-            case kid
-            case entitlements
-            case metadata
-        }
-    }
-
-    /// Entitlement in offline token (uses Unix timestamps)
-    public struct TokenEntitlement: Codable, Equatable, Sendable {
-        public let key: String
-        public let expiresAt: Int?
-
-        enum CodingKeys: String, CodingKey {
-            case key
-            case expiresAt = "expires_at"
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            id = try container.decodeStringOrInteger(forKey: .id)
+            deviceId = try container.decodeFirstPresentString(
+                forKeys: [.fingerprint, .deviceId, .deviceFingerprint]
+            )
+            deviceName = try container.decodeIfPresent(String.self, forKey: .deviceName)
+            licenseKey = try container.decode(String.self, forKey: .licenseKey)
+            activatedAt = try container.decode(Date.self, forKey: .activatedAt)
+            deactivatedAt = try container.decodeIfPresent(Date.self, forKey: .deactivatedAt)
+            ipAddress = try container.decodeIfPresent(String.self, forKey: .ipAddress)
+            metadata = try container.decodeIfPresent([String: AnyCodable].self, forKey: .metadata)
         }
 
         public func encode(to encoder: Encoder) throws {
             var container = encoder.container(keyedBy: CodingKeys.self)
-            try container.encode(key, forKey: .key)
-            if let expiresAt {
-                try container.encode(expiresAt, forKey: .expiresAt)
-            } else {
-                // The Ruby API's signed v1 contract includes this member as
-                // explicit JSON null. Preserve it when reconstructing the
-                // visible payload for signed-claim equality checks.
-                try container.encodeNil(forKey: .expiresAt)
-            }
+            try container.encode(id, forKey: .id)
+            try container.encode(deviceId, forKey: .fingerprint)
+            try container.encodeIfPresent(deviceName, forKey: .deviceName)
+            try container.encode(licenseKey, forKey: .licenseKey)
+            try container.encode(activatedAt, forKey: .activatedAt)
+            try container.encodeIfPresent(deactivatedAt, forKey: .deactivatedAt)
+            try container.encodeIfPresent(ipAddress, forKey: .ipAddress)
+            try container.encodeIfPresent(metadata, forKey: .metadata)
         }
-    }
-
-    /// Signature block
-    public struct Signature: Codable, Equatable, Sendable {
-        public let algorithm: String
-        public let keyId: String
-        public let value: String
-
-        enum CodingKeys: String, CodingKey {
-            case algorithm
-            case keyId = "key_id"
-            case value
-        }
-    }
-}
-
-// MARK: - Signing Key (API Response)
-
-/// Signing key as returned by the API
-/// Response format: `{"object": "signing_key", "key_id": "...", "public_key": "...", ...}`
-public struct SigningKeyResponse: Codable, Equatable, Sendable {
-    public let object: String
-    public let keyId: String
-    public let algorithm: String
-    public let publicKey: String
-    public let createdAt: Date?
-    public let status: String
-
-    enum CodingKeys: String, CodingKey {
-        case object
-        case keyId = "key_id"
-        case algorithm
-        case publicKey = "public_key"
-        case createdAt = "created_at"
-        case status
     }
 }
 
@@ -388,3 +362,5 @@ public struct License: Codable, Equatable, Sendable {
         self.validation = validation
     }
 }
+
+// swiftlint:enable nesting

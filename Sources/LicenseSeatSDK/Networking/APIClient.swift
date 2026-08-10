@@ -15,40 +15,67 @@ import FoundationNetworking
 struct EmptyResponse: Decodable {}
 
 /// API client with retry logic and exponential backoff
+@MainActor
 final class APIClient {
     private static let maxResponseBytes = 2 * 1024 * 1024
-    private static let maxRequestBytes = 1024 * 1024
+    static let maxRequestBytes = 1024 * 1024
+    static let maxPathBytes = 2_048
     private static let maxRetries = 10
     private static let maxRetryDelay: TimeInterval = 60
+    static let protectedHeaders: Set<String> = [
+        "accept", "authorization", "connection", "content-length",
+        "content-type", "cookie", "expect", "host", "proxy-authorization",
+        "set-cookie", "te", "trailer", "transfer-encoding", "upgrade"
+    ]
+    static let headerNameCharacters = CharacterSet(
+        charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!#$%&'*+-.^_`|~"
+    )
 
-    private let config: LicenseSeatConfig
+    let config: LicenseSeatConfig
     private let session: URLSession
+    private let boundedSessionDelegate: BoundedSessionDelegate?
+    private let ownsSession: Bool
     private let decoder: JSONDecoder
-    private let encoder: JSONEncoder
     
     /// Callback for network status changes
     var onNetworkStatusChange: ((Bool) -> Void)?
     
     /// Current online status
     private var isOnline = true
+
+    /// Restore the optimistic connectivity baseline after a full SDK reset so
+    /// the next transport failure can emit a fresh offline transition.
+    func resetNetworkStatus() {
+        isOnline = true
+    }
     
-    init(config: LicenseSeatConfig, session: URLSession? = nil) {
+    init(
+        config: LicenseSeatConfig,
+        session: URLSession? = nil,
+        ownedSessionConfiguration: URLSessionConfiguration? = nil
+    ) {
         self.config = config
-        
-        // Use injected session if provided (useful for unit tests)
+
         if let session = session {
             self.session = session
+            self.boundedSessionDelegate = nil
+            self.ownsSession = false
         } else {
-            let configuration = URLSessionConfiguration.default
+            let sourceConfiguration = ownedSessionConfiguration
+                ?? URLSessionConfiguration.default
+            let configuration = sourceConfiguration.copy() as! URLSessionConfiguration
             configuration.timeoutIntervalForRequest = 30
             configuration.timeoutIntervalForResource = 60
             configuration.httpShouldSetCookies = false
             configuration.httpCookieAcceptPolicy = .never
             configuration.urlCache = nil
             configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+            let delegate = BoundedSessionDelegate()
+            self.boundedSessionDelegate = delegate
+            self.ownsSession = true
             self.session = URLSession(
                 configuration: configuration,
-                delegate: RedirectRejectingDelegate.shared,
+                delegate: delegate,
                 delegateQueue: nil
             )
         }
@@ -56,9 +83,12 @@ final class APIClient {
         // Configure JSON coding
         self.decoder = JSONDecoder()
         self.decoder.dateDecodingStrategy = .iso8601
-        
-        self.encoder = JSONEncoder()
-        self.encoder.dateEncodingStrategy = .iso8601
+    }
+
+    deinit {
+        if ownsSession {
+            session.invalidateAndCancel()
+        }
     }
     
     // MARK: - Public Methods
@@ -68,149 +98,196 @@ final class APIClient {
         path: String,
         headers: [String: String] = [:]
     ) async throws -> T {
-        try await apiCall(path: path, method: "GET", headers: headers)
+        try await apiCall(
+            pathComponents: path.split(separator: "/").map(String.init),
+            method: "GET",
+            headers: headers
+        )
+    }
+
+    /// Make a GET request from discrete route components. Dynamic identifiers
+    /// must use this form so reserved characters cannot alter route structure.
+    func get<T: Decodable>(
+        pathComponents: [String],
+        headers: [String: String] = [:]
+    ) async throws -> T {
+        try await apiCall(pathComponents: pathComponents, method: "GET", headers: headers)
     }
     
-    /// Make a POST request
+    /// Make a POST request from discrete route components. Each component is
+    /// encoded as one path segment. Credentials belong in the request body.
     func post<T: Decodable>(
-        path: String,
+        pathComponents: [String],
         body: Any? = nil,
         headers: [String: String] = [:]
     ) async throws -> T {
-        try await apiCall(path: path, method: "POST", body: body, headers: headers)
-    }
-    
-    /// Make a POST request with Encodable body
-    func post<B: Encodable, T: Decodable>(
-        path: String,
-        body: B,
-        headers: [String: String] = [:]
-    ) async throws -> T {
-        let bodyData = try encoder.encode(body)
-        return try await apiCall(path: path, method: "POST", bodyData: bodyData, headers: headers)
+        try await apiCall(
+            pathComponents: pathComponents,
+            method: "POST",
+            body: body,
+            headers: headers
+        )
     }
     
     // MARK: - Private Methods
     
     private func apiCall<T: Decodable>(
-        path: String,
+        pathComponents: [String],
         method: String,
         body: Any? = nil,
-        bodyData: Data? = nil,
         headers: [String: String] = [:]
     ) async throws -> T {
-        let url = try makeURL(path: path)
-        let allHeaders = requestHeaders(customHeaders: headers)
-        let retryCount = min(max(config.maxRetries, 0), Self.maxRetries)
-        guard config.retryDelay.isFinite, config.retryDelay >= 0 else {
-            throw LicenseSeatError.invalidConfiguration
+        guard let baseURL = validatedBaseURL() else {
+            throw APIError(
+                code: "invalid_base_url",
+                message: "Invalid API base URL",
+                status: 0
+            )
         }
+        guard let url = endpointURL(baseURL: baseURL, pathComponents: pathComponents) else {
+            throw APIError(
+                code: "invalid_endpoint_path",
+                message: "Invalid API endpoint path",
+                status: 0
+            )
+        }
+
+        let allHeaders = try requestHeaders(merging: headers)
+        let maximumRetries = try validatedMaximumRetries()
         var lastError: Error?
 
-        // Retry loop
-        for attempt in 0...retryCount {
+        for attempt in 0...maximumRetries {
             do {
                 let request = try makeRequest(
                     url: url,
                     method: method,
                     body: body,
-                    bodyData: bodyData,
                     headers: allHeaders
                 )
-                return try await send(request, expectedURL: url)
+                let (data, response) = try await loadBoundedData(for: request)
+                let httpResponse = try validatedHTTPResponse(
+                    response,
+                    data: data,
+                    intendedURL: url
+                )
+
+                guard (200...299).contains(httpResponse.statusCode) else {
+                    throw decodeAPIError(data: data, status: httpResponse.statusCode)
+                }
+
+                markOnlineAfterSuccess()
+                return try decodeSuccess(data)
             } catch {
+                // Cancellation is a caller decision, not a connectivity change,
+                // and must never trigger another HTTP request.
+                if Task.isCancelled {
+                    throw error
+                }
+
                 lastError = error
                 markOfflineIfNeeded(for: error)
 
-                guard attempt < retryCount, shouldRetryError(error) else {
+                guard attempt < maximumRetries, shouldRetryError(error) else {
                     throw error
                 }
-                let delay = try retryDelay(for: attempt)
-                log("Retry attempt \(attempt + 1) after \(delay)s (\(String(describing: type(of: error))))")
-                try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                try await sleepBeforeRetry(attempt: attempt, error: error)
             }
         }
 
         throw lastError ?? APIError(message: "Unknown error", status: 0)
     }
 
-    private func requestHeaders(customHeaders: [String: String]) -> [String: String] {
-        var headers = [
-            "Content-Type": "application/json",
-            "Accept": "application/json"
-        ]
-        if let apiKey = config.apiKey {
-            headers["Authorization"] = "Bearer \(apiKey)"
-        } else {
-            log("[Warning] No API key configured for LicenseSeat SDK. Authenticated endpoints will fail.")
+    private func loadBoundedData(
+        for request: URLRequest
+    ) async throws -> (Data, URLResponse) {
+        if let boundedSessionDelegate {
+            return try await boundedSessionDelegate.data(
+                for: request,
+                using: session,
+                maximumBytes: Self.maxResponseBytes
+            )
         }
 
-        // Never allow callers to replace the SDK's authentication or content
-        // negotiation boundary.
-        let protectedHeaders = ["authorization", "content-type", "accept"]
-        for (key, value) in customHeaders where !protectedHeaders.contains(key.lowercased()) {
-            headers[key] = value
-        }
-        return headers
+        // An injected session keeps its caller-owned delegate and lifecycle.
+        // Acceptance is still bounded below, but callers that inject a session
+        // own incremental-delivery and redirect policy during transfer.
+        return try await session.data(for: request)
     }
 
-    private func makeRequest(
-        url: URL,
-        method: String,
-        body: Any?,
-        bodyData: Data?,
-        headers: [String: String]
-    ) throws -> URLRequest {
-        var request = URLRequest(url: url)
-        request.httpMethod = method
-        for (key, value) in headers {
-            request.setValue(value, forHTTPHeaderField: key)
+    private func validatedMaximumRetries() throws -> Int {
+        guard config.retryDelay.isFinite, config.retryDelay >= 0 else {
+            throw APIError.localFailure(
+                code: "invalid_retry_configuration",
+                message: "Retry delay must be finite and nonnegative"
+            )
         }
-
-        if let bodyData {
-            request.httpBody = bodyData
-        } else if let body {
-            if method == "POST", var bodyDictionary = body as? [String: Any], config.telemetryEnabled {
-                bodyDictionary["telemetry"] = TelemetryPayload.collect().toDictionary()
-                request.httpBody = try JSONSerialization.data(withJSONObject: bodyDictionary)
-            } else {
-                request.httpBody = try JSONSerialization.data(withJSONObject: body)
-            }
-        }
-
-        guard (request.httpBody?.count ?? 0) <= Self.maxRequestBytes else {
-            throw LicenseSeatError.invalidConfiguration
-        }
-        return request
+        return min(max(0, config.maxRetries), Self.maxRetries)
     }
 
-    private func send<T: Decodable>(_ request: URLRequest, expectedURL: URL) async throws -> T {
-        let (data, response) = try await session.data(for: request)
+    private func validatedHTTPResponse(
+        _ response: URLResponse,
+        data: Data,
+        intendedURL: URL
+    ) throws -> HTTPURLResponse {
         guard let httpResponse = response as? HTTPURLResponse else {
-            throw APIError(message: "Invalid response", status: 0)
+            throw APIError.localFailure(
+                code: "invalid_response",
+                message: "Invalid HTTP response"
+            )
         }
-        guard httpResponse.url == expectedURL else {
-            throw LicenseSeatError.invalidConfiguration
+        guard httpResponse.url == intendedURL else {
+            throw APIError.localFailure(
+                code: "unexpected_response_url",
+                message: "Response URL did not match the intended endpoint"
+            )
         }
-        guard data.count <= Self.maxResponseBytes else {
-            throw APIError(message: "Response exceeds the supported size", status: 0)
+        let declaredLength = httpResponse.expectedContentLength
+        guard declaredLength < 0 || declaredLength <= Self.maxResponseBytes,
+              data.count <= Self.maxResponseBytes else {
+            throw APIError.localFailure(
+                code: "response_too_large",
+                message: "Response exceeds the supported size"
+            )
         }
-        guard (200..<300).contains(httpResponse.statusCode) else {
-            throw APIError(from: errorPayload(from: data), status: httpResponse.statusCode)
-        }
+        return httpResponse
+    }
 
-        markOnlineIfNeeded()
-        if T.self == EmptyResponse.self {
-            return EmptyResponse() as! T
+    private func decodeSuccess<T: Decodable>(_ data: Data) throws -> T {
+        if let emptyResponse = EmptyResponse() as? T {
+            return emptyResponse
         }
+        guard !data.isEmpty else {
+            throw DecodingError.dataCorrupted(
+                .init(
+                    codingPath: [],
+                    debugDescription: "Expected a JSON response body"
+                )
+            )
+        }
+        try StrictJSON.validate(data, limits: .api)
         return try decoder.decode(T.self, from: data)
     }
 
-    private func errorPayload(from data: Data) -> [String: Any] {
-        (try? JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
+    private func decodeAPIError(data: Data, status: Int) -> APIError {
+        guard data.count <= Self.maxResponseBytes else {
+            return APIError(
+                code: "response_too_large",
+                message: "Error response exceeds the supported size",
+                status: status
+            )
+        }
+        guard (try? StrictJSON.validate(data, limits: .api)) != nil else {
+            return APIError(
+                code: nil,
+                message: "Request failed",
+                status: status
+            )
+        }
+        let responseData = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
+        return APIError(from: responseData, status: status)
     }
 
-    private func markOnlineIfNeeded() {
+    private func markOnlineAfterSuccess() {
         guard !isOnline else { return }
         isOnline = true
         onNetworkStatusChange?(true)
@@ -222,30 +299,36 @@ final class APIClient {
         onNetworkStatusChange?(false)
     }
 
-    private func retryDelay(for attempt: Int) throws -> TimeInterval {
-        let delay = min(config.retryDelay * pow(2, Double(attempt)), Self.maxRetryDelay)
-        guard delay.isFinite, delay >= 0 else {
-            throw LicenseSeatError.invalidConfiguration
+    private func sleepBeforeRetry(attempt: Int, error: Error) async throws {
+        guard config.retryDelay.isFinite, config.retryDelay >= 0 else {
+            throw APIError.localFailure(
+                code: "invalid_retry_configuration",
+                message: "Retry delay must be finite and nonnegative"
+            )
         }
-        return delay
+        let exponentialDelay = config.retryDelay * pow(2, Double(attempt))
+        let delay = min(exponentialDelay, Self.maxRetryDelay)
+        log("Retry attempt \(attempt + 1) after \(delay)s for error: \(LogRedaction.describe(error))")
+        guard delay.isFinite, delay > 0 else { return }
+        try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
     }
-    
+
     private func isNetworkError(_ error: Error) -> Bool {
-        if error is URLError {
-            return true
+        if let urlError = error as? URLError {
+            return urlError.code != .cancelled
         }
         
-        if let apiError = error as? APIError, apiError.status == 0 {
-            return true
+        if let apiError = error as? APIError {
+            return apiError.isNetworkError
         }
         
         return false
     }
-    
+
     private func shouldRetryError(_ error: Error) -> Bool {
         // Network errors from URLSession
-        if error is URLError {
-            return true
+        if let urlError = error as? URLError {
+            return urlError.code != .cancelled
         }
 
         // API errors - delegate to the error's own retry logic
@@ -255,55 +338,9 @@ final class APIClient {
 
         return false
     }
-
-    private func makeURL(path: String) throws -> URL {
-        guard path.utf8.count <= 2_048,
-              path.hasPrefix("/"),
-              !path.contains("\\"),
-              !path.contains("?"),
-              !path.contains("#"),
-              var components = URLComponents(string: config.apiBaseUrl),
-              components.user == nil,
-              components.password == nil,
-              components.query == nil,
-              components.fragment == nil,
-              let scheme = components.scheme?.lowercased(),
-              let host = components.host?.lowercased(),
-              !host.isEmpty else {
-            throw LicenseSeatError.invalidConfiguration
-        }
-
-        let isLoopback = host == "localhost" || host == "127.0.0.1" || host == "::1"
-        guard scheme == "https" || (scheme == "http" && isLoopback) else {
-            throw LicenseSeatError.invalidConfiguration
-        }
-
-        let basePath = components.percentEncodedPath.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        let requestPath = path.drop(while: { $0 == "/" })
-        components.percentEncodedPath = "/" + [basePath, String(requestPath)].filter { !$0.isEmpty }.joined(separator: "/")
-
-        guard let url = components.url else {
-            throw LicenseSeatError.invalidConfiguration
-        }
-        return url
-    }
     
-    private func log(_ message: String) {
+    func log(_ message: String) {
         guard config.debug else { return }
         print("[LicenseSeat SDK]", message)
-    }
-}
-
-private final class RedirectRejectingDelegate: NSObject, URLSessionTaskDelegate {
-    static let shared = RedirectRejectingDelegate()
-
-    func urlSession(
-        _ session: URLSession,
-        task: URLSessionTask,
-        willPerformHTTPRedirection response: HTTPURLResponse,
-        newRequest request: URLRequest,
-        completionHandler: @escaping (URLRequest?) -> Void
-    ) {
-        completionHandler(nil)
     }
 }

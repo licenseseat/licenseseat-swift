@@ -1,4 +1,4 @@
-// swift-tools-version: 5.8
+// swift-tools-version: 5.10
 
 import PackageDescription
 
@@ -12,7 +12,7 @@ let package = Package(
         .executable(name: "LicenseSeatExample", targets: ["LicenseSeatExample"])
     ],
     dependencies: [
-        .package(path: "../..")
+        .package(name: "licenseseat-swift", path: "../..")
     ],
     targets: [
         .executableTarget(
@@ -22,4 +22,4 @@ let package = Package(
             ]
         )
     ]
-) 
+)

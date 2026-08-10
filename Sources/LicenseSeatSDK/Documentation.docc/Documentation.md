@@ -1,83 +1,61 @@
 # ``LicenseSeat``
 
-A comprehensive Swift SDK for managing software licenses with the LicenseSeat licensing system.
+Integrate LicenseSeat activation, validation, entitlements, heartbeat, and signed offline grants into Swift applications.
 
 ## Overview
 
-LicenseSeat provides a complete solution for integrating license management into your Swift applications. With a simple two-line integration and support for advanced features like offline validation, automatic re-validation, and entitlement management, it offers everything you need for robust license control.
-
-### Quick Integration
+LicenseSeat is a main-actor-isolated SDK for macOS, iOS, tvOS, watchOS, and supported Swift platforms. Configure it with a client-safe publishable key and product slug, then activate the customer's license.
 
 ```swift
-// 1️⃣ Configure once at app launch
-LicenseSeat.configure(apiKey: "YOUR_API_KEY")
+import LicenseSeat
 
-// 2️⃣ Activate when user enters their license
-try await LicenseSeat.activate("USER-LICENSE-KEY")
+LicenseSeat.configure(
+    apiKey: "pk_live_…",
+    productSlug: "my-product"
+)
 
-// ✅ That's it! The SDK handles everything else
+let license = try await LicenseSeat.activate("CUSTOMER-LICENSE-KEY")
 ```
 
-### Key Features
+The SDK persists the activation, validates it automatically, sends licensing heartbeats and optional device telemetry, downloads an Ed25519-signed offline token, and exposes entitlement state. On Apple platforms, licensing grants and verification keys are stored in Keychain.
 
-- **Simple Static API** - Clean, modern Swift interface following SDK best practices
-- **License Lifecycle** - Activation, validation, and deactivation with async/await
-- **Offline Validation** - Ed25519 cryptographic verification for resilient offline use
-- **Auto Re-validation** - Background validation keeps licenses current automatically
-- **Entitlements** - Control feature access with fine-grained entitlement checks
-- **Network Resilience** - Automatic retry, exponential backoff, and offline fallback
-- **Reactive UI** - SwiftUI property wrappers and Combine publishers
-- **Security** - Clock tamper detection, secure caching, and device fingerprinting
-- **Multi-Platform** - Full support for macOS, iOS, tvOS, watchOS, and Linux
+Use either the static API or ``LicenseSeatStore``. Both configuration entry points now install the same process-wide ``LicenseSeat/shared`` instance, so Combine and SwiftUI observers cannot diverge from imperative calls.
 
 ## Topics
 
-### Getting Started
+### Start Here
 
 - <doc:GettingStarted>
-- ``LicenseSeat``
 - ``LicenseSeatConfig``
+- ``LicenseSeatStore``
 
-### Core APIs
+### License Lifecycle
 
 - ``License``
-- ``LicenseStatus``
 - ``ActivationOptions``
 - ``ValidationOptions``
+- ``ValidationResponse``
+- ``LicenseStatus``
+- ``LicenseStatusDetails``
+- ``LicenseSeatError``
+- ``APIError``
 
-### Entitlements
+### Entitlements and Reactive UI
 
 - ``Entitlement``
 - ``EntitlementStatus``
 - ``EntitlementInactiveReason``
-
-### SwiftUI Integration
-
 - <doc:ReactiveIntegration>
-- ``LicenseState``
-- ``EntitlementState``
 - <doc:LicenseSeatStore>
+- <doc:EventReference>
 
-### Advanced Features
+### Resilience and Security
 
 - <doc:OfflineValidation>
 - <doc:NetworkResilience>
 - <doc:SecurityFeatures>
-
-### Reference
-
-- ``LicenseValidationResult``
-- ``LicenseStatusDetails``
-- ``ActivationResult``
-- ``LicenseSeatError``
-- ``APIError``
-
-### Platform Guides
-
-- <doc:SwiftUIIntegration>
-- <doc:AppKitIntegration>
-- <doc:LinuxSupport>
+- <doc:Privacy>
 
 ### Migration
 
-- <doc:MigratingFromJavaScript> 
+- <doc:MigratingFromJavaScript>

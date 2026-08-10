@@ -3,14 +3,25 @@
   "offline_token": {
     "object": "offline_token",
     "token": {
-      "entitlements": [{"expires_at": null, "key": "pro"}],
+      "entitlements": [
+        {
+          "expires_at": null,
+          "key": "pro"
+        }
+      ],
       "exp": 4102444800,
       "fingerprint": "test-device",
       "iat": 1700000000,
       "kid": "cross-language-2026",
       "license_key": "CROSS-LANGUAGE-LICENSE",
       "metadata": {
-        "array": [true, null, {"value": 1.5}],
+        "array": [
+          true,
+          null,
+          {
+            "value": 1.5
+          }
+        ],
         "escaped": "quote: \" backslash: \\",
         "int64_max": 9223372036854775807,
         "large": 1e+21,

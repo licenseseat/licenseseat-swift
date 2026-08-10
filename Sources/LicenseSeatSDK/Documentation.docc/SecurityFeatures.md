@@ -1,304 +1,142 @@
 # Security Features
 
-In-depth guide to LicenseSeat's security mechanisms and best practices.
+Understand the guarantees LicenseSeat provides, the trust boundaries it cannot remove, and the production configuration expected of a native client.
 
-## Overview
+## Threat Model
 
-LicenseSeat implements multiple layers of security to protect your software licenses from tampering, piracy, and unauthorized use. This guide covers the security features and how to maximize protection.
+The SDK protects cached license data from casual local modification and verifies that offline claims were issued by LicenseSeat. A determined user controls their own device, process, debugger, and filesystem; no client-only licensing system can make application code or a client-embedded credential secret from that user.
 
-## Cryptographic Verification
+Design high-value server-side capabilities so the server re-authorizes them. Use the SDK to gate local product features and provide resilient UX, not as a replacement for server authorization.
 
-### Ed25519 Signatures
+## Publishable and Secret API Keys
 
-All offline licenses are cryptographically signed using Ed25519:
+Embed only a LicenseSeat publishable key (`pk_…`) in an application. The backend limits that key to client-safe scopes such as activation, validation, heartbeat, offline-token retrieval, and release reads.
 
-```swift
-// Automatic signature verification
-let result = try await licenseSeat.validate(licenseKey: "KEY")
-// SDK verifies Ed25519 signature if offline
-```
-
-**Security Properties:**
-- 128-bit security level
-- Resistant to timing attacks
-- Fast verification (< 1ms)
-- Small signature size (64 bytes)
-
-### Platform Implementation
-
-- **Apple Platforms**: Native CryptoKit (hardware-accelerated when available)
-- **Linux**: SwiftCrypto (constant-time implementation)
-
-## Clock Tamper Detection
-
-The SDK detects system clock manipulation attempts:
+Never ship a secret key (`sk_…`) in a native app. Secret keys can perform administrative operations and cannot be hidden by obfuscation, Keychain, environment variables, or build settings once distributed.
 
 ```swift
-let config = LicenseSeatConfig(
-    maxClockSkewMs: 300000  // 5 minutes tolerance
+LicenseSeatStore.shared.configure(
+    apiKey: "pk_live_…",
+    productSlug: "my-product"
 )
 ```
 
-**How it works:**
-1. Records timestamp after each successful online validation
-2. Compares current time against last known good time
-3. Rejects validation if clock moved backwards beyond tolerance
+## Transport Security
 
-**Protection against:**
-- Setting clock back to extend trial periods
-- Bypassing time-based license expiration
-- Replay attacks with old offline licenses
+The SDK accepts HTTPS API base URLs. Plain HTTP is rejected unless the host is a loopback development address (`localhost`, `127.0.0.1`, or `::1`). URLs containing credentials, queries, or fragments are rejected as invalid base URLs.
+
+```swift
+let config = LicenseSeatConfig(
+    apiBaseUrl: "https://licenseseat.com/api/v1",
+    apiKey: "pk_live_…",
+    productSlug: "my-product"
+)
+```
+
+The SDK relies on URLSession's platform trust evaluation. Certificate pinning is intentionally not built in: pinning adds an operational key-rotation requirement and should be introduced only with a documented backup-pin and emergency-rotation process.
+
+License keys and fingerprints are sent in authenticated JSON request bodies,
+never in paths or query strings. This keeps them out of ordinary URL telemetry,
+proxy access logs, browser history, and intermediary cache keys. The SDK rejects
+cross-origin redirects and requires the final response URL to match the intended
+URL exactly. Its internally created URLSession disables cookie persistence and
+URL caching and cancels streamed response bodies above 2 MiB before further
+buffering. Callers that inject their own session retain responsibility for that
+session's storage, incremental transfer limit, and pre-redirect delegate policy;
+the SDK still rejects an oversized or final-URL-mismatched result.
 
 ## Device Binding
 
-### Secure Device Identification
+Activation sends one canonical `fingerprint` to the server. The same value is used for validation, heartbeat, deactivation, and offline-token issuance.
 
 ```swift
-// Automatic device ID generation
-let deviceId = DeviceIdentifier.generate()
-// Output: "mac-9559bc39-868b-53ed-b6e1-7d20436b5dc3"
-```
-
-**Platform-specific methods:**
-- **macOS**: Hardware UUID from IOKit (tamper-resistant)
-- **iOS**: Composite of device characteristics
-- **Linux**: Machine ID + hardware info
-
-### License-Device Binding
-
-Licenses are bound to specific devices:
-
-```swift
-// Activation binds to device
-let license = try await licenseSeat.activate(
-    licenseKey: "KEY",
+let license = try await LicenseSeat.shared.activate(
+    licenseKey: "LICENSE-KEY",
     options: ActivationOptions(
-        deviceIdentifier: customId  // Optional custom ID
+        deviceId: "stable-custom-fingerprint",
+        deviceName: "Studio Mac"
     )
 )
 ```
 
-## Secure Storage
+When no custom value is supplied, `DeviceIdentifier` creates a random app-scoped installation identifier. Apple platforms protect it in Keychain and migrate the identifier created by older SDKs without changing the active seat. The default does not derive identity from a hardware serial, locale, screen, or other mutable device characteristic. A custom identifier must remain stable across launches and must not contain user-entered license data.
 
-### Cache Security
+The offline verifier requires the signed token fingerprint to match the fingerprint in the protected cached activation. It also requires the signed license key and product slug to match local configuration.
+
+## Offline Cryptography
+
+Offline tokens use Ed25519 signatures. Apple platforms use CryptoKit; platforms without CryptoKit use SwiftCrypto.
+
+Verification is fail-closed and checks:
+
+- algorithm and key-ID consistency;
+- equality between the signed canonical payload and the sibling token object;
+- the Ed25519 signature;
+- schema, license, product, and fingerprint identity;
+- `iat`, `nbf`, token expiry, and underlying license expiry;
+- optional maximum offline age measured from signed `iat`;
+- local clock rollback.
+
+Untrusted JSON is validated before model decoding. Duplicate decoded object
+keys—including escape-equivalent spellings—are rejected at every nesting level,
+as are excessive depth/count/size, non-finite numeric magnitude, and trailing
+data. Canonical re-encoding has independent depth, node, key, string, and output
+bounds. API responses are limited to 2 MiB and request bodies to 1 MiB.
+
+Both launch-time quick verification and explicit/fallback verification call the same implementation. See <doc:OfflineValidation> for the full lifecycle.
+
+Public signing keys are selected by the signed key ID. Key rotation must use a new key ID; do not publish different key material under an existing ID.
+
+## Protected Cache
+
+On Apple platforms, the SDK stores the following as generic-password Keychain items using `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`:
+
+- activated license and latest validation;
+- offline token;
+- Ed25519 verification keys;
+- last-seen clock timestamp.
+- default app-scoped installation identifier (stored separately from revocable grant state).
+
+This accessibility class supports background validation after the user has unlocked the device once and prevents the items from migrating to another device through a backup.
+
+Older plaintext UserDefaults/Application Support data is migrated only after a successful Keychain write. Reset, purge, and deactivation remove the relevant protected grants.
+
+On platforms where Security.framework is unavailable, UserDefaults remains the portability fallback. Applications with a platform-native secret store can place additional protection around the process, but must not skip SDK signature and identity verification.
+
+## Authoritative Invalidation
+
+Not every 4xx response means a license is invalid. A missing API scope or malformed request must not erase an otherwise valid signed grant.
+
+The SDK purges cached grants only for authoritative terminal decisions such as license not found, revoked, suspended, expired, not active, device not activated, activation not found, or HTTP 410. It applies that policy consistently to validation, heartbeat, and offline refresh.
+
+An HTTP 200 validation with `valid: false` retains the invalid response for UI diagnostics but removes the old offline token. Entitlements require `valid == true`; an inconsistent invalid payload cannot grant features.
+
+## Clock Handling
+
+`maxClockSkewMs` tolerates small clock differences for not-before and rollback checks. `maxOfflineDays` is measured from the signed `iat` claim, so editing a local timestamp cannot create a sliding grace period.
 
 ```swift
-// Current implementation
-let cache = LicenseCache(prefix: "myapp_")
-// Stores in UserDefaults + Documents
-```
-
-### Keychain Integration (Recommended)
-
-```swift
-// Example Keychain wrapper
-class SecureLicenseCache {
-    private let keychain = Keychain(service: "com.myapp.licenses")
-    
-    func setLicense(_ license: License) throws {
-        let data = try JSONEncoder().encode(license)
-        try keychain
-            .accessibility(.whenUnlockedThisDeviceOnly)
-            .set(data, key: "license")
-    }
-    
-    func getLicense() -> License? {
-        guard let data = try? keychain.getData("license") else { return nil }
-        return try? JSONDecoder().decode(License.self, from: data)
-    }
-}
-```
-
-## Network Security
-
-### TLS/HTTPS Only
-
-All API communication uses HTTPS:
-
-```swift
-// Enforced HTTPS
 let config = LicenseSeatConfig(
-    apiBaseUrl: "https://api.licenseseat.com"  // https:// required
+    maxOfflineDays: 7,
+    maxClockSkewMs: 300_000
 )
 ```
 
-### API Key Protection
+`maxOfflineDays == 0` disables offline authority entirely. Values in
+`1...36,600` enable it for at most that signed age; negative and larger values
+also fail closed. Token and underlying license expiry remain additional upper
+bounds whenever offline authority is enabled.
 
-```swift
-// Never hardcode API keys
-let apiKey = ProcessInfo.processInfo.environment["LICENSESEAT_API_KEY"]
-let config = LicenseSeatConfig(apiKey: apiKey)
-```
+## Application Guidance
 
-### Certificate Pinning (Optional)
-
-```swift
-// Implement URLSessionDelegate for cert pinning
-class PinnedSessionDelegate: NSObject, URLSessionDelegate {
-    func urlSession(_ session: URLSession, 
-                    didReceive challenge: URLAuthenticationChallenge,
-                    completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
-        // Verify server certificate
-        guard let serverTrust = challenge.protectionSpace.serverTrust,
-              let certificate = SecTrustGetCertificateAtIndex(serverTrust, 0) else {
-            completionHandler(.cancelAuthenticationChallenge, nil)
-            return
-        }
-        
-        // Compare with pinned certificate
-        let pinnedCertData = // your pinned cert data
-        let serverCertData = SecCertificateCopyData(certificate) as Data
-        
-        if pinnedCertData == serverCertData {
-            completionHandler(.useCredential, URLCredential(trust: serverTrust))
-        } else {
-            completionHandler(.cancelAuthenticationChallenge, nil)
-        }
-    }
-}
-```
-
-## Anti-Tampering Measures
-
-### Constant-Time Comparisons
-
-The SDK uses constant-time string comparison for license keys:
-
-```swift
-// Internal implementation
-func constantTimeEqual(_ a: String, _ b: String) -> Bool {
-    guard a.count == b.count else { return false }
-    var result = 0
-    for (charA, charB) in zip(a, b) {
-        result |= Int(charA.asciiValue ?? 0) ^ Int(charB.asciiValue ?? 0)
-    }
-    return result == 0
-}
-```
-
-### Canonical JSON
-
-Ensures consistent serialization for signature verification:
-
-```swift
-// Deterministic JSON with sorted keys
-let canonical = try CanonicalJSON.stringify(payload)
-// Same output regardless of input order
-```
-
-## Best Practices
-
-### 1. Secure API Key Storage
-
-**❌ Don't:**
-```swift
-let config = LicenseSeatConfig(apiKey: "sk_live_abcd1234")
-```
-
-**✅ Do:**
-```swift
-// Use environment variables
-let apiKey = ProcessInfo.processInfo.environment["LICENSESEAT_API_KEY"]
-
-// Or secure configuration service
-let apiKey = try ConfigService.shared.getSecureValue("api_key")
-```
-
-### 2. Validate Critical Operations
-
-```swift
-// Always validate before enabling features
-func enablePremiumFeatures() async throws {
-    let result = try await licenseSeat.validate(licenseKey: currentKey)
-    guard result.valid else {
-        throw FeatureError.licenseRequired
-    }
-    // Enable features
-}
-```
-
-### 3. Implement App Attestation
-
-```swift
-#if os(iOS)
-import DeviceCheck
-
-func attestDevice() async throws {
-    let service = DCAppAttestService.shared
-    guard service.isSupported else { return }
-    
-    let keyId = try await service.generateKey()
-    let clientData = Data(UUID().uuidString.utf8)
-    let attestation = try await service.attestKey(keyId, clientDataHash: clientData.sha256())
-    
-    // Send attestation to your server
-}
-#endif
-```
-
-### 4. Obfuscate Sensitive Logic
-
-```swift
-// Use symbols instead of strings for critical checks
-private enum SecurityFlags {
-    static let δ = 0x1  // Valid
-    static let λ = 0x2  // Active
-    static let ω = 0x4  // Premium
-}
-
-func checkAccess() -> Bool {
-    let flags = getLicenseFlags()
-    return (flags & SecurityFlags.δ) != 0 &&
-           (flags & SecurityFlags.λ) != 0
-}
-```
-
-### 5. Runtime Integrity Checks
-
-```swift
-// Detect debugger attachment
-func isDebuggerAttached() -> Bool {
-    var info = kinfo_proc()
-    var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, getpid()]
-    var size = MemoryLayout<kinfo_proc>.stride
-    
-    let result = sysctl(&mib, UInt32(mib.count), &info, &size, nil, 0)
-    return result == 0 && (info.kp_proc.p_flag & P_TRACED) != 0
-}
-
-// Check code signature
-func verifyCodeSignature() -> Bool {
-    guard let url = Bundle.main.executableURL else { return false }
-    var staticCode: SecStaticCode?
-    
-    let result = SecStaticCodeCreateWithPath(url as CFURL, [], &staticCode)
-    guard result == errSecSuccess, let code = staticCode else { return false }
-    
-    let status = SecStaticCodeCheckValidity(code, [.checkAllArchitectures], nil)
-    return status == errSecSuccess
-}
-```
-
-## Security Checklist
-
-- [ ] API key stored securely (environment/keychain)
-- [ ] HTTPS enforced for all API calls
-- [ ] Offline validation enabled
-- [ ] Clock tamper detection configured
-- [ ] Device binding implemented
-- [ ] Critical operations re-validate license
-- [ ] Sensitive data in Keychain (not UserDefaults)
-- [ ] Code signature verification (production)
-- [ ] Debugger detection (optional)
-- [ ] Certificate pinning (high-security apps)
+- Treat `.active` and `.offlineValid` as the only licensed statuses.
+- Check `EntitlementStatus.active`, not merely whether an entitlement object exists.
+- Call `deactivate()` when moving a seat and `purgeCachedLicense()` when local identity is removed without a server call.
+- Keep the default `.networkOnly` fallback unless product requirements explicitly justify `.always`.
+- Do not add local “temporary unlock” flags that bypass failed signature, identity, or expiry checks.
+- Re-authorize server-side actions on the server.
+- Test revoked, suspended, expired, scope-error, outage, relaunch, clock-rollback, and Keychain-migration paths before release.
 
 ## Reporting Security Issues
 
-Found a security vulnerability? Please report it to security@licenseseat.com with:
-
-1. Description of the vulnerability
-2. Steps to reproduce
-3. Potential impact
-4. Suggested fix (if any)
-
-We'll respond within 48 hours and work on a fix immediately. 
+Send suspected vulnerabilities privately to security@licenseseat.com with reproduction steps, impact, and affected versions. Do not include live API keys, signing seeds, license keys, or customer data.

@@ -30,57 +30,39 @@ enum Base64URL {
             throw Base64URLError.invalidInput
         }
 
-        let usesURLAlphabet = string.contains("-") || string.contains("_")
-        let usesStandardAlphabet = string.contains("+") || string.contains("/")
-        guard !(usesURLAlphabet && usesStandardAlphabet) else {
-            throw Base64URLError.invalidInput
-        }
+        // The current Rails API emits canonical padded Base64 for public keys
+        // and signatures. Older/native producers may emit canonical unpadded
+        // Base64URL. Accept those two explicit RFC 4648 forms, but reject
+        // whitespace, mixed alphabets, and malformed padding.
+        let urlSafeAlphabet = CharacterSet(
+            charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+        )
+        if !string.isEmpty,
+           string.unicodeScalars.allSatisfy(urlSafeAlphabet.contains),
+           string.utf8.count % 4 != 1 {
+            var base64 = string
+                .replacingOccurrences(of: "-", with: "+")
+                .replacingOccurrences(of: "_", with: "/")
 
-        let unpadded = string.trimmingCharacters(in: CharacterSet(charactersIn: "="))
-        let paddingCount = string.count - unpadded.count
-        guard paddingCount <= 2,
-              !unpadded.contains("="),
-              unpadded.count % 4 != 1 else {
-            throw Base64URLError.invalidInput
-        }
+            let remainder = base64.utf8.count % 4
+            if remainder > 0 {
+                base64.append(String(repeating: "=", count: 4 - remainder))
+            }
 
-        let allowed = usesURLAlphabet
-            ? "^[A-Za-z0-9_-]+={0,2}$"
-            : "^[A-Za-z0-9+/]+={0,2}$"
-        guard string.range(of: allowed, options: .regularExpression) != nil else {
-            throw Base64URLError.invalidInput
-        }
-
-        // Convert from Base64URL to standard Base64 for Foundation.
-        var base64 = unpadded
-            .replacingOccurrences(of: "-", with: "+")
-            .replacingOccurrences(of: "_", with: "/")
-        
-        // Add padding if needed
-        let remainder = base64.count % 4
-        if remainder > 0 {
-            base64.append(String(repeating: "=", count: 4 - remainder))
-        }
-        
-        guard let data = Data(base64Encoded: base64) else {
-            throw Base64URLError.invalidInput
-        }
-        
-        let canonicalStandard = data.base64EncodedString()
-        if usesURLAlphabet {
-            let canonicalURL = encode(data)
-            let paddedURL = canonicalStandard
-                .replacingOccurrences(of: "+", with: "-")
-                .replacingOccurrences(of: "/", with: "_")
-            guard string == canonicalURL || string == paddedURL else {
+            guard let data = Data(base64Encoded: base64),
+                  encode(data) == string else {
                 throw Base64URLError.invalidInput
             }
-        } else {
-            guard string == canonicalStandard || string == canonicalStandard.trimmingCharacters(in: CharacterSet(charactersIn: "=")) else {
-                throw Base64URLError.invalidInput
-            }
+            return data
         }
 
+        let standardPattern = #"\A[A-Za-z0-9+/]+={0,2}\z"#
+        guard string.utf8.count.isMultiple(of: 4),
+              string.range(of: standardPattern, options: .regularExpression) != nil,
+              let data = Data(base64Encoded: string),
+              data.base64EncodedString() == string else {
+            throw Base64URLError.invalidInput
+        }
         return data
     }
 }

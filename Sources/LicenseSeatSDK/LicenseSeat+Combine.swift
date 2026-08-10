@@ -10,6 +10,9 @@ import Foundation
 #if canImport(Combine)
 import Combine
 
+// Publisher and event types are intentionally namespaced under LicenseSeat.
+// swiftlint:disable nesting
+
 // MARK: - ObservableObject Conformance
 
 extension LicenseSeat: ObservableObject {}
@@ -67,11 +70,12 @@ extension LicenseSeat {
         eventPublisher
             .compactMap { event in
                 switch event.name {
-                case "activation:success", "activation:error",
+                case "license:loaded",
+                     "activation:success", "activation:error",
                      "validation:success", "validation:failed",
                      "validation:offline-success", "validation:offline-failed",
                      "license:revoked",
-                     "deactivation:success":
+                     "deactivation:success", "sdk:reset":
                     return self.getStatus()
                 default:
                     return nil
@@ -86,7 +90,10 @@ extension LicenseSeat {
         eventPublisher
             .compactMap { event in
                 switch event.name {
-                case "validation:success", "validation:offline-success":
+                case "activation:success",
+                     "validation:success", "validation:failed",
+                     "validation:offline-success", "validation:offline-failed",
+                     "license:revoked", "deactivation:success", "sdk:reset":
                     return self.checkEntitlement(key)
                 default:
                     return nil
@@ -108,11 +115,15 @@ extension LicenseSeat {
 
 // MARK: - Private Subscription
 
-private final class EventSubscription<S: Subscriber>: Subscription where S.Input == LicenseSeat.Event, S.Failure == Never {
+private final class EventSubscription<S: Subscriber>: Subscription
+where S.Input == LicenseSeat.Event, S.Failure == Never {
+    private let lock = NSLock()
     private var subscriber: S?
     private let eventName: String?
     private let eventBus: EventBus
-    private var cancellables: Set<AnyCancellable> = []
+    private var eventCancellable: AnyCancellable?
+    private var outstandingDemand: Subscribers.Demand = .none
+    private var subscribed = false
     
     init(subscriber: S, eventName: String?, eventBus: EventBus) {
         self.subscriber = subscriber
@@ -120,46 +131,71 @@ private final class EventSubscription<S: Subscriber>: Subscription where S.Input
         self.eventBus = eventBus
     }
     
-    func request(_ demand: Subscribers.Demand) {
-        guard demand > .none else { return }
-        
-        if let eventName = eventName {
-            // Subscribe to specific event
-            eventBus.on(eventName) { [weak self] data in
-                _ = self?.subscriber?.receive(LicenseSeat.Event(name: eventName, data: data))
-            }.store(in: &cancellables)
+    func request(_ newDemand: Subscribers.Demand) {
+        guard newDemand > .none else { return }
+
+        lock.lock()
+        guard subscriber != nil else {
+            lock.unlock()
+            return
+        }
+        outstandingDemand += newDemand
+        let shouldSubscribe = !subscribed
+        subscribed = true
+        lock.unlock()
+
+        guard shouldSubscribe else { return }
+
+        let cancellable: AnyCancellable
+        if let eventName {
+            cancellable = eventBus.on(eventName) { [weak self] data in
+                self?.receive(LicenseSeat.Event(name: eventName, data: data))
+            }
         } else {
-            // Subscribe to all events
-            let allEvents = [
-                "license:loaded",
-                "activation:start", "activation:success", "activation:error",
-                "deactivation:start", "deactivation:success", "deactivation:error",
-                "validation:start", "validation:success", "validation:failed",
-                "validation:error", "validation:auto-failed",
-                "validation:offline-success", "validation:offline-failed",
-                "validation:auth-failed",
-                "autovalidation:cycle", "autovalidation:stopped",
-                "network:online", "network:offline",
-                "offlineLicense:fetching", "offlineLicense:fetched",
-                "offlineLicense:fetchError", "offlineLicense:ready",
-                "offlineLicense:verified", "offlineLicense:verificationFailed",
-                "heartbeat:success", "heartbeat:error",
-                "auth_test:start", "auth_test:success", "auth_test:error",
-                "sdk:error", "sdk:reset",
-                "license:revoked"
-            ]
-            
-            for event in allEvents {
-                eventBus.on(event) { [weak self] data in
-                    _ = self?.subscriber?.receive(LicenseSeat.Event(name: event, data: data))
-                }.store(in: &cancellables)
+            cancellable = eventBus.onAny { [weak self] event, data in
+                self?.receive(LicenseSeat.Event(name: event, data: data))
             }
         }
+
+        lock.lock()
+        if subscriber == nil {
+            lock.unlock()
+            cancellable.cancel()
+        } else {
+            eventCancellable = cancellable
+            lock.unlock()
+        }
     }
-    
+
     func cancel() {
+        lock.lock()
         subscriber = nil
-        cancellables.removeAll()
+        outstandingDemand = .none
+        let cancellable = eventCancellable
+        eventCancellable = nil
+        lock.unlock()
+        cancellable?.cancel()
+    }
+
+    private func receive(_ event: LicenseSeat.Event) {
+        lock.lock()
+        guard outstandingDemand > .none, let subscriber else {
+            lock.unlock()
+            return
+        }
+        if outstandingDemand != .unlimited {
+            outstandingDemand -= 1
+        }
+        lock.unlock()
+
+        let additionalDemand = subscriber.receive(event)
+        guard additionalDemand > .none else { return }
+
+        lock.lock()
+        if self.subscriber != nil {
+            outstandingDemand += additionalDemand
+        }
+        lock.unlock()
     }
 }
 
@@ -185,4 +221,6 @@ extension LicenseSeat.Event {
     }
 }
 
-#endif // canImport(Combine) 
+// swiftlint:enable nesting
+
+#endif // canImport(Combine)

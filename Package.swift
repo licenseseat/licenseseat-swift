@@ -1,4 +1,4 @@
-// swift-tools-version: 5.9
+// swift-tools-version: 5.10
 // The swift-tools-version declares the minimum version of Swift required to build this package.
 
 import PackageDescription
@@ -17,10 +17,9 @@ let package = Package(
     ],
     dependencies: [
         // Documentation Plugin (command plugin; no runtime impact)
-        .package(url: "https://github.com/apple/swift-docc-plugin", from: "1.3.0"),
+        .package(url: "https://github.com/swiftlang/swift-docc-plugin", from: "1.5.0"),
         // SwiftCrypto fallback for cross-platform Ed25519 verification
-        .package(url: "https://github.com/apple/swift-crypto.git", from: "2.6.0"),
-        // Future runtime dependencies (e.g., networking) will be added here.
+        .package(url: "https://github.com/apple/swift-crypto.git", from: "3.15.1"),
     ],
     targets: [
         // Targets are the basic building blocks of a package, defining a module or a test suite.
@@ -32,14 +31,16 @@ let package = Package(
             ],
             path: "Sources/LicenseSeatSDK",
             resources: [
-                // Place bundled assets or JSON fixtures here, if needed.
+                .process("Resources")
             ]
         ),
         .testTarget(
             name: "LicenseSeatTests",
             dependencies: ["LicenseSeat"],
             path: "Tests/LicenseSeatSDKTests",
-            resources: [.copy("Fixtures")]
+            resources: [
+                .process("Fixtures")
+            ]
         ),
     ]
 )
