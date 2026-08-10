@@ -7,6 +7,25 @@ import Combine
 #endif
 @testable import LicenseSeat
 
+/// Records URLProtocol callbacks without relying on XCTest's inverted async
+/// expectation handling, which differs between Swift 5.10 and newer XCTest.
+private final class LockedRequestCount: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storage = 0
+
+    func increment() {
+        lock.lock()
+        storage += 1
+        lock.unlock()
+    }
+
+    var value: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return storage
+    }
+}
+
 // swiftlint:disable implicitly_unwrapped_optional
 @MainActor
 final class AutoValidationTests: LicenseSeatTestCase {
@@ -138,11 +157,10 @@ final class AutoValidationTests: LicenseSeatTestCase {
 
     @MainActor
     func testDisabledAutoValidationDoesNotSendLaunchRequestForCachedLicense() async {
-        let unexpectedRequest = expectation(description: "No automatic online request")
-        unexpectedRequest.isInverted = true
+        let requestCount = LockedRequestCount()
 
         MockURLProtocol.requestHandler = { request in
-            unexpectedRequest.fulfill()
+            requestCount.increment()
             let url = try XCTUnwrap(request.url)
             let response = try XCTUnwrap(HTTPURLResponse(
                 url: url,
@@ -182,6 +200,11 @@ final class AutoValidationTests: LicenseSeatTestCase {
 
         XCTAssertNil(sdk.validationTask)
         XCTAssertNil(sdk.backgroundValidationTask)
-        await assertFulfillment(of: [unexpectedRequest], timeout: 0.2)
+        // Yield the main actor long enough for any incorrectly scheduled launch
+        // work to reach URLSession, then inspect a lock-protected counter. The
+        // async XCTWaiter API returned `.timedOut` for an unfulfilled inverted
+        // expectation on Xcode 15.4 even though that is this test's success case.
+        _ = try? await Task.sleep(nanoseconds: 200_000_000)
+        XCTAssertEqual(requestCount.value, 0)
     }
 }
