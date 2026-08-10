@@ -49,7 +49,8 @@ final class LicenseSeatSDKTests: LicenseSeatTestCase {
             deviceIdentifier: "test-device",
             autoValidateInterval: 3600, // won't trigger in unit time
             maxRetries: 0,
-            offlineFallbackMode: .networkOnly
+            offlineFallbackMode: .networkOnly,
+            maxOfflineDays: 7
         )
         let urlConf = URLSessionConfiguration.ephemeral
         urlConf.protocolClasses = [MockURLProtocol.self]
@@ -250,21 +251,31 @@ final class LicenseSeatSDKTests: LicenseSeatTestCase {
                 throw URLError(.badURL)
             }
             requestPaths.append(url.path)
+            let body = MockURLProtocol.jsonBody(for: request)
 
-            // New v1 API paths: /products/{slug}/licenses/{key}/activate|validate|deactivate
+            // Current v1 routes keep the credential in the JSON body.
             if url.path.contains("/activate") {
+                guard body["license_key"] as? String == licenseKey else {
+                    throw URLError(.badServerResponse)
+                }
                 let data = try JSONSerialization.data(withJSONObject: self.makeActivationResponse(licenseKey: licenseKey, deviceId: "test-device"))
                 guard let resp = HTTPURLResponse(url: url, statusCode: 201, httpVersion: nil, headerFields: ["Content-Type": "application/json"]) else {
                     throw URLError(.badServerResponse)
                 }
                 return (resp, data)
             } else if url.path.contains("/validate") {
+                guard body["license_key"] as? String == licenseKey else {
+                    throw URLError(.badServerResponse)
+                }
                 let data = try JSONSerialization.data(withJSONObject: self.makeValidationResponse(valid: true, licenseKey: licenseKey))
                 guard let resp = HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: ["Content-Type": "application/json"]) else {
                     throw URLError(.badServerResponse)
                 }
                 return (resp, data)
             } else if url.path.contains("/deactivate") {
+                guard body["license_key"] as? String == licenseKey else {
+                    throw URLError(.badServerResponse)
+                }
                 let data = try JSONSerialization.data(withJSONObject: self.makeDeactivationResponse())
                 guard let resp = HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: ["Content-Type": "application/json"]) else {
                     throw URLError(.badServerResponse)
@@ -321,9 +332,9 @@ final class LicenseSeatSDKTests: LicenseSeatTestCase {
         // request, and snapshot under a lock because URLProtocol callbacks can
         // execute concurrently with the main-actor test.
         let expectedLifecycleSuffixes = [
-            "/products/\(Self.testProductSlug)/licenses/\(licenseKey)/activate",
-            "/products/\(Self.testProductSlug)/licenses/\(licenseKey)/validate",
-            "/products/\(Self.testProductSlug)/licenses/\(licenseKey)/deactivate"
+            "/products/\(Self.testProductSlug)/licenses/activate",
+            "/products/\(Self.testProductSlug)/licenses/validate",
+            "/products/\(Self.testProductSlug)/licenses/deactivate"
         ]
         let lifecyclePaths = requestPaths.snapshot().filter { path in
             expectedLifecycleSuffixes.contains { path.hasSuffix($0) }
@@ -336,6 +347,7 @@ final class LicenseSeatSDKTests: LicenseSeatTestCase {
                 "Expected lifecycle path suffix \(expectedSuffix), got \(actual)"
             )
         }
+        XCTAssertFalse(requestPaths.snapshot().joined().contains(licenseKey))
     }
 
     func testProductSlugRequired() async {
@@ -689,7 +701,7 @@ final class LicenseSeatSDKTests: LicenseSeatTestCase {
                     try JSONSerialization.data(withJSONObject: payload)
                 )
             }
-            if url.path.contains("/offline_token") {
+            if url.path.contains("/offline-token") {
                 let payload = [
                     "error": ["code": "forbidden", "message": "Offline scope unavailable"]
                 ]
@@ -935,7 +947,8 @@ final class LicenseSeatSDKTests: LicenseSeatTestCase {
             productSlug: Self.testProductSlug,
             storagePrefix: "offline_race_test_\(UUID().uuidString)_",
             deviceIdentifier: "test-device",
-            maxRetries: 0
+            maxRetries: 0,
+            maxOfflineDays: 7
         )
         let urlConfig = URLSessionConfiguration.ephemeral
         urlConfig.protocolClasses = [MockURLProtocol.self]
@@ -1137,14 +1150,15 @@ final class LicenseSeatSDKTests: LicenseSeatTestCase {
         let releaseOldResponse = DispatchSemaphore(value: 0)
         MockURLProtocol.requestHandler = { request in
             guard let url = request.url else { throw URLError(.badURL) }
-            let licenseKey: String
-            if url.path.contains("/licenses/OLD-ACTIVATION/activate") {
+            let body = MockURLProtocol.jsonBody(for: request)
+            guard url.path.hasSuffix("/licenses/activate"),
+                  let licenseKey = body["license_key"] as? String else {
+                throw URLError(.notConnectedToInternet)
+            }
+            if licenseKey == "OLD-ACTIVATION" {
                 oldRequestStarted.fulfill()
                 _ = releaseOldResponse.wait(timeout: .now() + 0.5)
-                licenseKey = "OLD-ACTIVATION"
-            } else if url.path.contains("/licenses/NEW-ACTIVATION/activate") {
-                licenseKey = "NEW-ACTIVATION"
-            } else {
+            } else if licenseKey != "NEW-ACTIVATION" {
                 throw URLError(.notConnectedToInternet)
             }
             let payload = self.makeActivationResponse(
@@ -1560,12 +1574,23 @@ final class LicenseSeatSDKTests: LicenseSeatTestCase {
         for (index, corruptKey) in corruptKeys.enumerated() {
             sdk.cache.clear()
             let licenseKey = "CORRUPT-CACHE-\(index)"
-            let grant = try cacheValidOfflineGrant(on: sdk, licenseKey: licenseKey)
+            let grant = try cacheValidOfflineGrant(
+                on: sdk,
+                licenseKey: licenseKey,
+                cachePublicKey: false
+            )
             let keyId = grant.offlineToken.token.kid
             let authoritativeKey = Base64URL.encode(
                 grant.privateKey.publicKey.rawRepresentation
             )
-            XCTAssertTrue(sdk.cache.setPublicKey(keyId, corruptKey))
+            if index == 0 {
+                XCTAssertFalse(
+                    sdk.cache.setPublicKey(keyId, corruptKey),
+                    "Malformed keys must be rejected at the cache boundary"
+                )
+            } else {
+                XCTAssertTrue(sdk.cache.setPublicKey(keyId, corruptKey))
+            }
             var signingKeyRequests = 0
 
             MockURLProtocol.requestHandler = { request in
@@ -1611,7 +1636,7 @@ final class LicenseSeatSDKTests: LicenseSeatTestCase {
 
         MockURLProtocol.requestHandler = { request in
             guard let url = request.url else { throw URLError(.badURL) }
-            if url.path.contains("/offline_token") {
+            if url.path.contains("/offline-token") {
                 offlineTokenRequests += 1
                 return (
                     HTTPURLResponse(

@@ -17,6 +17,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Reject mismatched activation, validation, signing-key, and offline-token identities before they can replace trusted state
 - Accept only canonical padded Base64 from the Rails API or canonical unpadded Base64URL when decoding Ed25519 material
 - Encode every dynamic API identifier as one opaque URL path segment so license keys and signing-key IDs cannot alter route structure
+- Move license keys and fingerprints out of URL paths and into authenticated JSON request bodies for activation, validation, heartbeat, deactivation, and offline-token issuance
+- Reject cross-origin redirects and require the final response URL to match the intended URL; disable cookies and URL caching in SDK-owned sessions
+- Enforce 1 MiB request and 2 MiB response limits, bounded route/configuration values, protected-header invariants, and finite retry/scheduling limits
+- Validate untrusted JSON with duplicate decoded-key detection and depth, node, collection, string, number, and document bounds before decoding; independently bound canonical JSON generation
+- Treat `maxOfflineDays == 0`, negative values, and values above 36,600 as an explicit fail-closed offline policy shared by startup, fallback, refresh, and manual verification
+- Namespace cache identifiers through SHA-256 instead of interpolating caller-controlled storage prefixes into Keychain accounts, UserDefaults keys, or legacy filesystem paths
+- Bound cached artifacts and Ed25519 key material before persistence or verification, and reject symlinked or oversized legacy cache files during migration
 
 ### Fixed
 
@@ -41,6 +48,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Preserve the 0.4.1 `LicenseSeatStore.configure` signature as a compatibility overload while adding the explicit-product form, avoiding a source break in this patch release
 - Keep invalid base-URL/path configuration errors from masquerading as connectivity loss while consistently treating HTTP 408 as a transport-offline signal
 - Adopt a cached activation's existing fingerprint into protected installation-identity storage when the host removes a legacy custom identifier, preventing a later deactivation/reactivation from consuming a new seat
+- Reject structurally valid but ambiguous signed payloads with duplicate or escape-equivalent keys before either the sibling token or canonical payload can become authoritative
+- Filter individually expired signed entitlements from an otherwise valid offline grant
+- Keep license and fingerprint credentials out of errors and support diagnostics, including the previously exposed license-key prefix and fingerprint digest
 
 ### Changed
 
@@ -53,6 +63,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Split activation, validation, state, networking, offline-token, and compatibility-decoding responsibilities into focused source files
 - Add a digest-pinned Swift 6.2.4 Linux strict-concurrency build and isolated all-test runner alongside the Apple test matrix
 - Give CI read-only default permissions and pin current official GitHub Actions releases to immutable commit SHAs
+- Enforce an 85% first-party line-coverage floor in the current-Xcode lane, alongside strict parallel and Thread Sanitizer evidence
 - Set the declared minimum to Swift 5.10, matching the `nonisolated(unsafe)` lifecycle storage used for Swift 6-safe timer cleanup and the Xcode 15.4 minimum CI lane
 - Upgrade the Linux Ed25519 fallback from Swift Crypto 2.6.0 to the maintained Swift-5.10-compatible 3.15.x line, and use the current `swiftlang/swift-docc-plugin` 1.5.x package endpoint
 - Make the live StressTest consume the checked-out SDK, compile under strict concurrency, distinguish intentional latest-request-wins supersession from transport failures, and exit nonzero on missing credentials or failed scenarios

@@ -377,7 +377,7 @@ if result.valid {
 | `retryDelay`                | `TimeInterval`        | `1`                                | Base retry delay (exponential backoff)   |
 | `offlineFallbackMode`       | `OfflineFallbackMode` | `.networkOnly`                     | Offline fallback strategy                |
 | `offlineTokenRefreshInterval` | `TimeInterval`      | `259200` (72 hours)                | Offline token refresh interval           |
-| `maxOfflineDays`            | `Int`                 | `0`                                | Optional maximum signed-grant age (`0` disables this extra cap; token/license expiry still apply) |
+| `maxOfflineDays`            | `Int`                 | `0`                                | Maximum signed-grant age; `0` disables all offline authority, enabled values are `1...36,600` |
 | `maxClockSkewMs`            | `TimeInterval`        | `300000` (5 min)                   | Clock tamper tolerance                   |
 | `telemetryEnabled`          | `Bool`                | `true`                             | Send device telemetry with supported licensing POST requests |
 | `debug`                     | `Bool`                | `false`                            | Enable debug logging                     |
@@ -474,6 +474,12 @@ LicenseSeatStore.shared.configure(
 }
 ```
 
+Offline authority is disabled by default. Set `maxOfflineDays` to an explicit
+value in `1...36,600` only after choosing the maximum outage window your product
+will accept. Zero, negative values, and values above that range fail closed:
+cached grants cannot authorize features, launch-time offline verification is
+skipped, and background offline-token refresh is disabled.
+
 ### Offline Fallback Modes
 
 | Mode          | Description                                                                                         |
@@ -519,6 +525,20 @@ The SDK verifies offline tokens by:
 4. Binding the signed license, product, and fingerprint to the protected cached activation
 5. Checking schema, `iat`, `exp`, `nbf`, underlying license expiry, and the optional `maxOfflineDays` cap against signed `iat`
 6. Detecting local clock rollback with `maxClockSkewMs` tolerance
+
+License keys and fingerprints are carried in authenticated JSON request bodies,
+not URL paths or query strings, for activation, validation, heartbeat,
+deactivation, and offline-token issuance. This avoids copying credentials into
+ordinary URL telemetry, proxy access logs, browser history, or intermediary
+cache keys. Signing-key IDs remain encoded as a single bounded path component.
+
+Before decoding, the SDK applies a bounded strict-JSON pass that rejects
+duplicate object keys (including escape-equivalent keys), excessive nesting or
+container sizes, oversized strings/numbers/documents, non-finite numeric values,
+and trailing data. SDK-owned sessions cancel response streams once they exceed
+2 MiB, and request bodies are capped at 1 MiB. Applications that inject a
+caller-owned `URLSession` retain responsibility for incremental transfer limits
+and pre-redirect policy; final response acceptance is still size- and URL-bound.
 
 On Apple platforms the activation, offline token, signing keys, rollback timestamp, and default app-scoped installation identifier are stored in Keychain with `AfterFirstUnlockThisDeviceOnly`. Existing 0.4.x UserDefaults/Application Support data is migrated on first access and removed only after the protected write succeeds. Resetting a license removes grant state but intentionally retains the installation identifier so a future activation uses the same seat identity.
 
@@ -806,6 +826,8 @@ To use LicenseSeat in your project, add the Swift Package Manager dependency as 
 1. **Ensure all tests pass:**
    ```bash
    swift test --parallel -Xswiftc -strict-concurrency=complete -Xswiftc -warnings-as-errors
+   swift test --enable-code-coverage
+   Scripts/check-coverage.sh 85
    Scripts/test-linux.sh  # inside the pinned Swift 6.2.4 Linux environment
    ```
 

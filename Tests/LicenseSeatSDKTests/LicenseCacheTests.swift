@@ -61,13 +61,14 @@ final class LicenseCacheTests: LicenseSeatTestCase {
     func testOfflineTokenSigningKeysAndClockStateRoundTrip() {
         let token = makeOfflineToken()
         let timestamp = Date().timeIntervalSince1970
+        let publicKey = Base64URL.encode(Data(repeating: 0x42, count: 32))
 
         cache.setOfflineToken(token)
-        cache.setPublicKey("kid-1", "public-key-material")
+        cache.setPublicKey("kid-1", publicKey)
         cache.setLastSeenTimestamp(timestamp)
 
         XCTAssertEqual(cache.getOfflineToken(), token)
-        XCTAssertEqual(cache.getPublicKey("kid-1"), "public-key-material")
+        XCTAssertEqual(cache.getPublicKey("kid-1"), publicKey)
         XCTAssertEqual(cache.getLastSeenTimestamp() ?? 0, timestamp, accuracy: 0.001)
 
         #if canImport(Security)
@@ -154,6 +155,82 @@ final class LicenseCacheTests: LicenseSeatTestCase {
             defaults.string(forKey: installationIdentifierKey),
             "stable-installation"
         )
+    }
+
+    func testHostileStoragePrefixCannotBecomeAPathOrDeleteUnrelatedState() {
+        let hostilePrefix = "../../outside/\(UUID().uuidString)/"
+        let hostileCache = LicenseCache(
+            prefix: hostilePrefix,
+            userDefaults: defaults
+        )
+        defaults.set("preserve-me", forKey: "unrelated")
+        let license = makeLicense()
+
+        XCTAssertTrue(hostileCache.setLicense(license))
+        XCTAssertEqual(hostileCache.getLicense(), license)
+
+        hostileCache.clear()
+        XCTAssertNil(hostileCache.getLicense())
+        XCTAssertEqual(defaults.string(forKey: "unrelated"), "preserve-me")
+    }
+
+    func testMalformedPublicKeysAreRejectedBeforePersistence() {
+        XCTAssertFalse(cache.setPublicKey("kid-1", "not-base64"))
+        XCTAssertFalse(
+            cache.setPublicKey(
+                "kid-1",
+                Base64URL.encode(Data(repeating: 0x01, count: 31))
+            )
+        )
+        XCTAssertFalse(
+            cache.setPublicKey(
+                "../attacker",
+                Base64URL.encode(Data(repeating: 0x01, count: 32))
+            )
+        )
+        XCTAssertNil(cache.getPublicKey("kid-1"))
+    }
+
+    func testOversizedOfflineTokenIsNotPersisted() {
+        let original = makeOfflineToken()
+        let payload = OfflineTokenResponse.TokenPayload(
+            schemaVersion: original.token.schemaVersion,
+            licenseKey: original.token.licenseKey,
+            productSlug: original.token.productSlug,
+            planKey: original.token.planKey,
+            mode: original.token.mode,
+            seatLimit: original.token.seatLimit,
+            fingerprint: original.token.fingerprint,
+            iat: original.token.iat,
+            exp: original.token.exp,
+            nbf: original.token.nbf,
+            licenseExpiresAt: original.token.licenseExpiresAt,
+            kid: original.token.kid,
+            entitlements: original.token.entitlements,
+            metadata: [
+                "oversized": AnyCodable(
+                    String(repeating: "x", count: 2 * 1024 * 1024)
+                )
+            ]
+        )
+        let oversized = OfflineTokenResponse(
+            object: original.object,
+            token: payload,
+            signature: original.signature,
+            canonical: original.canonical
+        )
+
+        XCTAssertFalse(cache.setOfflineToken(oversized))
+        XCTAssertNil(cache.getOfflineToken())
+    }
+
+    func testAmbiguousLegacyCacheJSONCannotRestoreAuthority() {
+        let ambiguous = Data(
+            #"{"licenseKey":"FIRST","licenseKey":"SECOND"}"#.utf8
+        )
+        defaults.set(ambiguous, forKey: prefix + "license")
+
+        XCTAssertNil(cache.getLicense())
     }
 
     private func makeLicense() -> License {

@@ -190,7 +190,9 @@ public final class LicenseSeat {
     /// Initialize SDK components
     private func initialize() async {
         guard !Task.isCancelled else { return }
-        log("LicenseSeat SDK initialized", config)
+        // Configuration contains authentication and installation-adjacent
+        // values. Never interpolate it into automatic logs.
+        log("LicenseSeat SDK initialized")
 
         // Set up network monitoring
         setupNetworkMonitoring()
@@ -207,7 +209,7 @@ public final class LicenseSeat {
             // overwriting an authoritative invalid response from the server.
             if let offlineResult = await quickVerifyCachedOfflineLocal() {
                 guard !Task.isCancelled else { return }
-                if cache.updateValidation(offlineResult) {
+                if cache.updateValidation(offlineResult, markValidatedOnline: false) {
                     if offlineResult.valid {
                         eventBus.emit("validation:offline-success", offlineResult)
                     } else {
@@ -225,7 +227,9 @@ public final class LicenseSeat {
             if config.apiKey != nil, !Task.isCancelled {
                 startAutoValidation(licenseKey: cachedLicense.licenseKey)
                 startHeartbeat()
-                scheduleOfflineRefresh()
+                if config.offlineAuthorityEnabled {
+                    scheduleOfflineRefresh()
+                }
 
                 // Launch-time online validation follows the same opt-out as
                 // periodic validation. Hosts that set the interval to zero own

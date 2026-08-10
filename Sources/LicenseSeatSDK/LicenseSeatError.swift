@@ -74,4 +74,4 @@ public enum LicenseSeatError: LocalizedError, Sendable, Equatable {
             return "License activation failed: \(reason)"
         }
     }
-} 
+}

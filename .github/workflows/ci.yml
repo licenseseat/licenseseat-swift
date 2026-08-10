@@ -51,7 +51,16 @@ jobs:
         run: swift build -v
 
       - name: Run tests
+        if: matrix.xcode != '16.2'
         run: swift test -v
+
+      - name: Run tests with coverage
+        if: matrix.xcode == '16.2'
+        run: swift test -v --enable-code-coverage
+
+      - name: Enforce first-party line coverage floor
+        if: matrix.xcode == '16.2'
+        run: Scripts/check-coverage.sh 85
 
   test-linux:
     name: Test on Linux (Swift 6.2.4 strict concurrency)

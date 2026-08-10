@@ -27,6 +27,38 @@ final class MockURLProtocol: URLProtocol {
     static func reset() {
         requestHandler = nil
     }
+
+    /// URLSession may present a request body to URLProtocol as a stream even
+    /// when the caller assigned URLRequest.httpBody. Tests inspect the exact
+    /// credential-bearing JSON without assuming either representation.
+    static func bodyData(for request: URLRequest) -> Data? {
+        if let body = request.httpBody {
+            return body
+        }
+        guard let stream = request.httpBodyStream else { return nil }
+
+        stream.open()
+        defer { stream.close() }
+        var result = Data()
+        var buffer = [UInt8](repeating: 0, count: 4_096)
+        while stream.hasBytesAvailable {
+            let count = stream.read(&buffer, maxLength: buffer.count)
+            guard count >= 0 else { return nil }
+            if count == 0 { break }
+            result.append(contentsOf: buffer.prefix(count))
+            guard result.count <= 1024 * 1024 else { return nil }
+        }
+        return result
+    }
+
+    static func jsonBody(for request: URLRequest) -> [String: Any] {
+        guard let data = bodyData(for: request),
+              let object = try? JSONSerialization.jsonObject(with: data),
+              let body = object as? [String: Any] else {
+            return [:]
+        }
+        return body
+    }
     
     override class func canInit(with request: URLRequest) -> Bool {
         // Intercept every request

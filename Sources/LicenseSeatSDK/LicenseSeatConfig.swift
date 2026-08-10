@@ -26,6 +26,10 @@ import Foundation
 public struct LicenseSeatConfig {
     // MARK: - Constants
 
+    /// Upper bound for SDK-owned repeating schedules. Longer cadences should
+    /// be owned explicitly by the host application.
+    internal static let maximumScheduledInterval: TimeInterval = 366 * 86_400
+
     /// The current SDK version. Single source of truth for version information.
     public static let sdkVersion = "0.4.2"
 
@@ -60,7 +64,7 @@ public struct LicenseSeatConfig {
     internal var automaticValidationEnabled: Bool {
         autoValidateInterval.isFinite &&
             autoValidateInterval > 0 &&
-            autoValidateInterval <= Double(UInt64.max) / 1_000_000_000
+            autoValidateInterval <= Self.maximumScheduledInterval
     }
 
     /// Interval for standalone heartbeat pings (in seconds).
@@ -111,10 +115,19 @@ public struct LicenseSeatConfig {
     /// Strategy for offline fallback during validation.
     public var offlineFallbackMode: OfflineFallbackMode
 
-    /// Maximum age of a signed offline token in days. A value of 0 disables
-    /// this additional SDK-side age cap; the signed token and license expiry
-    /// claims are always enforced.
+    /// Maximum age of a signed offline token in days. A value of zero disables
+    /// offline authority entirely. Enabled values are limited to 1...36,600
+    /// (100 leap years); the signed token and license expiry claims are always
+    /// enforced as additional upper bounds.
     public var maxOfflineDays: Int
+
+    /// Whether this configuration permits a cached signed token to grant
+    /// authority. One predicate is shared by startup, fallback, refresh, and
+    /// explicit verification so zero cannot mean disabled in one path and
+    /// unbounded in another.
+    internal var offlineAuthorityEnabled: Bool {
+        (1...36_600).contains(maxOfflineDays)
+    }
 
     /// Maximum allowed clock skew (in milliseconds)
     public var maxClockSkewMs: TimeInterval

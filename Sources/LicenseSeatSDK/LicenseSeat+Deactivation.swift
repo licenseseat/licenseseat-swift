@@ -20,54 +20,26 @@ public extension LicenseSeat {
         guard let license = cache.getLicense() else {
             throw LicenseSeatError.noActiveLicense
         }
+        try validateRequestIdentity(
+            productSlug: productSlug,
+            licenseKey: license.licenseKey
+        )
+        try validateFingerprint(
+            license.deviceId,
+            allowLegacyShortValue: true
+        )
         currentActivationRequestID = nil
         let requestedIdentity = CachedLicenseIdentity(license)
 
         eventBus.emit("deactivation:start", license)
 
-        @discardableResult
-        func completeLocalDeactivation() -> Bool {
-            guard cachedLicenseMatches(requestedIdentity) else {
-                return false
-            }
-            cancelBackgroundLicenseOperations()
-            cache.clearLicense()
-            cache.clearOfflineToken()
-            stopAutoValidation()
-            stopHeartbeat()
-            stopOfflineRefresh()
-            currentAutoLicenseKey = nil
-            lastOfflineValidation = nil
-            return true
-        }
-
-        func shouldTreatAsSuccess(_ error: Error) -> Bool {
-            guard let apiError = error as? APIError else { return false }
-            switch apiError.status {
-            case 404:
-                let code = apiError.code?.lowercased()
-                return code.map {
-                    ["license_not_found", "activation_not_found", "already_deactivated"]
-                        .contains($0)
-                } == true
-            case 410:
-                return true
-            case 422:
-                let code = apiError.code?.lowercased()
-                return apiError.isLicenseTerminalError ||
-                    code == "already_deactivated"
-            default:
-                return false
-            }
-        }
-
         do {
-            // POST /products/{slug}/licenses/{key}/deactivate
             let response: DeactivationResponse = try await apiClient.post(
-                pathComponents: [
-                    "products", productSlug, "licenses", license.licenseKey, "deactivate"
-                ],
-                body: ["fingerprint": license.deviceId]
+                pathComponents: ["products", productSlug, "licenses", "deactivate"],
+                body: [
+                    "license_key": license.licenseKey,
+                    "fingerprint": license.deviceId
+                ]
             )
             guard response.object == "deactivation",
                   response.activationId == license.activationId else {
@@ -76,14 +48,18 @@ public extension LicenseSeat {
                 )
             }
 
-            let clearedCurrentState = completeLocalDeactivation()
+            let clearedCurrentState = completeLocalDeactivation(
+                matching: requestedIdentity
+            )
             eventBus.emit("deactivation:success", [
                 "licenseKey": license.licenseKey,
                 "localStateCleared": clearedCurrentState
             ])
         } catch {
-            if shouldTreatAsSuccess(error) {
-                let clearedCurrentState = completeLocalDeactivation()
+            if shouldTreatDeactivationAsSuccess(error) {
+                let clearedCurrentState = completeLocalDeactivation(
+                    matching: requestedIdentity
+                )
                 eventBus.emit("deactivation:success", [
                     "licenseKey": license.licenseKey,
                     "localStateCleared": clearedCurrentState
@@ -119,16 +95,25 @@ public extension LicenseSeat {
         guard let license = cache.getLicense() else {
             throw LicenseSeatError.noActiveLicense
         }
+        try validateRequestIdentity(
+            productSlug: productSlug,
+            licenseKey: license.licenseKey
+        )
+        try validateFingerprint(
+            license.deviceId,
+            allowLegacyShortValue: true
+        )
 
         let deviceId = license.deviceId
 
-        let body: [String: Any] = ["fingerprint": deviceId]
+        let body: [String: Any] = [
+            "license_key": license.licenseKey,
+            "fingerprint": deviceId
+        ]
 
         do {
             let response: HeartbeatResponse = try await apiClient.post(
-                pathComponents: [
-                    "products", productSlug, "licenses", license.licenseKey, "heartbeat"
-                ],
+                pathComponents: ["products", productSlug, "licenses", "heartbeat"],
                 body: body
             )
             guard response.object == "heartbeat",
@@ -166,6 +151,44 @@ public extension LicenseSeat {
             }
             eventBus.emit("heartbeat:error", ["error": error])
             throw error
+        }
+    }
+}
+
+private extension LicenseSeat {
+    @discardableResult
+    func completeLocalDeactivation(
+        matching requestedIdentity: CachedLicenseIdentity
+    ) -> Bool {
+        guard cachedLicenseMatches(requestedIdentity) else {
+            return false
+        }
+        cancelBackgroundLicenseOperations()
+        cache.clearLicense()
+        cache.clearOfflineToken()
+        stopAutoValidation()
+        stopHeartbeat()
+        stopOfflineRefresh()
+        currentAutoLicenseKey = nil
+        lastOfflineValidation = nil
+        return true
+    }
+
+    func shouldTreatDeactivationAsSuccess(_ error: Error) -> Bool {
+        guard let apiError = error as? APIError else { return false }
+        let code = apiError.code?.lowercased()
+        switch apiError.status {
+        case 404:
+            return code.map {
+                ["license_not_found", "activation_not_found", "already_deactivated"]
+                    .contains($0)
+            } == true
+        case 410:
+            return true
+        case 422:
+            return apiError.isLicenseTerminalError || code == "already_deactivated"
+        default:
+            return false
         }
     }
 }

@@ -43,11 +43,6 @@
 ///
 
 import Foundation
-#if canImport(CryptoKit)
-import CryptoKit
-#elseif canImport(Crypto)
-import Crypto
-#endif
 #if canImport(FoundationNetworking)
 import FoundationNetworking
 #endif
@@ -189,7 +184,7 @@ public final class LicenseSeatStore {
     public func activate(_ key: String,
                          options: ActivationOptions = .init()) async throws -> License {
         guard let seat else { throw LicenseSeatStoreError.notConfigured }
-        defer { status = seat.getStatus() }
+        defer { refreshStatus(from: seat) }
         let license = try await seat.activate(licenseKey: key, options: options)
         return license
     }
@@ -202,21 +197,21 @@ public final class LicenseSeatStore {
         options: ValidationOptions = .init()
     ) async throws -> ValidationResponse {
         guard let seat else { throw LicenseSeatStoreError.notConfigured }
-        defer { status = seat.getStatus() }
+        defer { refreshStatus(from: seat) }
         let validation = try await seat.validate(licenseKey: licenseKey, options: options)
         return validation
     }
     
     public func deactivate() async throws {
         guard let seat else { throw LicenseSeatStoreError.notConfigured }
-        defer { status = seat.getStatus() }
+        defer { refreshStatus(from: seat) }
         try await seat.deactivate()
     }
 
     /// Sends an immediate heartbeat for the active license.
     public func heartbeat() async throws {
         guard let seat else { throw LicenseSeatStoreError.notConfigured }
-        defer { status = seat.getStatus() }
+        defer { refreshStatus(from: seat) }
         try await seat.heartbeat()
     }
 
@@ -306,70 +301,48 @@ public final class LicenseSeatStore {
             .store(in: &subscriptions)
         #endif
     }
+
+    private func refreshStatus(from seat: LicenseSeat) {
+        let currentStatus = seat.getStatus()
+        if status != currentStatus {
+            status = currentStatus
+        }
+    }
     
     /// Generate a redacted diagnostic report for support tickets
     public func debugReport() -> [String: Any] {
         var report: [String: Any] = [
             "sdk_version": LicenseSeatConfig.sdkVersion,
-            "status": String(describing: status),
+            "status": redactedStatusName,
             "has_seat": seat != nil,
             "next_validation": nextAutoValidationAt?.timeIntervalSince1970 ?? "none"
         ]
         
         if let license = seat?.currentLicense() {
-            report["license_key_prefix"] = String(license.licenseKey.prefix(8)) + "..."
-            report["device_id_hash"] = SHA256.hash(data: Data(license.deviceId.utf8))
-                .prefix(8)
-                .map { String(format: "%02x", $0) }
-                .joined()
             report["activated_at"] = license.activatedAt.timeIntervalSince1970
             report["last_validated"] = license.lastValidated.timeIntervalSince1970
         }
         
         return report
     }
-}
 
-// MARK: – SwiftUI Quality-of-life Sugar
-
-#if canImport(SwiftUI)
-/// Property-wrapper exposing the current ``LicenseStatus`` inside SwiftUI views.
-@propertyWrapper
-public struct LicenseState: DynamicProperty {
-    @StateObject private var store = LicenseSeatStore.shared
-    public var wrappedValue: LicenseStatus { store.status }
-    public var projectedValue: LicenseStatus { store.status }
-    public init() {}
-}
-
-/// Property-wrapper for checking a specific entitlement's status inside SwiftUI views.
-@propertyWrapper
-public struct EntitlementState: DynamicProperty {
-    @StateObject private var store = LicenseSeatStore.shared
-    private let entitlementId: String
-    
-    public var wrappedValue: Bool { 
-        store.entitlement(entitlementId).active 
-    }
-    
-    public var projectedValue: EntitlementStatus { 
-        store.entitlement(entitlementId) 
-    }
-    
-    public init(_ id: String) {
-        self.entitlementId = id
+    private var redactedStatusName: String {
+        switch status {
+        case .inactive:
+            return "inactive"
+        case .pending:
+            return "pending"
+        case .invalid:
+            return "invalid"
+        case .offlineInvalid:
+            return "offline_invalid"
+        case .active:
+            return "active"
+        case .offlineValid:
+            return "offline_valid"
+        }
     }
 }
-
-extension View {
-    /// Injects the shared ``LicenseSeatStore`` into the environment.
-    @MainActor
-    public func licenseSeat(_ store: LicenseSeatStore? = nil) -> some View {
-        let target = store ?? LicenseSeatStore.shared
-        return environmentObject(target)
-    }
-}
-#endif
 
 // MARK: – Convenience errors
 

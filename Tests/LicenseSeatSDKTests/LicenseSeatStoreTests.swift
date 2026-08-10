@@ -36,7 +36,8 @@ final class LicenseSeatStoreTests: LicenseSeatTestCase {
             storagePrefix: "store_test_\(UUID().uuidString)_",
             deviceIdentifier: "test-device",
             autoValidateInterval: 0, // Disable auto-validation by default
-            debug: false
+            debug: false,
+            maxOfflineDays: 7
         )
 
         // Create a URLSession that uses the mock protocol.
@@ -71,20 +72,17 @@ final class LicenseSeatStoreTests: LicenseSeatTestCase {
             let path = request.url!.path
             let headers = ["Content-Type": "application/json"]
 
-            // Echo the requested license identity exactly as the real API does.
-            let pathComponents = request.url!.pathComponents
-            let licenseKey = pathComponents.firstIndex(of: "licenses")
-                .flatMap { index in
-                    pathComponents.indices.contains(index + 1) ? pathComponents[index + 1] : nil
-                }
-                ?? "LICENSE-TEST"
+            // Echo the body-bound identity exactly as the real API does.
+            let body = MockURLProtocol.jsonBody(for: request)
+            let licenseKey = body["license_key"] as? String ?? "LICENSE-TEST"
+            let fingerprint = body["fingerprint"] as? String ?? "test-device"
 
             if path.contains("/activate") {
                 // Return v1 ActivationResponse
                 let payload: [String: Any] = [
                     "object": "activation",
                     "id": "act-12345-uuid",
-                    "fingerprint": "test-device",
+                    "fingerprint": fingerprint,
                     "device_name": "Test Device",
                     "license_key": licenseKey,
                     "activated_at": ISO8601DateFormatter().string(from: Date()),
@@ -146,7 +144,7 @@ final class LicenseSeatStoreTests: LicenseSeatTestCase {
                 let data = try JSONSerialization.data(withJSONObject: result)
                 let resp = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: headers)!
                 return (resp, data)
-            } else if path.contains("/offline_token") {
+            } else if path.contains("/offline-token") {
                 // Return a cryptographically valid v1 OfflineTokenResponse so
                 // background asset sync exercises the real verification path.
                 let now = Int(Date().timeIntervalSince1970)
@@ -157,7 +155,7 @@ final class LicenseSeatStoreTests: LicenseSeatTestCase {
                     "plan_key": "pro",
                     "mode": "hardware_locked",
                     "seat_limit": 5,
-                    "fingerprint": "test-device",
+                    "fingerprint": fingerprint,
                     "iat": now,
                     "exp": now + 86400 * 30,
                     "nbf": now,
@@ -407,7 +405,8 @@ final class LicenseSeatStoreTests: LicenseSeatTestCase {
             storagePrefix: "force_lifecycle_test_\(UUID().uuidString)_",
             autoValidateInterval: 60,
             heartbeatInterval: 60,
-            offlineTokenRefreshInterval: 60
+            offlineTokenRefreshInterval: 60,
+            maxOfflineDays: 7
         )
         let lifecycleStore = LicenseSeatStore(config: lifecycleConfig)
         let firstSeat = try XCTUnwrap(lifecycleStore.seat)
@@ -447,9 +446,8 @@ final class LicenseSeatStoreTests: LicenseSeatTestCase {
         XCTAssertEqual(report["has_seat"] as? Bool, true)
         
         // Check redacted license info
-        XCTAssertNotNil(report["license_key_prefix"] as? String)
-        XCTAssertTrue((report["license_key_prefix"] as? String)?.hasSuffix("...") == true)
-        XCTAssertNotNil(report["device_id_hash"])
+        XCTAssertNil(report["license_key_prefix"])
+        XCTAssertNil(report["device_id_hash"])
         XCTAssertNotNil(report["activated_at"])
         XCTAssertNotNil(report["last_validated"])
     }

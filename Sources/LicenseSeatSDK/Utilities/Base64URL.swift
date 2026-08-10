@@ -24,6 +24,12 @@ enum Base64URL {
     
     /// Decode Base64URL string to data
     static func decode(_ string: String) throws -> Data {
+        guard !string.isEmpty,
+              string.utf8.count <= 1_500_000,
+              string.unicodeScalars.allSatisfy({ $0.isASCII }) else {
+            throw Base64URLError.invalidInput
+        }
+
         // The current Rails API emits canonical padded Base64 for public keys
         // and signatures. Older/native producers may emit canonical unpadded
         // Base64URL. Accept those two explicit RFC 4648 forms, but reject

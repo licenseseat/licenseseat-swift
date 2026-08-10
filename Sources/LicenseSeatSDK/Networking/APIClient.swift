@@ -14,36 +14,27 @@ import FoundationNetworking
 /// Empty response placeholder for endpoints that return no body
 struct EmptyResponse: Decodable {}
 
-/// Debug-log sanitizer for errors that can carry request URLs.
-///
-/// The license key is a URL path segment by API design, so a `URLError`'s
-/// failing-URL metadata (or any interpolated error text containing the
-/// request URL) would leak the key into debug logs. Transport errors are
-/// reduced to their domain and code; every other error has absolute URLs
-/// stripped from its description before interpolation.
-enum LogRedaction {
-    static func describe(_ error: Error) -> String {
-        if let urlError = error as? URLError {
-            return "URLError(code: \(urlError.code.rawValue))"
-        }
-        return redactingURLs(from: String(describing: error))
-    }
-
-    /// Replace every absolute URL in `text` with a placeholder.
-    static func redactingURLs(from text: String) -> String {
-        text.replacingOccurrences(
-            of: #"[A-Za-z][A-Za-z0-9+.-]*://[^\s"'<>)\]]+"#,
-            with: "<redacted-url>",
-            options: .regularExpression
-        )
-    }
-}
-
 /// API client with retry logic and exponential backoff
 @MainActor
 final class APIClient {
-    private let config: LicenseSeatConfig
+    private static let maxResponseBytes = 2 * 1024 * 1024
+    static let maxRequestBytes = 1024 * 1024
+    static let maxPathBytes = 2_048
+    private static let maxRetries = 10
+    private static let maxRetryDelay: TimeInterval = 60
+    static let protectedHeaders: Set<String> = [
+        "accept", "authorization", "connection", "content-length",
+        "content-type", "cookie", "expect", "host", "proxy-authorization",
+        "set-cookie", "te", "trailer", "transfer-encoding", "upgrade"
+    ]
+    static let headerNameCharacters = CharacterSet(
+        charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!#$%&'*+-.^_`|~"
+    )
+
+    let config: LicenseSeatConfig
     private let session: URLSession
+    private let boundedSessionDelegate: BoundedSessionDelegate?
+    private let ownsSession: Bool
     private let decoder: JSONDecoder
     
     /// Callback for network status changes
@@ -58,22 +49,46 @@ final class APIClient {
         isOnline = true
     }
     
-    init(config: LicenseSeatConfig, session: URLSession? = nil) {
+    init(
+        config: LicenseSeatConfig,
+        session: URLSession? = nil,
+        ownedSessionConfiguration: URLSessionConfiguration? = nil
+    ) {
         self.config = config
-        
-        // Use injected session if provided (useful for unit tests)
+
         if let session = session {
             self.session = session
+            self.boundedSessionDelegate = nil
+            self.ownsSession = false
         } else {
-            let configuration = URLSessionConfiguration.default
+            let sourceConfiguration = ownedSessionConfiguration
+                ?? URLSessionConfiguration.default
+            let configuration = sourceConfiguration.copy() as! URLSessionConfiguration
             configuration.timeoutIntervalForRequest = 30
             configuration.timeoutIntervalForResource = 60
-            self.session = URLSession(configuration: configuration)
+            configuration.httpShouldSetCookies = false
+            configuration.httpCookieAcceptPolicy = .never
+            configuration.urlCache = nil
+            configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+            let delegate = BoundedSessionDelegate()
+            self.boundedSessionDelegate = delegate
+            self.ownsSession = true
+            self.session = URLSession(
+                configuration: configuration,
+                delegate: delegate,
+                delegateQueue: nil
+            )
         }
         
         // Configure JSON coding
         self.decoder = JSONDecoder()
         self.decoder.dateDecodingStrategy = .iso8601
+    }
+
+    deinit {
+        if ownsSession {
+            session.invalidateAndCancel()
+        }
     }
     
     // MARK: - Public Methods
@@ -100,7 +115,7 @@ final class APIClient {
     }
     
     /// Make a POST request from discrete route components. Each component is
-    /// encoded as one path segment, including user-provided license keys.
+    /// encoded as one path segment. Credentials belong in the request body.
     func post<T: Decodable>(
         pathComponents: [String],
         body: Any? = nil,
@@ -137,8 +152,8 @@ final class APIClient {
             )
         }
 
-        let allHeaders = requestHeaders(merging: headers)
-        let maximumRetries = max(0, config.maxRetries)
+        let allHeaders = try requestHeaders(merging: headers)
+        let maximumRetries = try validatedMaximumRetries()
         var lastError: Error?
 
         for attempt in 0...maximumRetries {
@@ -149,10 +164,12 @@ final class APIClient {
                     body: body,
                     headers: allHeaders
                 )
-                let (data, response) = try await session.data(for: request)
-                guard let httpResponse = response as? HTTPURLResponse else {
-                    throw APIError(message: "Invalid response", status: 0)
-                }
+                let (data, response) = try await loadBoundedData(for: request)
+                let httpResponse = try validatedHTTPResponse(
+                    response,
+                    data: data,
+                    intendedURL: url
+                )
 
                 guard (200...299).contains(httpResponse.statusCode) else {
                     throw decodeAPIError(data: data, status: httpResponse.statusCode)
@@ -180,53 +197,92 @@ final class APIClient {
         throw lastError ?? APIError(message: "Unknown error", status: 0)
     }
 
-    private func requestHeaders(merging headers: [String: String]) -> [String: String] {
-        var result = [
-            "Content-Type": "application/json",
-            "Accept": "application/json"
-        ]
-        if let apiKey = config.apiKey {
-            result["Authorization"] = "Bearer \(apiKey)"
-        } else {
-            log("[Warning] No API key configured for LicenseSeat SDK. Authenticated endpoints will fail.")
+    private func loadBoundedData(
+        for request: URLRequest
+    ) async throws -> (Data, URLResponse) {
+        if let boundedSessionDelegate {
+            return try await boundedSessionDelegate.data(
+                for: request,
+                using: session,
+                maximumBytes: Self.maxResponseBytes
+            )
         }
-        result.merge(headers) { _, new in new }
-        return result
+
+        // An injected session keeps its caller-owned delegate and lifecycle.
+        // Acceptance is still bounded below, but callers that inject a session
+        // own incremental-delivery and redirect policy during transfer.
+        return try await session.data(for: request)
     }
 
-    private func makeRequest(
-        url: URL,
-        method: String,
-        body: Any?,
-        headers: [String: String]
-    ) throws -> URLRequest {
-        var request = URLRequest(url: url)
-        request.httpMethod = method
-        for (key, value) in headers {
-            request.setValue(value, forHTTPHeaderField: key)
+    private func validatedMaximumRetries() throws -> Int {
+        guard config.retryDelay.isFinite, config.retryDelay >= 0 else {
+            throw APIError.localFailure(
+                code: "invalid_retry_configuration",
+                message: "Retry delay must be finite and nonnegative"
+            )
         }
+        return min(max(0, config.maxRetries), Self.maxRetries)
+    }
 
-        if let body {
-            if method == "POST",
-               var dictionary = body as? [String: Any],
-               config.telemetryEnabled {
-                dictionary["telemetry"] = TelemetryPayload.collect().toDictionary()
-                request.httpBody = try JSONSerialization.data(withJSONObject: dictionary)
-            } else {
-                request.httpBody = try JSONSerialization.data(withJSONObject: body)
-            }
+    private func validatedHTTPResponse(
+        _ response: URLResponse,
+        data: Data,
+        intendedURL: URL
+    ) throws -> HTTPURLResponse {
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw APIError.localFailure(
+                code: "invalid_response",
+                message: "Invalid HTTP response"
+            )
         }
-        return request
+        guard httpResponse.url == intendedURL else {
+            throw APIError.localFailure(
+                code: "unexpected_response_url",
+                message: "Response URL did not match the intended endpoint"
+            )
+        }
+        let declaredLength = httpResponse.expectedContentLength
+        guard declaredLength < 0 || declaredLength <= Self.maxResponseBytes,
+              data.count <= Self.maxResponseBytes else {
+            throw APIError.localFailure(
+                code: "response_too_large",
+                message: "Response exceeds the supported size"
+            )
+        }
+        return httpResponse
     }
 
     private func decodeSuccess<T: Decodable>(_ data: Data) throws -> T {
         if let emptyResponse = EmptyResponse() as? T {
             return emptyResponse
         }
+        guard !data.isEmpty else {
+            throw DecodingError.dataCorrupted(
+                .init(
+                    codingPath: [],
+                    debugDescription: "Expected a JSON response body"
+                )
+            )
+        }
+        try StrictJSON.validate(data, limits: .api)
         return try decoder.decode(T.self, from: data)
     }
 
     private func decodeAPIError(data: Data, status: Int) -> APIError {
+        guard data.count <= Self.maxResponseBytes else {
+            return APIError(
+                code: "response_too_large",
+                message: "Error response exceeds the supported size",
+                status: status
+            )
+        }
+        guard (try? StrictJSON.validate(data, limits: .api)) != nil else {
+            return APIError(
+                code: nil,
+                message: "Request failed",
+                status: status
+            )
+        }
         let responseData = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
         return APIError(from: responseData, status: status)
     }
@@ -244,10 +300,14 @@ final class APIClient {
     }
 
     private func sleepBeforeRetry(attempt: Int, error: Error) async throws {
-        let baseDelay = config.retryDelay.isFinite ? max(0, config.retryDelay) : 0
-        let exponentialDelay = baseDelay * pow(2, Double(attempt))
-        let maximumSleepSeconds = Double(UInt64.max / 1_000_000_000)
-        let delay = min(exponentialDelay, maximumSleepSeconds)
+        guard config.retryDelay.isFinite, config.retryDelay >= 0 else {
+            throw APIError.localFailure(
+                code: "invalid_retry_configuration",
+                message: "Retry delay must be finite and nonnegative"
+            )
+        }
+        let exponentialDelay = config.retryDelay * pow(2, Double(attempt))
+        let delay = min(exponentialDelay, Self.maxRetryDelay)
         log("Retry attempt \(attempt + 1) after \(delay)s for error: \(LogRedaction.describe(error))")
         guard delay.isFinite, delay > 0 else { return }
         try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
@@ -265,62 +325,6 @@ final class APIClient {
         return false
     }
 
-    /// Production traffic must use TLS. Plain HTTP remains available only for
-    /// loopback development servers so local integration tests do not require
-    /// a trusted certificate.
-    private func validatedBaseURL() -> URL? {
-        guard let url = URL(string: config.apiBaseUrl),
-              let scheme = url.scheme?.lowercased(),
-              let host = url.host?.lowercased(),
-              url.user == nil,
-              url.password == nil,
-              url.query == nil,
-              url.fragment == nil else {
-            return nil
-        }
-
-        if scheme == "https" {
-            return url
-        }
-
-        let loopbackHosts = ["localhost", "127.0.0.1", "::1"]
-        return scheme == "http" && loopbackHosts.contains(host) ? url : nil
-    }
-
-    /// Construct a URL without ever interpreting a dynamic value as multiple
-    /// route components. `URL.appendingPathComponent` preserves embedded `/`
-    /// characters, so it cannot safely represent an opaque license/key ID.
-    private func endpointURL(baseURL: URL, pathComponents: [String]) -> URL? {
-        guard !pathComponents.isEmpty,
-              pathComponents.allSatisfy({ !$0.isEmpty }) else {
-            return nil
-        }
-
-        var allowed = CharacterSet.urlPathAllowed
-        allowed.remove(charactersIn: "/%?#\\")
-        let encodedComponents = pathComponents.compactMap { component -> String? in
-            // Dot-only segments can be normalized by clients or proxies even
-            // though they are legitimate opaque strings, so force encoding.
-            if component == "." { return "%2E" }
-            if component == ".." { return "%2E%2E" }
-            return component.addingPercentEncoding(withAllowedCharacters: allowed)
-        }
-        guard encodedComponents.count == pathComponents.count,
-              var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false) else {
-            return nil
-        }
-
-        var basePath = components.percentEncodedPath
-        while basePath.count > 1, basePath.hasSuffix("/") {
-            basePath.removeLast()
-        }
-        if basePath == "/" {
-            basePath = ""
-        }
-        components.percentEncodedPath = "\(basePath)/\(encodedComponents.joined(separator: "/"))"
-        return components.url
-    }
-    
     private func shouldRetryError(_ error: Error) -> Bool {
         // Network errors from URLSession
         if let urlError = error as? URLError {
@@ -335,7 +339,7 @@ final class APIClient {
         return false
     }
     
-    private func log(_ message: String) {
+    func log(_ message: String) {
         guard config.debug else { return }
         print("[LicenseSeat SDK]", message)
     }

@@ -45,6 +45,15 @@ final class APIClientTests: LicenseSeatTestCase {
         URLProtocol.unregisterClass(MockURLProtocol.self)
         super.tearDown()
     }
+
+    private func makeClient(config: LicenseSeatConfig) -> APIClient {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [MockURLProtocol.self]
+        return APIClient(
+            config: config,
+            session: URLSession(configuration: configuration)
+        )
+    }
     
     func testSuccessfulGETRequest() async throws {
         // Prepare stub
@@ -301,7 +310,7 @@ final class APIClientTests: LicenseSeatTestCase {
         XCTAssertEqual(attempts, 1)
     }
 
-    func testNonFiniteRetryDelayDoesNotTrap() async throws {
+    func testNonFiniteRetryDelayIsRejectedBeforeTransport() async {
         config.maxRetries = 1
         config.retryDelay = .infinity
         let conf = URLSessionConfiguration.ephemeral
@@ -320,8 +329,17 @@ final class APIClientTests: LicenseSeatTestCase {
             return (response, status == 200 ? Data() : Data())
         }
 
-        let _: EmptyResponse = try await apiClient.get(path: "/health")
-        XCTAssertEqual(attempts, 2)
+        do {
+            let _: EmptyResponse = try await apiClient.get(path: "/health")
+            XCTFail("Expected invalid retry configuration to be rejected")
+        } catch let error as APIError {
+            XCTAssertEqual(error.code, "invalid_retry_configuration")
+            XCTAssertFalse(error.isRetryable)
+            XCTAssertFalse(error.isNetworkError)
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+        XCTAssertEqual(attempts, 0)
     }
 
     func testRejectsCredentialsQueryAndFragmentInBaseURL() async {
@@ -344,6 +362,350 @@ final class APIClientTests: LicenseSeatTestCase {
             } catch {
                 XCTFail("Unexpected error for \(invalidURL): \(error)")
             }
+        }
+    }
+
+    func testCustomHeadersCannotOverrideAuthenticationOrJSONBoundary() async throws {
+        MockURLProtocol.requestHandler = { request in
+            XCTAssertEqual(
+                request.value(forHTTPHeaderField: "Authorization"),
+                "Bearer test-key"
+            )
+            XCTAssertEqual(
+                request.value(forHTTPHeaderField: "Content-Type"),
+                "application/json"
+            )
+            XCTAssertEqual(
+                request.value(forHTTPHeaderField: "Accept"),
+                "application/json"
+            )
+            XCTAssertEqual(
+                request.value(forHTTPHeaderField: "X-Application-Header"),
+                "allowed"
+            )
+            XCTAssertNil(request.value(forHTTPHeaderField: "Cookie"))
+            XCTAssertNotEqual(
+                request.value(forHTTPHeaderField: "Host"),
+                "attacker.example"
+            )
+            XCTAssertNotEqual(
+                request.value(forHTTPHeaderField: "Content-Length"),
+                "999999"
+            )
+            return (
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 204,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!,
+                Data()
+            )
+        }
+
+        let _: EmptyResponse = try await apiClient.get(
+            path: "/protected-headers",
+            headers: [
+                "authorization": "Bearer attacker",
+                "CONTENT-TYPE": "text/plain",
+                "Accept": "*/*",
+                "Cookie": "session=attacker",
+                "Host": "attacker.example",
+                "Content-Length": "999999",
+                "X-Application-Header": "allowed"
+            ]
+        )
+    }
+
+    func testInvalidAPIKeyOrCustomHeaderCannotReachTransport() async {
+        var attempts = 0
+        MockURLProtocol.requestHandler = { request in
+            attempts += 1
+            return (
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 204,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!,
+                Data()
+            )
+        }
+
+        for invalidAPIKey in ["pk_test_bad\r\nInjected: yes", " key"] {
+            config.apiKey = invalidAPIKey
+            apiClient = makeClient(config: config)
+            do {
+                let _: EmptyResponse = try await apiClient.get(path: "/headers")
+                XCTFail("Invalid API keys must fail before transport")
+            } catch let error as APIError {
+                XCTAssertEqual(error.code, "invalid_headers")
+                XCTAssertFalse(error.isNetworkError)
+                XCTAssertFalse(error.isRetryable)
+            } catch {
+                XCTFail("Unexpected error: \(error)")
+            }
+        }
+
+        config.apiKey = "test-key"
+        apiClient = makeClient(config: config)
+        for headers in [["Bad:Name": "value"], ["X-Test": "line\nvalue"]] {
+            do {
+                let _: EmptyResponse = try await apiClient.get(
+                    path: "/headers",
+                    headers: headers
+                )
+                XCTFail("Invalid custom headers must fail before transport")
+            } catch let error as APIError {
+                XCTAssertEqual(error.code, "invalid_headers")
+                XCTAssertFalse(error.isNetworkError)
+                XCTAssertFalse(error.isRetryable)
+            } catch {
+                XCTFail("Unexpected error: \(error)")
+            }
+        }
+        XCTAssertEqual(attempts, 0)
+    }
+
+    func testDuplicateResponseMembersAreRejectedBeforeDecoding() async {
+        MockURLProtocol.requestHandler = { request in
+            (
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!,
+                Data(#"{"message":"denied","message":"granted"}"#.utf8)
+            )
+        }
+
+        do {
+            let _: TestResponse = try await apiClient.get(path: "/ambiguous")
+            XCTFail("Ambiguous JSON must not be decoded")
+        } catch let error as StrictJSONError {
+            XCTAssertEqual(error, .duplicateKey)
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+    }
+
+    func testOversizedActualOrDeclaredResponseIsRejected() async {
+        let oversized = Data(repeating: 0x20, count: 2 * 1024 * 1024 + 1)
+        var useDeclaredLength = false
+        var attempts = 0
+        MockURLProtocol.requestHandler = { request in
+            attempts += 1
+            let headers = useDeclaredLength
+                ? ["Content-Length": String(2 * 1024 * 1024 + 1)]
+                : nil
+            return (
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: headers
+                )!,
+                useDeclaredLength ? Data("{}".utf8) : oversized
+            )
+        }
+
+        for declaredLengthOnly in [false, true] {
+            useDeclaredLength = declaredLengthOnly
+            do {
+                let _: TestResponse = try await apiClient.get(path: "/large")
+                XCTFail("Oversized responses must be rejected")
+            } catch let error as APIError {
+                XCTAssertEqual(error.code, "response_too_large")
+                XCTAssertFalse(error.isNetworkError)
+                XCTAssertFalse(error.isRetryable)
+            } catch {
+                XCTFail("Unexpected error: \(error)")
+            }
+        }
+        XCTAssertEqual(attempts, 2)
+    }
+
+    func testSDKOwnedSessionStreamsThroughTheResponseLimit() async {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [MockURLProtocol.self]
+        apiClient = APIClient(
+            config: config,
+            ownedSessionConfiguration: configuration
+        )
+        var attempts = 0
+        MockURLProtocol.requestHandler = { request in
+            attempts += 1
+            return (
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!,
+                Data(repeating: 0x20, count: 2 * 1024 * 1024 + 1)
+            )
+        }
+
+        do {
+            let _: TestResponse = try await apiClient.get(path: "/stream-limit")
+            XCTFail("SDK-owned sessions must cancel oversized streamed responses")
+        } catch let error as APIError {
+            XCTAssertEqual(error.code, "response_too_large")
+            XCTAssertFalse(error.isNetworkError)
+            XCTAssertFalse(error.isRetryable)
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+        XCTAssertEqual(attempts, 1)
+    }
+
+    func testSDKOwnedSessionDelegateRejectsRedirectReplay() {
+        let delegate = BoundedSessionDelegate()
+        let session = URLSession(
+            configuration: .ephemeral,
+            delegate: delegate,
+            delegateQueue: nil
+        )
+        defer { session.invalidateAndCancel() }
+
+        let initialURL = URL(string: "https://api.test.com/license")!
+        let redirectURL = URL(string: "https://attacker.test/capture")!
+        let task = session.dataTask(with: initialURL)
+        let response = HTTPURLResponse(
+            url: initialURL,
+            statusCode: 307,
+            httpVersion: nil,
+            headerFields: ["Location": redirectURL.absoluteString]
+        )!
+
+        var replayedRequest: URLRequest?
+        delegate.urlSession(
+            session,
+            task: task,
+            willPerformHTTPRedirection: response,
+            newRequest: URLRequest(url: redirectURL)
+        ) { request in
+            replayedRequest = request
+        }
+        XCTAssertNil(replayedRequest)
+    }
+
+    func testMismatchedFinalResponseURLCannotGrantAuthority() async {
+        MockURLProtocol.requestHandler = { _ in
+            (
+                HTTPURLResponse(
+                    url: URL(string: "https://attacker.example/response")!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!,
+                Data(#"{"message":"forged"}"#.utf8)
+            )
+        }
+
+        do {
+            let _: TestResponse = try await apiClient.get(path: "/expected")
+            XCTFail("A response for another URL must be rejected")
+        } catch let error as APIError {
+            XCTAssertEqual(error.code, "unexpected_response_url")
+            XCTAssertFalse(error.isRetryable)
+            XCTAssertFalse(error.isNetworkError)
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+    }
+
+    func testRetryCountIsCappedAtTen() async {
+        config.maxRetries = .max
+        config.retryDelay = 0
+        let conf = URLSessionConfiguration.ephemeral
+        conf.protocolClasses = [MockURLProtocol.self]
+        apiClient = APIClient(
+            config: config,
+            session: URLSession(configuration: conf)
+        )
+        var attempts = 0
+        MockURLProtocol.requestHandler = { request in
+            attempts += 1
+            return (
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 503,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!,
+                Data(#"{"error":{"code":"unavailable"}}"#.utf8)
+            )
+        }
+
+        do {
+            let _: EmptyResponse = try await apiClient.get(path: "/retry-cap")
+            XCTFail("Expected the server failure")
+        } catch let error as APIError {
+            XCTAssertEqual(error.status, 503)
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+        XCTAssertEqual(attempts, 11)
+    }
+
+    func testOversizedRequestIsRejectedBeforeTransport() async {
+        var attempts = 0
+        MockURLProtocol.requestHandler = { request in
+            attempts += 1
+            return (
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 204,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!,
+                Data()
+            )
+        }
+
+        do {
+            let _: EmptyResponse = try await apiClient.post(
+                pathComponents: ["oversized"],
+                body: ["value": String(repeating: "x", count: 1024 * 1024)]
+            )
+            XCTFail("Oversized requests must be rejected")
+        } catch let error as APIError {
+            XCTAssertEqual(error.code, "request_too_large")
+            XCTAssertFalse(error.isRetryable)
+            XCTAssertFalse(error.isNetworkError)
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+        XCTAssertEqual(attempts, 0)
+    }
+
+    func testAmbiguousErrorJSONIsNotReflectedAsAuthoritativeCode() async {
+        MockURLProtocol.requestHandler = { request in
+            (
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 403,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!,
+                Data(
+                    #"{"error":{"code":"forbidden","code":"license_revoked"}}"#
+                        .utf8
+                )
+            )
+        }
+
+        do {
+            let _: EmptyResponse = try await apiClient.get(path: "/error")
+            XCTFail("Expected an API error")
+        } catch let error as APIError {
+            XCTAssertEqual(error.status, 403)
+            XCTAssertNil(error.code)
+            XCTAssertEqual(error.message, "Request failed")
+        } catch {
+            XCTFail("Unexpected error: \(error)")
         }
     }
 }

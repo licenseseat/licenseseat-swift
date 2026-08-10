@@ -7,13 +7,21 @@
 //
 
 import Foundation
+#if canImport(CryptoKit)
+import CryptoKit
+#elseif canImport(Crypto)
+import Crypto
+#endif
 #if canImport(Security)
 import Security
 #endif
 
 /// Cache manager for license data
 final class LicenseCache {
-    private enum Key {
+    static let maxCacheBytes = 2 * 1024 * 1024
+    static let maxPublicKeys = 64
+
+    enum Key {
         static let license = "license"
         static let offlineToken = "offline_token"
         static let publicKeys = "public_keys"
@@ -33,16 +41,41 @@ final class LicenseCache {
         static let clearedOnReset = [license, offlineToken, publicKeys]
     }
 
-    private let prefix: String
-    private let userDefaults: UserDefaults
-    private let fileManager = FileManager.default
-    private let cacheDirectory: URL?
+    /// New storage is always addressed by a fixed-length digest. The
+    /// caller-controlled compatibility prefix is never used as a path
+    /// component or an unbounded Keychain/UserDefaults account.
+    let namespacePrefix: String
+    let legacyPreferencesPrefix: String?
+    let legacyFilePrefix: String?
+    let userDefaults: UserDefaults
+    let fileManager = FileManager.default
+    let cacheDirectory: URL?
     #if canImport(Security)
-    private let keychainService: String
+    let keychainService: String
     #endif
 
     init(prefix: String, userDefaults: UserDefaults = .standard) {
-        self.prefix = prefix
+        let digest = SHA256.hash(data: Data(prefix.utf8))
+            .map { String(format: "%02x", $0) }
+            .joined()
+        self.namespacePrefix = "licenseseat_\(digest)_"
+        if !prefix.isEmpty,
+           prefix.utf8.count <= 128,
+           prefix.unicodeScalars.allSatisfy({
+               $0.value > 31 && $0.value != 127
+           }) {
+            self.legacyPreferencesPrefix = prefix
+        } else {
+            self.legacyPreferencesPrefix = nil
+        }
+        if prefix.range(
+            of: "^[A-Za-z0-9_-][A-Za-z0-9._-]{0,127}$",
+            options: .regularExpression
+        ) != nil {
+            self.legacyFilePrefix = prefix
+        } else {
+            self.legacyFilePrefix = nil
+        }
         self.userDefaults = userDefaults
 
         let bundleId = Bundle.main.bundleIdentifier ?? "com.licenseseat.sdk"
@@ -55,7 +88,11 @@ final class LicenseCache {
         if let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
             let sdkDir = appSupport.appendingPathComponent(bundleId, isDirectory: true)
 
-            try? fileManager.createDirectory(at: sdkDir, withIntermediateDirectories: true)
+            try? fileManager.createDirectory(
+                at: sdkDir,
+                withIntermediateDirectories: true,
+                attributes: [.posixPermissions: 0o700]
+            )
             self.cacheDirectory = sdkDir
         } else {
             // Fallback to caches directory
@@ -65,20 +102,12 @@ final class LicenseCache {
     
     // MARK: - License Storage
 
-    private var licenseEncoder: JSONEncoder {
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-        return encoder
-    }
-
-    private var licenseDecoder: JSONDecoder {
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        return decoder
-    }
-
     func getLicense() -> License? {
         guard let data = protectedData(forKey: Key.license, legacyFileURL: licenseFileURL) else {
+            return nil
+        }
+        guard data.count <= Self.maxCacheBytes,
+              (try? StrictJSON.validate(data, limits: .cache)) != nil else {
             return nil
         }
         return try? licenseDecoder.decode(License.self, from: data)
@@ -88,7 +117,10 @@ final class LicenseCache {
     func setLicense(_ license: License) -> Bool {
         do {
             let data = try licenseEncoder.encode(license)
-            guard storeProtectedData(data, forKey: Key.license) else { return false }
+            guard data.count <= Self.maxCacheBytes,
+                  storeProtectedData(data, forKey: Key.license) else {
+                return false
+            }
             removeLegacyData(forKey: Key.license, fileURL: licenseFileURL)
             return true
         } catch {
@@ -100,10 +132,15 @@ final class LicenseCache {
     }
     
     @discardableResult
-    func updateValidation(_ validation: ValidationResponse) -> Bool {
+    func updateValidation(
+        _ validation: ValidationResponse,
+        markValidatedOnline: Bool = true
+    ) -> Bool {
         guard var license = getLicense() else { return false }
         license.validation = validation
-        license.lastValidated = Date()
+        if markValidatedOnline {
+            license.lastValidated = Date()
+        }
         return setLicense(license)
     }
 
@@ -122,6 +159,10 @@ final class LicenseCache {
         guard let data = protectedData(forKey: Key.offlineToken) else {
             return nil
         }
+        guard data.count <= Self.maxCacheBytes,
+              (try? StrictJSON.validate(data, limits: .cache)) != nil else {
+            return nil
+        }
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         return try? decoder.decode(OfflineTokenResponse.self, from: data)
@@ -131,7 +172,10 @@ final class LicenseCache {
     func setOfflineToken(_ token: OfflineTokenResponse) -> Bool {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
-        guard let data = try? encoder.encode(token) else { return false }
+        guard let data = try? encoder.encode(token),
+              data.count <= Self.maxCacheBytes else {
+            return false
+        }
         guard storeProtectedData(data, forKey: Key.offlineToken) else { return false }
         removeLegacyData(forKey: Key.offlineToken)
         return true
@@ -142,146 +186,53 @@ final class LicenseCache {
         removeLegacyData(forKey: Key.offlineToken)
     }
     
-    // MARK: - Public Key Storage
-    
-    func getPublicKey(_ keyId: String) -> String? {
-        let keys = getPublicKeys()
-        return keys[keyId]
-    }
-    
-    @discardableResult
-    func setPublicKey(_ keyId: String, _ publicKey: String) -> Bool {
-        var keys = getPublicKeys()
-        keys[keyId] = publicKey
-        
-        guard let data = try? JSONSerialization.data(withJSONObject: keys),
-              storeProtectedData(data, forKey: Key.publicKeys) else { return false }
-        removeLegacyData(forKey: Key.publicKeys)
-        return true
-    }
-
-    private func getPublicKeys() -> [String: String] {
-        guard let data = protectedData(forKey: Key.publicKeys),
-              let keys = try? JSONSerialization.jsonObject(with: data) as? [String: String] else {
-            return [:]
-        }
-        return keys
-    }
-    
-    // MARK: - Timestamp Storage
-    
-    func getLastSeenTimestamp() -> TimeInterval? {
-        if let data = readProtectedData(forKey: Key.lastSeenTimestamp),
-           let string = String(data: data, encoding: .utf8),
-           let value = TimeInterval(string),
-           value > 0 {
-            return value
-        }
-
-        // Migrate the 0.4.x UserDefaults Double representation.
-        let legacyValue = userDefaults.double(forKey: prefixed(Key.lastSeenTimestamp))
-        guard legacyValue > 0 else { return nil }
-        setLastSeenTimestamp(legacyValue)
-        return legacyValue
-    }
-
-    /// Advance the clock-tamper watermark (ratchet only — never lowers).
-    ///
-    /// Offline verification success must use this method so a rolled-back
-    /// clock can never lower the watermark. Authoritative online successes
-    /// use ``anchorLastSeenTimestamp(_:)`` instead.
-    @discardableResult
-    func setLastSeenTimestamp(_ timestamp: TimeInterval) -> Bool {
-        guard timestamp.isFinite, timestamp > 0 else { return false }
-
-        // Preserve the highest protected or legacy value so a temporary
-        // clock rollback cannot extend an offline grant.
-        let protectedValue = readProtectedData(forKey: Key.lastSeenTimestamp)
-            .flatMap { String(data: $0, encoding: .utf8) }
-            .flatMap(TimeInterval.init)
-        let legacyValue = userDefaults.double(forKey: prefixed(Key.lastSeenTimestamp))
-        let protectedWatermark = protectedValue.flatMap {
-            $0.isFinite && $0 > 0 ? $0 : nil
-        } ?? 0
-        let legacyWatermark = legacyValue.isFinite && legacyValue > 0 ? legacyValue : 0
-        let watermark = max(timestamp, max(protectedWatermark, legacyWatermark))
-
-        guard let data = String(watermark).data(using: .utf8),
-              storeProtectedData(data, forKey: Key.lastSeenTimestamp) else {
-            return false
-        }
-        removeLegacyData(forKey: Key.lastSeenTimestamp)
-        return true
-    }
-
-    /// Re-anchor the clock-rollback watermark to an authoritative observation.
-    ///
-    /// Unlike ``setLastSeenTimestamp(_:)``, this may LOWER the stored value.
-    /// It must only be called when the server has just accepted an
-    /// authenticated request (activation commit, online validation success,
-    /// heartbeat success): the server accepted the request as valid *now*, so
-    /// the current local time is the best available trust anchor.
-    /// Re-anchoring recovers installations whose watermark was poisoned by a
-    /// transiently future-set clock, while rollback detection continues to
-    /// protect the offline windows between authoritative contacts. This
-    /// contract is shared with the other LicenseSeat SDKs.
-    @discardableResult
-    func anchorLastSeenTimestamp(_ timestamp: TimeInterval) -> Bool {
-        guard timestamp.isFinite, timestamp > 0 else { return false }
-        guard let data = String(timestamp).data(using: .utf8),
-              storeProtectedData(data, forKey: Key.lastSeenTimestamp) else {
-            return false
-        }
-        // The stale (possibly higher) 0.4.x plaintext value must not survive:
-        // the next ratcheting write would max() against it and re-poison the
-        // watermark that was just re-anchored.
-        removeLegacyData(forKey: Key.lastSeenTimestamp)
-        return true
-    }
-
-    // MARK: - Clear All
-
-    /// Clear license grants and derived artifacts while preserving the
-    /// clock-rollback watermark (`last_seen_ts`), which only authoritative
-    /// online operations may re-anchor — see `Key.clearedOnReset`.
-    func clear() {
-        for key in Key.clearedOnReset {
-            deleteProtectedData(forKey: key)
-            // Remove the matching 0.4.x plaintext representation without
-            // deleting other components' values that happen to share the
-            // configured prefix. In particular, DeviceIdentifier owns the
-            // stable installation fingerprint and reset must not rotate it or
-            // consume another licensed seat.
-            userDefaults.removeObject(forKey: prefixed(key))
-        }
-
-        // Clear file storage
-        if let url = licenseFileURL {
-            try? fileManager.removeItem(at: url)
-        }
-    }
-    
     // MARK: - Private Helpers
     
-    private var licenseFileURL: URL? {
-        return cacheDirectory?.appendingPathComponent(prefix + "license.json")
+    var licenseFileURL: URL? {
+        guard let legacyFilePrefix else { return nil }
+        return cacheDirectory?.appendingPathComponent(
+            legacyFilePrefix + "license.json",
+            isDirectory: false
+        )
     }
 
-    private func prefixed(_ key: String) -> String {
-        prefix + key
+    func prefixed(_ key: String) -> String {
+        namespacePrefix + key
+    }
+
+    func legacyPrefixed(_ key: String) -> String? {
+        legacyPreferencesPrefix.map { $0 + key }
+    }
+
+    func legacyPreferenceValue(forKey key: String) -> TimeInterval {
+        guard let legacyKey = legacyPrefixed(key) else { return 0 }
+        return userDefaults.double(forKey: legacyKey)
+    }
+
+    func validKeyId(_ keyId: String) -> Bool {
+        keyId.utf8.count <= 255 &&
+            keyId.range(
+                of: "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+                options: .regularExpression
+            ) != nil
     }
 
     /// Reads protected storage and migrates the plaintext 0.4.x locations on
     /// first access. Plaintext is removed only after the protected write has
     /// succeeded, so an interrupted migration never loses an activation.
-    private func protectedData(forKey key: String, legacyFileURL: URL? = nil) -> Data? {
-        if let data = readProtectedData(forKey: key) {
+    func protectedData(forKey key: String, legacyFileURL: URL? = nil) -> Data? {
+        if let data = readProtectedData(forKey: key),
+           data.count <= Self.maxCacheBytes {
             return data
         }
 
-        let legacyData = userDefaults.data(forKey: prefixed(key))
-            ?? legacyFileURL.flatMap { try? Data(contentsOf: $0) }
-        guard let legacyData else { return nil }
+        let legacyData = readLegacyProtectedData(forKey: key)
+            ?? legacyPrefixed(key).flatMap { userDefaults.data(forKey: $0) }
+            ?? boundedLegacyFileData(at: legacyFileURL)
+        guard let legacyData,
+              legacyData.count <= Self.maxCacheBytes else {
+            return nil
+        }
 
         if storeProtectedData(legacyData, forKey: key) {
             removeLegacyData(forKey: key, fileURL: legacyFileURL)
@@ -289,13 +240,34 @@ final class LicenseCache {
         return legacyData
     }
 
-    private func removeLegacyData(forKey key: String, fileURL: URL? = nil) {
-        #if canImport(Security)
-        userDefaults.removeObject(forKey: prefixed(key))
-        #endif
+    func removeLegacyData(forKey key: String, fileURL: URL? = nil) {
+        deleteLegacyProtectedData(forKey: key)
+        if let legacyKey = legacyPrefixed(key) {
+            userDefaults.removeObject(forKey: legacyKey)
+        }
         if let fileURL {
             try? fileManager.removeItem(at: fileURL)
         }
+    }
+
+    private func boundedLegacyFileData(at url: URL?) -> Data? {
+        guard let url,
+              fileManager.fileExists(atPath: url.path),
+              let values = try? url.resourceValues(
+                  forKeys: [
+                      .isSymbolicLinkKey,
+                      .isRegularFileKey,
+                      .fileSizeKey
+                  ]
+              ),
+              values.isSymbolicLink != true,
+              values.isRegularFile == true,
+              let size = values.fileSize,
+              size >= 0,
+              size <= Self.maxCacheBytes else {
+            return nil
+        }
+        return try? Data(contentsOf: url, options: [.mappedIfSafe])
     }
 
     #if canImport(Security)
@@ -307,7 +279,19 @@ final class LicenseCache {
         ]
     }
 
-    private func readProtectedData(forKey key: String) -> Data? {
+    private func legacyKeychainQuery(forKey key: String) -> [CFString: Any]? {
+        guard let account = legacyPrefixed(key),
+              account != prefixed(key) else {
+            return nil
+        }
+        return [
+            kSecClass: kSecClassGenericPassword,
+            kSecAttrService: keychainService,
+            kSecAttrAccount: account
+        ]
+    }
+
+    func readProtectedData(forKey key: String) -> Data? {
         var query = keychainQuery(forKey: key)
         query[kSecReturnData] = true
         query[kSecMatchLimit] = kSecMatchLimitOne
@@ -318,8 +302,22 @@ final class LicenseCache {
         return result as? Data
     }
 
+    func readLegacyProtectedData(forKey key: String) -> Data? {
+        guard var query = legacyKeychainQuery(forKey: key) else {
+            return nil
+        }
+        query[kSecReturnData] = true
+        query[kSecMatchLimit] = kSecMatchLimitOne
+
+        var result: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        guard status == errSecSuccess else { return nil }
+        return result as? Data
+    }
+
     @discardableResult
-    private func storeProtectedData(_ data: Data, forKey key: String) -> Bool {
+    func storeProtectedData(_ data: Data, forKey key: String) -> Bool {
+        guard data.count <= Self.maxCacheBytes else { return false }
         let query = keychainQuery(forKey: key)
         let updateStatus = SecItemUpdate(
             query as CFDictionary,
@@ -345,10 +343,18 @@ final class LicenseCache {
         return true
     }
 
-    private func deleteProtectedData(forKey key: String) {
+    func deleteProtectedData(forKey key: String) {
         let status = SecItemDelete(keychainQuery(forKey: key) as CFDictionary)
         if status != errSecSuccess && status != errSecItemNotFound {
             logKeychainFailure(status, operation: "delete", key: key)
+        }
+    }
+
+    func deleteLegacyProtectedData(forKey key: String) {
+        guard let query = legacyKeychainQuery(forKey: key) else { return }
+        let status = SecItemDelete(query as CFDictionary)
+        if status != errSecSuccess && status != errSecItemNotFound {
+            logKeychainFailure(status, operation: "delete legacy", key: key)
         }
     }
 
@@ -358,18 +364,29 @@ final class LicenseCache {
         #endif
     }
     #else
-    private func readProtectedData(forKey key: String) -> Data? {
+    func readProtectedData(forKey key: String) -> Data? {
         userDefaults.data(forKey: prefixed(key))
     }
 
+    func readLegacyProtectedData(forKey key: String) -> Data? {
+        guard let legacyKey = legacyPrefixed(key) else { return nil }
+        return userDefaults.data(forKey: legacyKey)
+    }
+
     @discardableResult
-    private func storeProtectedData(_ data: Data, forKey key: String) -> Bool {
+    func storeProtectedData(_ data: Data, forKey key: String) -> Bool {
+        guard data.count <= Self.maxCacheBytes else { return false }
         userDefaults.set(data, forKey: prefixed(key))
         return true
     }
 
-    private func deleteProtectedData(forKey key: String) {
+    func deleteProtectedData(forKey key: String) {
         userDefaults.removeObject(forKey: prefixed(key))
+    }
+
+    func deleteLegacyProtectedData(forKey key: String) {
+        guard let legacyKey = legacyPrefixed(key) else { return }
+        userDefaults.removeObject(forKey: legacyKey)
     }
     #endif
 }

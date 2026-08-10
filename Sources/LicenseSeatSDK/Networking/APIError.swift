@@ -23,6 +23,12 @@ import Foundation
 /// - `device_not_activated`: Device is not activated for this license
 /// - `parameter_missing`: Required parameter is missing
 public struct APIError: LocalizedError, Equatable, @unchecked Sendable {
+    /// Internal construction for SDK-side failures that must not be retried or
+    /// interpreted as transport outages merely because they have no HTTP status.
+    static func localFailure(code: String, message: String) -> APIError {
+        APIError(code: code, message: message, status: 0)
+    }
+
     /// Machine-readable error code for programmatic handling
     public let code: String?
 
@@ -130,6 +136,16 @@ public struct APIError: LocalizedError, Equatable, @unchecked Sendable {
 
     private var isConfigurationError: Bool {
         guard let code else { return false }
-        return ["invalid_base_url", "invalid_endpoint_path"].contains(code)
+        return [
+            "invalid_base_url",
+            "invalid_endpoint_path",
+            "invalid_headers",
+            "invalid_identity",
+            "invalid_response",
+            "invalid_retry_configuration",
+            "request_too_large",
+            "response_too_large",
+            "unexpected_response_url"
+        ].contains(code)
     }
 }

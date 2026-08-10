@@ -31,6 +31,10 @@ public extension LicenseSeat {
         guard let productSlug = config.productSlug else {
             throw LicenseSeatError.productSlugRequired
         }
+        try validateRequestIdentity(
+            productSlug: productSlug,
+            licenseKey: licenseKey
+        )
 
         let deviceId: String
         do {
@@ -43,12 +47,17 @@ public extension LicenseSeat {
             eventBus.emit("activation:error", ["licenseKey": licenseKey, "error": error])
             throw error
         }
+        try validateFingerprint(deviceId, allowLegacyShortValue: false)
         eventBus.emit("activation:start", ["licenseKey": licenseKey, "deviceId": deviceId])
 
         do {
             let activation: ActivationResponse = try await apiClient.post(
-                pathComponents: ["products", productSlug, "licenses", licenseKey, "activate"],
-                body: activationRequestBody(options: options, deviceId: deviceId)
+                pathComponents: ["products", productSlug, "licenses", "activate"],
+                body: activationRequestBody(
+                    licenseKey: licenseKey,
+                    options: options,
+                    deviceId: deviceId
+                )
             )
             try Task.checkCancellation()
             try ensureCurrentActivationRequest(requestID)
@@ -81,10 +90,14 @@ private extension LicenseSeat {
     }
 
     func activationRequestBody(
+        licenseKey: String,
         options: ActivationOptions,
         deviceId: String
     ) -> [String: Any] {
-        var body: [String: Any] = ["fingerprint": deviceId]
+        var body: [String: Any] = [
+            "license_key": licenseKey,
+            "fingerprint": deviceId
+        ]
         if let deviceName = options.deviceName {
             body["device_name"] = deviceName
         }
@@ -164,7 +177,9 @@ private extension LicenseSeat {
 
         startAutoValidation(licenseKey: license.licenseKey)
         startHeartbeat()
-        startOfflineAssetSync()
-        scheduleOfflineRefresh()
+        if config.offlineAuthorityEnabled {
+            startOfflineAssetSync()
+            scheduleOfflineRefresh()
+        }
     }
 }

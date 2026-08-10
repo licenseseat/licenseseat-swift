@@ -28,7 +28,19 @@ public struct OfflineTokenResponse: Codable, Equatable, Sendable {
         public let planKey: String
         public let mode: String
         public let seatLimit: Int?
-        public let deviceId: String?
+        /// Presence is retained internally so an alias-only signed payload can
+        /// be decoded and rejected as a canonical-payload mismatch instead of
+        /// being silently treated as the canonical fingerprint member.
+        private let decodedFingerprint: String?
+
+        /// Canonical device binding covered by the signature. Missing
+        /// canonical data is exposed as an empty value and is rejected before
+        /// signature authority is granted.
+        public var fingerprint: String { decodedFingerprint ?? "" }
+
+        /// Source-compatible spelling retained for 0.4.x callers. Signed
+        /// payloads themselves accept only the canonical fingerprint member.
+        public var deviceId: String? { decodedFingerprint }
         public let iat: Int
         public let exp: Int
         public let nbf: Int
@@ -82,7 +94,7 @@ public struct OfflineTokenResponse: Codable, Equatable, Sendable {
             self.planKey = planKey
             self.mode = mode
             self.seatLimit = seatLimit
-            self.deviceId = deviceId
+            self.decodedFingerprint = deviceId
             self.iat = iat
             self.exp = exp
             self.nbf = nbf
@@ -100,7 +112,10 @@ public struct OfflineTokenResponse: Codable, Equatable, Sendable {
             planKey = try container.decode(String.self, forKey: .planKey)
             mode = try container.decode(String.self, forKey: .mode)
             seatLimit = try container.decodeIfPresent(Int.self, forKey: .seatLimit)
-            deviceId = try container.decodeIfPresent(String.self, forKey: .fingerprint)
+            decodedFingerprint = try container.decodeIfPresent(
+                String.self,
+                forKey: .fingerprint
+            )
             iat = try container.decode(Int.self, forKey: .iat)
             exp = try container.decode(Int.self, forKey: .exp)
             nbf = try container.decode(Int.self, forKey: .nbf)
@@ -118,7 +133,10 @@ public struct OfflineTokenResponse: Codable, Equatable, Sendable {
             try container.encode(planKey, forKey: .planKey)
             try container.encode(mode, forKey: .mode)
             try container.encodeIfPresent(seatLimit, forKey: .seatLimit)
-            try container.encodeIfPresent(deviceId, forKey: .fingerprint)
+            try container.encodeIfPresent(
+                decodedFingerprint,
+                forKey: .fingerprint
+            )
             try container.encode(iat, forKey: .iat)
             try container.encode(exp, forKey: .exp)
             try container.encode(nbf, forKey: .nbf)
@@ -126,6 +144,38 @@ public struct OfflineTokenResponse: Codable, Equatable, Sendable {
             try container.encode(kid, forKey: .kid)
             try container.encode(entitlements, forKey: .entitlements)
             try container.encodeIfPresent(metadata, forKey: .metadata)
+        }
+
+        public init(
+            schemaVersion: Int,
+            licenseKey: String,
+            productSlug: String,
+            planKey: String,
+            mode: String,
+            seatLimit: Int?,
+            fingerprint: String,
+            iat: Int,
+            exp: Int,
+            nbf: Int,
+            licenseExpiresAt: Int?,
+            kid: String,
+            entitlements: [TokenEntitlement],
+            metadata: [String: AnyCodable]?
+        ) {
+            self.schemaVersion = schemaVersion
+            self.licenseKey = licenseKey
+            self.productSlug = productSlug
+            self.planKey = planKey
+            self.mode = mode
+            self.seatLimit = seatLimit
+            self.decodedFingerprint = fingerprint
+            self.iat = iat
+            self.exp = exp
+            self.nbf = nbf
+            self.licenseExpiresAt = licenseExpiresAt
+            self.kid = kid
+            self.entitlements = entitlements
+            self.metadata = metadata
         }
     }
 

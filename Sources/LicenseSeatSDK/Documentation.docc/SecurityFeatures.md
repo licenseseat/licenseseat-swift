@@ -35,6 +35,16 @@ let config = LicenseSeatConfig(
 
 The SDK relies on URLSession's platform trust evaluation. Certificate pinning is intentionally not built in: pinning adds an operational key-rotation requirement and should be introduced only with a documented backup-pin and emergency-rotation process.
 
+License keys and fingerprints are sent in authenticated JSON request bodies,
+never in paths or query strings. This keeps them out of ordinary URL telemetry,
+proxy access logs, browser history, and intermediary cache keys. The SDK rejects
+cross-origin redirects and requires the final response URL to match the intended
+URL exactly. Its internally created URLSession disables cookie persistence and
+URL caching and cancels streamed response bodies above 2 MiB before further
+buffering. Callers that inject their own session retain responsibility for that
+session's storage, incremental transfer limit, and pre-redirect delegate policy;
+the SDK still rejects an oversized or final-URL-mismatched result.
+
 ## Device Binding
 
 Activation sends one canonical `fingerprint` to the server. The same value is used for validation, heartbeat, deactivation, and offline-token issuance.
@@ -66,6 +76,12 @@ Verification is fail-closed and checks:
 - `iat`, `nbf`, token expiry, and underlying license expiry;
 - optional maximum offline age measured from signed `iat`;
 - local clock rollback.
+
+Untrusted JSON is validated before model decoding. Duplicate decoded object
+keys—including escape-equivalent spellings—are rejected at every nesting level,
+as are excessive depth/count/size, non-finite numeric magnitude, and trailing
+data. Canonical re-encoding has independent depth, node, key, string, and output
+bounds. API responses are limited to 2 MiB and request bodies to 1 MiB.
 
 Both launch-time quick verification and explicit/fallback verification call the same implementation. See <doc:OfflineValidation> for the full lifecycle.
 
@@ -106,7 +122,10 @@ let config = LicenseSeatConfig(
 )
 ```
 
-Token and underlying license expiry are enforced even when `maxOfflineDays` is zero.
+`maxOfflineDays == 0` disables offline authority entirely. Values in
+`1...36,600` enable it for at most that signed age; negative and larger values
+also fail closed. Token and underlying license expiry remain additional upper
+bounds whenever offline authority is enabled.
 
 ## Application Guidance
 

@@ -69,8 +69,15 @@ private extension LicenseSeat {
         guard let productSlug = config.productSlug else {
             throw LicenseSeatError.productSlugRequired
         }
+        try validateRequestIdentity(
+            productSlug: productSlug,
+            licenseKey: licenseKey
+        )
 
         let deviceId = options.deviceId ?? cache.getDeviceId()
+        if let deviceId {
+            try validateFingerprint(deviceId, allowLegacyShortValue: true)
+        }
         let cachedIdentity: CachedLicenseIdentity? = cache.getLicense().flatMap { cachedLicense in
             guard cachedLicense.licenseKey == licenseKey,
                   deviceId == nil || cachedLicense.deviceId == deviceId else {
@@ -91,16 +98,14 @@ private extension LicenseSeat {
         licenseKey: String,
         context: ValidationRequestContext
     ) async throws -> ValidationResponse {
-        var body: [String: Any] = [:]
+        var body: [String: Any] = ["license_key": licenseKey]
         if let deviceId = context.deviceId {
             body["fingerprint"] = deviceId
         }
 
         let result: ValidationResponse = try await apiClient.post(
-            pathComponents: [
-                "products", context.productSlug, "licenses", licenseKey, "validate"
-            ],
-            body: body.isEmpty ? nil : body
+            pathComponents: ["products", context.productSlug, "licenses", "validate"],
+            body: body
         )
 
         try verifyValidationResponse(
@@ -222,7 +227,10 @@ private extension LicenseSeat {
                 reason: "The cached activation changed during offline validation."
             )
         }
-        guard cache.updateValidation(offlineResult) else {
+        guard cache.updateValidation(
+            offlineResult,
+            markValidatedOnline: false
+        ) else {
             if !offlineResult.valid {
                 lastOfflineValidation = offlineResult
                 eventBus.emit("validation:offline-failed", offlineResult)

@@ -69,7 +69,7 @@ extension LicenseSeat {
 
         let interval = config.heartbeatInterval
         guard interval.isFinite, interval > 0,
-              interval <= Double(UInt64.max) / 1_000_000_000 else {
+              interval <= LicenseSeatConfig.maximumScheduledInterval else {
             log("Standalone heartbeat disabled (interval: \(interval))")
             return
         }
@@ -131,7 +131,9 @@ extension LicenseSeat {
         guard connectivityTimer == nil else { return }
 
         let interval = config.networkRecheckInterval
-        guard interval.isFinite, interval > 0 else {
+        guard interval.isFinite,
+              interval >= 0.1,
+              interval <= 86_400 else {
             log("Connectivity polling disabled (interval: \(interval))")
             return
         }
@@ -189,6 +191,10 @@ extension LicenseSeat {
     /// Downloads the offline token and its corresponding public signing key, caching both locally.
     /// Emits `offlineToken:ready` on success or `offlineToken:fetchError` on failure.
     public func syncOfflineAssets() async {
+        guard config.offlineAuthorityEnabled else {
+            stopOfflineRefresh()
+            return
+        }
         let requestID = UUID()
         currentOfflineSyncRequestID = requestID
         defer {
@@ -275,7 +281,10 @@ extension LicenseSeat {
         stopOfflineRefresh()
 
         let interval = config.offlineTokenRefreshInterval
-        guard interval.isFinite, interval > 0 else {
+        guard config.offlineAuthorityEnabled,
+              interval.isFinite,
+              interval >= 1,
+              interval <= LicenseSeatConfig.maximumScheduledInterval else {
             log("Offline token refresh disabled (interval: \(interval))")
             return
         }
@@ -301,13 +310,22 @@ extension LicenseSeat {
         guard let productSlug = config.productSlug else {
             throw LicenseSeatError.productSlugRequired
         }
+        try validateRequestIdentity(
+            productSlug: productSlug,
+            licenseKey: license.licenseKey
+        )
+        try validateFingerprint(
+            license.deviceId,
+            allowLegacyShortValue: true
+        )
 
         eventBus.emit("offlineToken:fetching", ["licenseKey": license.licenseKey])
         let response: OfflineTokenResponse = try await apiClient.post(
-            pathComponents: [
-                "products", productSlug, "licenses", license.licenseKey, "offline_token"
-            ],
-            body: ["fingerprint": license.deviceId]
+            pathComponents: ["products", productSlug, "licenses", "offline-token"],
+            body: [
+                "license_key": license.licenseKey,
+                "fingerprint": license.deviceId
+            ]
         )
         eventBus.emit("offlineToken:fetched", ["licenseKey": license.licenseKey])
         return response
@@ -315,7 +333,11 @@ extension LicenseSeat {
 
     /// Get signing key (public key) from server
     internal func getSigningKey(keyId: String) async throws -> String {
-        guard !keyId.isEmpty else {
+        guard keyId.utf8.count <= 255,
+              keyId.range(
+                  of: "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+                  options: .regularExpression
+              ) != nil else {
             throw LicenseSeatError.invalidKeyId
         }
 

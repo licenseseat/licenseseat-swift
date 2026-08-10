@@ -111,6 +111,10 @@ local signed-cache verification.
 
 ## Diagnostics
 
-``LicenseSeatStore/debugReport()`` returns status, SDK version, timestamps, a license-key prefix, and a stable truncated SHA-256 fingerprint digest. It does not return the full license key or device fingerprint. Review support reports before transmitting them because timestamps and status can still be customer metadata.
+``LicenseSeatStore/debugReport()`` returns only a coarse status name, SDK
+version, whether an SDK instance exists, and operational timestamps. It omits
+the license key, fingerprint, activation identifier, product slug, entitlement
+details, and error messages. Review support reports before transmitting them
+because timestamps and status can still be customer metadata.
 
 See <doc:ReactiveIntegration> for publisher-based integrations.

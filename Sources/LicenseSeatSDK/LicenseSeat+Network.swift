@@ -59,8 +59,10 @@ extension LicenseSeat {
                 startAutoValidation(licenseKey: licenseKey)
             }
             if heartbeatTask == nil { startHeartbeat() }
-            scheduleOfflineRefresh()
-            startOfflineAssetSync()
+            if config.offlineAuthorityEnabled {
+                scheduleOfflineRefresh()
+                startOfflineAssetSync()
+            }
         }
     }
 
@@ -73,6 +75,7 @@ extension LicenseSeat {
     }
 
     internal func shouldFallbackToOffline(error: Error) -> Bool {
+        guard config.offlineAuthorityEnabled else { return false }
         switch config.offlineFallbackMode {
         case .always:
             return true

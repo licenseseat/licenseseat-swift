@@ -34,7 +34,13 @@ LicenseSeatStore.shared.configure(
 
 `always` requests fallback for other nonterminal failures. It does not override authoritative license invalidation.
 
-`maxOfflineDays` applies an optional application-side cap measured from the token's signed `iat` claim. Set it to `0` to disable this additional cap. The signed token `exp` and underlying `license_expires_at` are always enforced.
+Offline authority is disabled by default. `maxOfflineDays` must be in
+`1...36,600` to permit a cached signed token to grant access; it then applies an
+application-side cap measured from the token's signed `iat` claim. Zero,
+negative values, and values above that range fail closed and also disable
+launch-time verification and background offline-token refresh. The signed token
+`exp` and underlying `license_expires_at` are always enforced as additional
+upper bounds.
 
 Intervals that are zero, negative, non-finite, or too large for the scheduler disable their corresponding timer safely.
 
@@ -77,6 +83,15 @@ Both quick and full verification enforce the same checks:
 - The underlying license expiry has not passed.
 - The optional maximum offline age from signed `iat` has not passed.
 - The local clock has not moved backward beyond `maxClockSkewMs`.
+- The token lifetime, text fields, entitlement count, metadata, signature, and
+  public key remain within documented structural bounds.
+- Each JSON object has unique decoded keys, including when two spellings differ
+  only through JSON escapes.
+
+The activation, validation, heartbeat, deactivation, and offline-token routes
+carry the license key and fingerprint in the authenticated JSON body rather than
+the URL. Signing-key IDs are the only dynamic licensing value in a GET path and
+are encoded as one bounded path component.
 
 The SDK verifies a newly downloaded token before it can replace the previous cache. A malformed or mismatched server response therefore cannot poison working offline recovery.
 
@@ -130,6 +145,7 @@ Offline `ValidationResponse.code` values are stable machine-readable diagnostics
 - `fingerprint_missing`, `fingerprint_mismatch`
 - `token_expired`, `token_not_yet_valid`, `invalid_time_window`
 - `license_expired`, `grace_period_expired`
+- `offline_disabled`
 - `clock_tamper`, `cache_error`, `verification_error`
 
 Treat any code other than a valid result as unlicensed. Do not add a permissive local bypass around these checks.
@@ -138,6 +154,8 @@ Treat any code other than a valid result as unlicensed. Do not add a permissive 
 
 - Activate and complete at least one successful offline-asset sync before testing an outage.
 - Keep `.networkOnly` unless a deliberate compatibility requirement justifies `.always`.
-- Set `maxOfflineDays` to the product's outage tolerance; it can be shorter than the server token TTL.
+- Set `maxOfflineDays` to the product's outage tolerance; leaving it at `0`
+  intentionally disables offline access. The configured window can be shorter
+  than the server token TTL.
 - Rotate Ed25519 keys by issuing a new unique key ID. Do not reuse a key ID for different key material.
 - On logout, account switching, or license removal, call `deactivate()` or `purgeCachedLicense()` so protected grants do not cross identities.

@@ -46,7 +46,11 @@ LicenseSeat.configure(
 }
 ```
 
-`maxOfflineDays` adds an application-side maximum age measured from the signed `iat` claim. Zero removes this extra cap; token expiry and the underlying license expiry are still enforced.
+`maxOfflineDays` enables offline authority and adds an application-side maximum
+age measured from the signed `iat` claim. The default `0` disables offline
+authority entirely. Enabled values are `1...36,600`; negative or larger values
+also fail closed. Token expiry and the underlying license expiry remain
+additional upper bounds.
 
 Set `autoValidateInterval` to zero or a negative value when the host application
 owns the online-validation cadence. This disables both the launch-time online
