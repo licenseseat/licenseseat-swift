@@ -6,6 +6,9 @@
 //
 
 import XCTest
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 #if canImport(CryptoKit)
 import CryptoKit
 #elseif canImport(Crypto)
