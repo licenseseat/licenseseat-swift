@@ -1,388 +1,151 @@
 # Migrating from JavaScript
 
-Comprehensive guide for migrating from the JavaScript SDK to Swift.
+Map a LicenseSeat JavaScript integration to the native Swift lifecycle and security model.
 
-## Overview
+## Configuration
 
-The Swift SDK maintains full feature parity with the JavaScript SDK while embracing Swift's type safety, async/await patterns, and platform-specific features. This guide maps JavaScript patterns to their Swift equivalents.
+JavaScript configuration objects become ``LicenseSeatConfig`` values or the static convenience API:
 
-## API Mapping
-
-### Initialization
-
-**JavaScript:**
-```javascript
-const sdk = new LicenseSeat({
-    apiBaseUrl: "https://api.licenseseat.com",
-    apiKey: "your-key",
-    autoValidateInterval: 3600000,
-    debug: true
-});
-```
-
-**Swift:**
 ```swift
-let config = LicenseSeatConfig(
-    apiBaseUrl: "https://api.licenseseat.com",
-    apiKey: "your-key",
-    autoValidateInterval: 3600, // seconds, not milliseconds
-    debug: true
-)
-let sdk = LicenseSeat(config: config)
-```
-
-### License Activation
-
-**JavaScript:**
-```javascript
-try {
-    const license = await sdk.activate("LICENSE-KEY", {
-        deviceIdentifier: "custom-id",
-        metadata: { version: "1.0" }
-    });
-} catch (error) {
-    console.error(error);
+LicenseSeat.configure(
+    apiKey: "pk_live_…",
+    productSlug: "my-product"
+) { config in
+    config.autoValidateInterval = 3_600
+    config.heartbeatInterval = 300
+    config.offlineFallbackMode = .networkOnly
 }
 ```
 
-**Swift:**
+The production base URL is `https://licenseseat.com/api/v1`. Do not carry forward the obsolete `api.licenseseat.com` hostname or an `/api` path without `/v1`.
+
+Embed only a publishable key. Environment variables and build settings make configuration convenient but do not make a client-embedded secret key confidential.
+
+## Async Operations
+
+JavaScript promises map directly to Swift `async throws`:
+
 ```swift
 do {
-    let license = try await sdk.activate(
-        licenseKey: "LICENSE-KEY",
+    let license = try await LicenseSeat.activate(
+        "CUSTOMER-KEY",
         options: ActivationOptions(
-            deviceIdentifier: "custom-id",
-            metadata: ["version": "1.0"]
+            deviceId: "stable-installation-fingerprint",
+            deviceName: "Studio Mac",
+            metadata: ["channel": "direct"]
         )
     )
-} catch {
-    print(error)
+    print(license.activationId)
+} catch let error as APIError {
+    print(error.code ?? "unknown", error.message)
 }
 ```
 
-### Validation
+The Swift property is `deviceId`; the canonical HTTP field emitted by the SDK is `fingerprint`. `device_id` and `device_fingerprint` remain server compatibility aliases but should not be used by new native integrations.
 
-**JavaScript:**
-```javascript
-const result = await sdk.validateLicense("KEY", {
-    productSlug: "pro"
-});
-if (result.valid) {
-    // License is valid
-}
-```
+## Validation
 
-**Swift:**
 ```swift
-let result = try await sdk.validate(
-    licenseKey: "KEY",
-    options: ValidationOptions(productSlug: "pro")
+let result = try await LicenseSeat.shared.validate(
+    licenseKey: "CUSTOMER-KEY",
+    options: ValidationOptions(deviceId: "stable-installation-fingerprint")
 )
-if result.valid {
-    // License is valid
+
+guard result.valid else {
+    throw LicensingError.denied(result.code)
 }
 ```
 
-### Event Handling
+Usually omit `ValidationOptions.deviceId`; the SDK reuses the fingerprint stored with the activation. Supplying a different value intentionally asks the server to validate a different installation.
 
-**JavaScript:**
-```javascript
-const unsubscribe = sdk.on("validation:success", (data) => {
-    console.log("Validated!", data);
-});
+## Status and Entitlements
 
-// Later
-unsubscribe();
-```
+Replace loosely typed JavaScript state checks with exhaustive Swift enums:
 
-**Swift:**
 ```swift
-let cancellable = sdk.on("validation:success") { data in
-    print("Validated!", data)
+switch LicenseSeat.shared.getStatus() {
+case .active, .offlineValid:
+    showApplication()
+case .inactive, .pending, .invalid, .offlineInvalid:
+    showLicensingUI()
 }
 
-// Later
-cancellable.cancel()
-```
-
-### Status Checking
-
-**JavaScript:**
-```javascript
-const status = sdk.getStatus();
-switch (status.status) {
-    case "active":
-        console.log("Active license:", status.license);
-        break;
-    case "invalid":
-        console.log("Invalid:", status.message);
-        break;
+if LicenseSeat.entitlement("export").active {
+    enableExport()
 }
 ```
 
-**Swift:**
+Do not infer access from a non-nil entitlement. Use ``EntitlementStatus/active`` so invalid parent validation and entitlement expiry are enforced.
+
+## Events
+
+JavaScript event listeners map to closure subscriptions or Combine:
+
 ```swift
-let status = sdk.getStatus()
-switch status {
-case .active(let details):
-    print("Active license:", details.license)
-case .invalid(let message):
-    print("Invalid:", message)
-default:
-    break
+let subscription = LicenseSeat.shared.on("license:revoked") { payload in
+    lockPremiumFeatures()
 }
+
+LicenseSeat.statusPublisher
+    .sink { status in updateUI(status) }
+    .store(in: &cancellables)
 ```
 
-## Configuration Differences
+Retain closure cancellables. Combine cancellables should live with the observing object.
 
-### Time Units
+## Offline Storage and Verification
 
-| JavaScript | Swift | Notes |
-|------------|-------|-------|
-| `autoValidateInterval: 3600000` | `autoValidateInterval: 3600` | JS uses milliseconds, Swift uses seconds |
-| `retryDelay: 1000` | `retryDelay: 1` | JS uses milliseconds, Swift uses seconds |
-| `maxClockSkewMs: 300000` | `maxClockSkewMs: 300000` | Both use milliseconds for precision |
+Do not port JavaScript local-storage code. The Swift SDK owns its cache:
 
-### Storage
+- Apple platforms use Keychain with `AfterFirstUnlockThisDeviceOnly`;
+- older 0.4.x UserDefaults and Application Support values migrate after a successful protected write;
+- supported non-Apple platforms use UserDefaults as the portability fallback;
+- the SDK verifies Ed25519 signature metadata, canonical token equality, license, product, fingerprint, time claims, license expiry, offline age, and clock rollback.
 
-**JavaScript:**
-```javascript
-// Uses localStorage with optional encryption
-const cache = new LicenseCache("prefix_");
-```
+Call the public refresh API only when an immediate sync is useful:
 
-**Swift:**
 ```swift
-// Uses UserDefaults + file storage
-let cache = LicenseCache(prefix: "prefix_")
-// Keychain integration available for sensitive data
+await LicenseSeat.shared.syncOfflineAssets()
+let offline = await LicenseSeat.shared.verifyCachedOffline()
 ```
 
-## Platform-Specific Features
+`verifyCachedOffline()` fails closed when a token, key, activation, identity claim, signature, or required time claim is absent or invalid.
 
-### Device Identification
+## Error Mapping
 
-**JavaScript:**
-```javascript
-// Canvas fingerprinting + browser data
-generateDeviceId() {
-    return `web-${hashCode}-${timestamp}`;
-}
-```
+JavaScript response-code branching becomes ``APIError`` classification:
 
-**Swift:**
-```swift
-// Hardware UUID on macOS, composite ID on iOS
-DeviceIdentifier.generate()
-// Returns: "mac-hardware-uuid" or "ios-composite-id"
-```
-
-### Network Monitoring
-
-**JavaScript:**
-```javascript
-// Polling-based with fetch API
-sdk.on("network:offline", () => {
-    // Handle offline
-});
-```
-
-**Swift:**
-```swift
-// Native Network.framework integration
-sdk.networkStatusPublisher
-    .sink { isOnline in
-        // Real-time network status
-    }
-```
-
-## Error Handling
-
-### Error Types
-
-**JavaScript:**
-```javascript
-try {
-    await sdk.activate(key);
-} catch (error) {
-    if (error instanceof APIError) {
-        console.log("Status:", error.status);
-    }
-}
-```
-
-**Swift:**
 ```swift
 do {
-    try await sdk.activate(licenseKey: key)
+    _ = try await LicenseSeat.activate("KEY")
+} catch let error as APIError where error.isAuthError {
+    showConfigurationError(error.message)
+} catch let error as APIError where error.isRetryable {
+    showTemporaryFailure(error.message)
 } catch let error as APIError {
-    print("Status:", error.status)
-} catch let error as LicenseSeatError {
-    switch error {
-    case .noActiveLicense:
-        print("No active license")
-    case .invalidOfflineLicense:
-        print("Invalid offline license")
-    default:
-        break
-    }
+    showLicenseFailure(code: error.code, message: error.message)
 }
 ```
 
-## Async Patterns
+The SDK parses both the standard `{ "error": … }` envelope and the JSON:API-style `errors` array used by machine-file endpoints.
 
-### Promises to Async/Await
+## Deactivation and Cleanup
 
-**JavaScript:**
-```javascript
-sdk.activate(key)
-    .then(license => {
-        return sdk.validateLicense(license.license_key);
-    })
-    .then(result => {
-        console.log("Valid:", result.valid);
-    })
-    .catch(error => {
-        console.error(error);
-    });
-```
-
-**Swift:**
 ```swift
-Task {
-    do {
-        let license = try await sdk.activate(licenseKey: key)
-        let result = try await sdk.validate(licenseKey: license.licenseKey)
-        print("Valid:", result.valid)
-    } catch {
-        print(error)
-    }
-}
+try await LicenseSeat.deactivate()
 ```
 
-## Reactive Patterns
+Deactivation releases the server seat and clears local activation and offline-token state. A terminal “already deactivated,” missing, or gone response is treated as idempotent success. Authentication or scope failures remain errors because the server outcome is not known.
 
-### JavaScript (Custom Events)
-```javascript
-class LicenseManager {
-    constructor() {
-        this.status = "inactive";
-        sdk.on("validation:success", () => {
-            this.status = "active";
-            this.updateUI();
-        });
-    }
-}
-```
-
-### Swift (Combine)
-```swift
-class LicenseManager: ObservableObject {
-    @Published var status: LicenseStatus = .inactive(message: "")
-    
-    init() {
-        sdk.statusPublisher
-            .assign(to: &$status)
-    }
-}
-```
-
-## Feature Comparison
-
-| Feature | JavaScript | Swift | Notes |
-|---------|------------|-------|-------|
-| Activation | ✅ | ✅ | Identical API |
-| Validation | ✅ | ✅ | Identical API |
-| Offline Validation | ✅ | ✅ | Ed25519 on both |
-| Auto-Validation | ✅ | ✅ | Timer-based |
-| Events | ✅ | ✅ | + Combine publishers |
-| Retry Logic | ✅ | ✅ | Exponential backoff |
-| Device ID | ✅ | ✅ | Platform-specific |
-| Clock Tamper | ✅ | ✅ | Identical detection |
-| Grace Period | ✅ | ✅ | Identical logic |
-| Entitlements | ✅ | ✅ | Identical API |
+Use `purgeCachedLicense()` only when intentionally removing local grants without releasing a server seat.
 
 ## Migration Checklist
 
-1. **Update Time Units**
-   - Convert milliseconds to seconds for intervals
-   - Keep milliseconds for `maxClockSkewMs`
-
-2. **Replace Callbacks with Async/Await**
-   - Use `try await` instead of `.then()`
-   - Use `do-catch` instead of `.catch()`
-
-3. **Update Event Handlers**
-   - Replace `unsubscribe()` with `cancellable.cancel()`
-   - Consider using Combine publishers
-
-4. **Type Safety**
-   - Replace string statuses with enums
-   - Use proper option types instead of plain objects
-
-5. **Platform Features**
-   - Leverage SwiftUI/UIKit integration
-   - Use native networking APIs
-   - Consider Keychain for sensitive storage
-
-## Common Pitfalls
-
-### 1. Time Unit Confusion
-```swift
-// ❌ Wrong - using milliseconds
-let config = LicenseSeatConfig(autoValidateInterval: 3600000)
-
-// ✅ Correct - using seconds
-let config = LicenseSeatConfig(autoValidateInterval: 3600)
-```
-
-### 2. Synchronous Expectations
-```swift
-// ❌ Wrong - expecting synchronous result
-let status = sdk.validate(licenseKey: key) // Won't compile
-
-// ✅ Correct - using async/await
-let status = try await sdk.validate(licenseKey: key)
-```
-
-### 3. Event Handler Memory Leaks
-```swift
-// ❌ Wrong - strong reference cycle
-sdk.on("event") { data in
-    self.handleEvent(data) // Retains self
-}
-
-// ✅ Correct - weak reference
-sdk.on("event") { [weak self] data in
-    self?.handleEvent(data)
-}
-```
-
-## Testing Differences
-
-**JavaScript:**
-```javascript
-// Mock fetch API
-global.fetch = jest.fn(() => 
-    Promise.resolve({
-        json: () => Promise.resolve({ valid: true })
-    })
-);
-```
-
-**Swift:**
-```swift
-// Mock URLProtocol
-MockURLProtocol.requestHandler = { request in
-    let response = HTTPURLResponse(/*...*/)
-    let data = try JSONEncoder().encode(["valid": true])
-    return (response, data)
-}
-```
-
-## Next Steps
-
-1. Review the <doc:GettingStarted> guide for Swift-specific setup
-2. Explore <doc:ReactiveIntegration> for SwiftUI patterns
-3. Check <doc:SecurityFeatures> for platform-specific security
-4. See the example app for complete implementation patterns 
+1. Pin version 0.4.2 or newer.
+2. Configure a publishable key and product slug.
+3. Remove obsolete API hostnames and field names.
+4. Delete application-owned plaintext license caches.
+5. Gate access from `.active`, `.offlineValid`, and `EntitlementStatus.active`.
+6. Preserve cancellables for event subscriptions.
+7. Test activation, relaunch, online validation, signed offline fallback, expiry, suspension, deactivation, 403 scope failure, and recovery after an outage.
+8. Review <doc:SecurityFeatures> and <doc:OfflineValidation> before release.

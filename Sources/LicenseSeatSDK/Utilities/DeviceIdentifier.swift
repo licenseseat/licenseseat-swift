@@ -7,190 +7,242 @@
 //
 
 import Foundation
-#if canImport(UIKit)
-import UIKit
-#elseif canImport(AppKit)
-import AppKit
-#endif
-#if canImport(IOKit)
-import IOKit
-#endif
-#if os(watchOS)
-import WatchKit
+#if canImport(Security)
+import Security
 #endif
 
-/// Device identifier generator
+/// Generates a stable, app-scoped installation identifier.
 ///
-/// Generates a stable, unique identifier for the current device.
-/// The identifier is cached after first generation to ensure stability.
+/// The identifier is random rather than derived from hardware or mutable
+/// device characteristics. Existing UserDefaults identifiers are migrated so
+/// upgrades do not consume a new seat. Apple platforms protect new values in
+/// Keychain; other platforms retain the UserDefaults compatibility store.
 enum DeviceIdentifier {
-
-    /// Key used to persist the cached device identifier
     private static let cacheKey = "licenseseat_device_identifier"
 
-    /// Generate a unique device identifier
+    #if canImport(Security) && DEBUG
+    /// Test-only override for the `SecItemCopyMatching` status so unit tests
+    /// can simulate a locked or denied Keychain (`errSecInteractionNotAllowed`,
+    /// `errSecAuthFailed`, ...) without entitlement-dependent state.
+    nonisolated(unsafe) static var keychainReadStatusOverrideForTesting: OSStatus?
+    #endif
+
+    /// Return the stable installation identifier, creating one only when no
+    /// identity exists yet.
     ///
-    /// This method returns a stable identifier that persists across app launches.
-    /// On first call, it generates an identifier and caches it. Subsequent calls
-    /// return the cached value.
-    static func generate() -> String {
-        // Check for cached identifier first
-        if let cached = getCachedIdentifier() {
+    /// - Throws: ``LicenseSeatError/deviceIdentifierError`` when a protected
+    ///   identity may exist but is temporarily unreadable (for example a
+    ///   locked Keychain). Callers must surface this as a recoverable
+    ///   condition — generating a replacement UUID instead would rotate the
+    ///   installation fingerprint and consume another licensed seat.
+    static func generate(
+        userDefaults: UserDefaults = .standard,
+        keychainServiceSuffix: String = ""
+    ) throws -> String {
+        if let cached = try getCachedIdentifier(
+            userDefaults: userDefaults,
+            keychainServiceSuffix: keychainServiceSuffix
+        ) {
             return cached
         }
 
-        // Generate a new identifier
-        let identifier = generateNewIdentifier()
-
-        // Cache it for future calls
-        cacheIdentifier(identifier)
-
+        let identifier = "\(platformPrefix)-\(UUID().uuidString.lowercased())"
+        try cacheIdentifier(
+            identifier,
+            userDefaults: userDefaults,
+            keychainServiceSuffix: keychainServiceSuffix
+        )
         return identifier
     }
 
-    /// Generate a fresh device identifier (internal, for testing)
-    private static func generateNewIdentifier() -> String {
-        #if os(macOS)
-        // Try to get hardware UUID on macOS
-        if let hardwareUUID = getMacHardwareUUID() {
-            return "mac-\(hardwareUUID.lowercased())"
-        }
-        #endif
-
-        // Fallback to composite identifier based on stable device characteristics
-        let components = [
-            getDeviceModel(),
-            getSystemVersion(),
-            getBundleIdentifier(),
-            getPreferredLanguage(),
-            String(getScreenResolutionHash())
-        ]
-
-        let composite = components.joined(separator: "|")
-        let hash = composite.simpleHash()
-
-        // Generate a stable random suffix once (not time-based)
-        let randomSuffix = UUID().uuidString.prefix(8).lowercased()
-
-        #if os(iOS) || os(tvOS)
-        return "ios-\(hash)-\(randomSuffix)"
-        #elseif os(watchOS)
-        return "watch-\(hash)-\(randomSuffix)"
-        #elseif os(macOS)
-        return "mac-\(hash)-\(randomSuffix)"
-        #else
-        return "swift-\(hash)-\(randomSuffix)"
-        #endif
-    }
-
-    /// Retrieve the cached device identifier from UserDefaults
-    private static func getCachedIdentifier() -> String? {
-        return UserDefaults.standard.string(forKey: cacheKey)
-    }
-
-    /// Cache the device identifier to UserDefaults
-    private static func cacheIdentifier(_ identifier: String) {
-        UserDefaults.standard.set(identifier, forKey: cacheKey)
-    }
-
-    /// Clear the cached device identifier (for testing purposes)
-    static func clearCache() {
-        UserDefaults.standard.removeObject(forKey: cacheKey)
-    }
-    
-    #if os(macOS) && canImport(IOKit)
-    /// Get hardware UUID on macOS
-    private static func getMacHardwareUUID() -> String? {
-        // IOKit approach for hardware UUID
-        let platformExpert = IOServiceGetMatchingService(
-            kIOMainPortDefault,
-            IOServiceMatching("IOPlatformExpertDevice")
+    /// Preserve the exact installation identity already bound to a cached
+    /// activation. This lets clients stop supplying a legacy hardware-derived
+    /// override without consuming a new seat after that activation is later
+    /// deactivated or replaced.
+    static func adoptCachedLicenseIdentifier(
+        _ identifier: String,
+        userDefaults: UserDefaults = .standard,
+        keychainServiceSuffix: String = ""
+    ) {
+        guard !identifier.isEmpty else { return }
+        // Best effort: the identity source is the cached activation itself,
+        // so a transiently denied Keychain write cannot rotate anything.
+        // Adoption re-runs on the next launch; it must never fail SDK
+        // initialization.
+        try? cacheIdentifier(
+            identifier,
+            userDefaults: userDefaults,
+            keychainServiceSuffix: keychainServiceSuffix
         )
-        
-        guard platformExpert != 0 else { return nil }
-        defer { IOObjectRelease(platformExpert) }
-        
-        let key = "IOPlatformUUID" as CFString
-        guard let uuidCF = IORegistryEntryCreateCFProperty(
-            platformExpert,
-            key,
-            kCFAllocatorDefault,
-            0
-        ) else { return nil }
-        
-        guard let uuid = uuidCF.takeRetainedValue() as? String else { return nil }
-        return uuid
+    }
+
+    private static var platformPrefix: String {
+        #if os(macOS)
+        return "mac"
+        #elseif os(iOS) || os(tvOS)
+        return "ios"
+        #elseif os(watchOS)
+        return "watch"
+        #else
+        return "swift"
+        #endif
+    }
+
+    private static func getCachedIdentifier(
+        userDefaults: UserDefaults,
+        keychainServiceSuffix: String
+    ) throws -> String? {
+        #if canImport(Security)
+        if let protectedIdentifier = try readKeychainIdentifier(
+            keychainServiceSuffix: keychainServiceSuffix
+        ) {
+            return protectedIdentifier
+        }
+
+        // Preserve the installation identity assigned by earlier SDKs. Remove
+        // plaintext only after a successful protected write.
+        if let legacyIdentifier = userDefaults.string(forKey: cacheKey),
+           !legacyIdentifier.isEmpty {
+            if storeKeychainIdentifier(
+                legacyIdentifier,
+                keychainServiceSuffix: keychainServiceSuffix
+            ) == errSecSuccess {
+                userDefaults.removeObject(forKey: cacheKey)
+            }
+            return legacyIdentifier
+        }
+        userDefaults.removeObject(forKey: cacheKey)
+        return nil
+        #else
+        guard let identifier = userDefaults.string(forKey: cacheKey),
+              !identifier.isEmpty else {
+            userDefaults.removeObject(forKey: cacheKey)
+            return nil
+        }
+        return identifier
+        #endif
+    }
+
+    private static func cacheIdentifier(
+        _ identifier: String,
+        userDefaults: UserDefaults,
+        keychainServiceSuffix: String
+    ) throws {
+        #if canImport(Security)
+        switch storeKeychainIdentifier(
+            identifier,
+            keychainServiceSuffix: keychainServiceSuffix
+        ) {
+        case errSecSuccess:
+            userDefaults.removeObject(forKey: cacheKey)
+        case errSecInteractionNotAllowed, errSecAuthFailed, errSecUserCanceled:
+            // The Keychain exists but temporarily refused the write (locked
+            // keychain, denied prompt). Falling back to UserDefaults here
+            // would mint an identity that the protected copy later
+            // contradicts, rotating the fingerprint and consuming another
+            // seat. Fail so the caller can retry once the keychain unlocks.
+            throw LicenseSeatError.deviceIdentifierError
+        default:
+            // Keychain genuinely unavailable or misconfigured for this
+            // process (for example a missing entitlement in a CI sandbox).
+            // A deterministic UserDefaults identity is more important than
+            // silently changing fingerprints on every launch.
+            userDefaults.set(identifier, forKey: cacheKey)
+        }
+        #else
+        userDefaults.set(identifier, forKey: cacheKey)
+        #endif
+    }
+
+    /// Clear the cached identifier for tests and explicit diagnostic recovery.
+    static func clearCache(
+        userDefaults: UserDefaults = .standard,
+        keychainServiceSuffix: String = ""
+    ) {
+        userDefaults.removeObject(forKey: cacheKey)
+        #if canImport(Security)
+        SecItemDelete(
+            keychainQuery(keychainServiceSuffix: keychainServiceSuffix) as CFDictionary
+        )
+        #endif
+    }
+
+    #if canImport(Security)
+    private static func keychainQuery(
+        keychainServiceSuffix: String
+    ) -> [CFString: Any] {
+        let bundleIdentifier = Bundle.main.bundleIdentifier ?? "com.licenseseat.sdk"
+        return [
+            kSecClass: kSecClassGenericPassword,
+            kSecAttrService: "\(bundleIdentifier).LicenseSeat.DeviceIdentifier\(keychainServiceSuffix)",
+            kSecAttrAccount: cacheKey
+        ]
+    }
+
+    /// Read the protected installation identifier.
+    ///
+    /// Only `errSecItemNotFound` means "no identity exists yet". Any other
+    /// failure (locked keychain: `errSecInteractionNotAllowed`, failed
+    /// authorization: `errSecAuthFailed`, ...) means an identity may exist
+    /// but is temporarily unreadable — treating it as absent would generate
+    /// a replacement UUID, rotate the installation fingerprint, and consume
+    /// another licensed seat. Identity acquisition fails instead so the host
+    /// app can ask the user to unlock the keychain and retry.
+    private static func readKeychainIdentifier(
+        keychainServiceSuffix: String
+    ) throws -> String? {
+        var query = keychainQuery(keychainServiceSuffix: keychainServiceSuffix)
+        query[kSecReturnData] = true
+        query[kSecMatchLimit] = kSecMatchLimitOne
+
+        var result: CFTypeRef?
+        let status: OSStatus
+        #if DEBUG
+        if let override = keychainReadStatusOverrideForTesting {
+            status = override
+        } else {
+            status = SecItemCopyMatching(query as CFDictionary, &result)
+        }
+        #else
+        status = SecItemCopyMatching(query as CFDictionary, &result)
+        #endif
+
+        switch status {
+        case errSecSuccess:
+            guard let data = result as? Data,
+                  let identifier = String(data: data, encoding: .utf8),
+                  !identifier.isEmpty else {
+                // A readable-but-malformed record is corruption, not a
+                // transient denial; regenerating is the only way forward.
+                return nil
+            }
+            return identifier
+        case errSecItemNotFound:
+            return nil
+        default:
+            throw LicenseSeatError.deviceIdentifierError
+        }
+    }
+
+    private static func storeKeychainIdentifier(
+        _ identifier: String,
+        keychainServiceSuffix: String
+    ) -> OSStatus {
+        guard !identifier.isEmpty,
+              let data = identifier.data(using: .utf8) else { return errSecParam }
+
+        let query = keychainQuery(keychainServiceSuffix: keychainServiceSuffix)
+        let updateStatus = SecItemUpdate(
+            query as CFDictionary,
+            [kSecValueData: data] as CFDictionary
+        )
+        if updateStatus == errSecSuccess { return updateStatus }
+        guard updateStatus == errSecItemNotFound else { return updateStatus }
+
+        var newItem = query
+        newItem[kSecValueData] = data
+        newItem[kSecAttrAccessible] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        return SecItemAdd(newItem as CFDictionary, nil)
     }
     #endif
-    
-    /// Get device model
-    private static func getDeviceModel() -> String {
-        #if os(iOS) || os(tvOS)
-        return UIDevice.current.model
-        #elseif os(watchOS)
-        return "Apple Watch"
-        #elseif os(macOS)
-        var size = 0
-        sysctlbyname("hw.model", nil, &size, nil, 0)
-        var model = [CChar](repeating: 0, count: size)
-        sysctlbyname("hw.model", &model, &size, nil, 0)
-        return String(cString: model)
-        #else
-        return "Unknown"
-        #endif
-    }
-    
-    /// Get system version
-    private static func getSystemVersion() -> String {
-        #if os(iOS) || os(tvOS)
-        return UIDevice.current.systemVersion
-        #elseif os(watchOS)
-        return WKInterfaceDevice.current().systemVersion
-        #elseif os(macOS)
-        let version = ProcessInfo.processInfo.operatingSystemVersion
-        return "\(version.majorVersion).\(version.minorVersion).\(version.patchVersion)"
-        #else
-        return "Unknown"
-        #endif
-    }
-    
-    /// Get bundle identifier
-    private static func getBundleIdentifier() -> String {
-        return Bundle.main.bundleIdentifier ?? "unknown"
-    }
-    
-    /// Get preferred language
-    private static func getPreferredLanguage() -> String {
-        return Locale.preferredLanguages.first ?? "en"
-    }
-    
-    /// Get screen resolution hash
-    private static func getScreenResolutionHash() -> Int {
-        #if os(iOS) || os(tvOS)
-        let screen = UIScreen.main
-        let scale = screen.scale
-        let bounds = screen.bounds
-        return "\(bounds.width)x\(bounds.height)@\(scale)".hashValue
-        #elseif os(macOS)
-        if let screen = NSScreen.main {
-            let scale = screen.backingScaleFactor
-            let frame = screen.frame
-            return "\(frame.width)x\(frame.height)@\(scale)".hashValue
-        }
-        return 0
-        #else
-        return 0
-        #endif
-    }
 }
-
-// MARK: - Hash Utilities
-
-private extension String {
-    func simpleHash() -> String {
-        var hasher = Hasher()
-        hasher.combine(self)
-        let hash = abs(hasher.finalize())
-        return String(hash, radix: 36)
-    }
-} 

@@ -26,8 +26,12 @@ import Foundation
 public struct LicenseSeatConfig {
     // MARK: - Constants
 
+    /// Upper bound for SDK-owned repeating schedules. Longer cadences should
+    /// be owned explicitly by the host application.
+    internal static let maximumScheduledInterval: TimeInterval = 366 * 86_400
+
     /// The current SDK version. Single source of truth for version information.
-    public static let sdkVersion = "0.4.1"
+    public static let sdkVersion = "0.4.2"
 
     /// The production API base URL (v1). Single source of truth for the default endpoint.
     public static let productionAPIBaseURL = "https://licenseseat.com/api/v1"
@@ -47,8 +51,21 @@ public struct LicenseSeatConfig {
     /// Custom device identifier (optional)
     public var deviceIdentifier: String?
 
-    /// Interval for automatic validation (in seconds)
+    /// Interval for automatic online validation (in seconds).
+    /// Set to 0 or negative to disable both launch-time and periodic online
+    /// validation. Local verification of a cached signed offline grant is
+    /// unaffected, so hosts can own their validation cadence without weakening
+    /// offline enforcement.
     public var autoValidateInterval: TimeInterval
+
+    /// A single policy predicate shared by launch-time and periodic scheduling.
+    /// The upper bound prevents conversion overflow when the interval is
+    /// converted to nanoseconds for `Task.sleep`.
+    internal var automaticValidationEnabled: Bool {
+        autoValidateInterval.isFinite &&
+            autoValidateInterval > 0 &&
+            autoValidateInterval <= Self.maximumScheduledInterval
+    }
 
     /// Interval for standalone heartbeat pings (in seconds).
     /// Independent from auto-validation; provides more frequent liveness updates.
@@ -67,14 +84,16 @@ public struct LicenseSeatConfig {
     /// Whether to enable debug logging
     public var debug: Bool
 
-    /// Whether to include device telemetry (OS, platform, app version, etc.) with API requests.
+    /// Whether to include device telemetry (OS, platform, app version, etc.) with supported
+    /// licensing POST requests (activation, validation, heartbeat, deactivation, and offline grants).
     ///
     /// Telemetry helps power per-product analytics in the LicenseSeat dashboard (DAU/MAU,
-    /// version adoption, platform distribution). No personally identifiable information is
-    /// collected — see the Telemetry & Privacy section in the README for details.
+    /// version adoption, platform distribution). Device and application attributes can qualify
+    /// as linked personal data under platform policy or privacy law; see <doc:Privacy>.
     ///
-    /// Set to `false` to disable telemetry entirely (e.g., for GDPR compliance).
-    /// Defaults to `true`.
+    /// Set to `false` to omit the optional `telemetry` object. Licensing identifiers, API
+    /// interaction, and the server-visible source IP remain necessary for the service.
+    /// Defaults to `true`; disabling this option alone does not establish legal compliance.
     public var telemetryEnabled: Bool
 
     /// Interval for refreshing offline token (in seconds)
@@ -96,8 +115,19 @@ public struct LicenseSeatConfig {
     /// Strategy for offline fallback during validation.
     public var offlineFallbackMode: OfflineFallbackMode
 
-    /// Maximum number of days to allow offline usage (0 = disabled)
+    /// Maximum age of a signed offline token in days. A value of zero disables
+    /// offline authority entirely. Enabled values are limited to 1...36,600
+    /// (100 leap years); the signed token and license expiry claims are always
+    /// enforced as additional upper bounds.
     public var maxOfflineDays: Int
+
+    /// Whether this configuration permits a cached signed token to grant
+    /// authority. One predicate is shared by startup, fallback, refresh, and
+    /// explicit verification so zero cannot mean disabled in one path and
+    /// unbounded in another.
+    internal var offlineAuthorityEnabled: Bool {
+        (1...36_600).contains(maxOfflineDays)
+    }
 
     /// Maximum allowed clock skew (in milliseconds)
     public var maxClockSkewMs: TimeInterval
@@ -143,4 +173,4 @@ public struct LicenseSeatConfig {
         self.maxOfflineDays = maxOfflineDays
         self.maxClockSkewMs = maxClockSkewMs
     }
-} 
+}

@@ -20,20 +20,18 @@ extension LicenseSeat {
         let interval = config.autoValidateInterval
 
         // Don't start auto-validation if interval is 0 or negative
-        guard interval > 0 else {
+        guard config.automaticValidationEnabled else {
             log("Auto-validation disabled (interval: \(interval))")
             return
         }
 
-        // Schedule validation using a detached Task so we are not tied to a RunLoop.
-        validationTask = Task.detached { [weak self] in
+        // A Task is run-loop independent and inherits this type's MainActor.
+        validationTask = Task { @MainActor [weak self] in
             guard let self else { return }
             // Emit first cycle information immediately so the UI can show when the next run will be.
-            await MainActor.run {
-                self.eventBus.emit("autovalidation:cycle", [
-                    "nextRunAt": Date().addingTimeInterval(interval)
-                ])
-            }
+            self.eventBus.emit("autovalidation:cycle", [
+                "nextRunAt": Date().addingTimeInterval(interval)
+            ])
 
             // Continuous loop until cancelled.
             while !Task.isCancelled {
@@ -44,12 +42,10 @@ extension LicenseSeat {
                     break
                 }
 
-                await MainActor.run {
-                    Task { @MainActor [weak self] in
-                        guard let self else { return }
-                        await self.performAutoValidation(licenseKey: licenseKey)
-                    }
+                let operation = Task { @MainActor [weak self] in
+                    await self?.performAutoValidation(licenseKey: licenseKey)
                 }
+                await operation.value
             }
         }
     }
@@ -68,17 +64,17 @@ extension LicenseSeat {
     // MARK: - Standalone Heartbeat
 
     /// Start a standalone heartbeat timer, independent from auto-validation.
-    /// - Parameter licenseKey: The active license key (used for logging)
-    func startHeartbeat(licenseKey: String) {
+    func startHeartbeat() {
         stopHeartbeat()
 
         let interval = config.heartbeatInterval
-        guard interval > 0 else {
+        guard interval.isFinite, interval > 0,
+              interval <= LicenseSeatConfig.maximumScheduledInterval else {
             log("Standalone heartbeat disabled (interval: \(interval))")
             return
         }
 
-        heartbeatTask = Task.detached { [weak self] in
+        heartbeatTask = Task { @MainActor [weak self] in
             while !Task.isCancelled {
                 do {
                     try await Task.sleep(nanoseconds: UInt64(interval * 1_000_000_000))
@@ -86,16 +82,15 @@ extension LicenseSeat {
                     break
                 }
 
-                guard let strongSelf = self else { break }
-                await MainActor.run {
-                    Task { @MainActor in
-                        do {
-                            try await strongSelf.heartbeat()
-                        } catch {
-                            strongSelf.log("Standalone heartbeat failed:", error)
-                        }
+                let operation = Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    do {
+                        try await self.heartbeat()
+                    } catch {
+                        self.log("Standalone heartbeat failed:", LogRedaction.describe(error))
                     }
                 }
+                await operation.value
             }
         }
     }
@@ -111,15 +106,11 @@ extension LicenseSeat {
         do {
             _ = try await validate(licenseKey: licenseKey)
         } catch {
-            log("Auto-validation failed:", error)
+            log("Auto-validation failed:", LogRedaction.describe(error))
             eventBus.emit("validation:auto-failed", [
                 "licenseKey": licenseKey,
                 "error": error
             ])
-        }
-
-        Task { [weak self] in
-            try? await self?.heartbeat()
         }
 
         // Announce next scheduled run
@@ -139,8 +130,16 @@ extension LicenseSeat {
     func startConnectivityPolling() {
         guard connectivityTimer == nil else { return }
 
+        let interval = config.networkRecheckInterval
+        guard interval.isFinite,
+              interval >= 0.1,
+              interval <= 86_400 else {
+            log("Connectivity polling disabled (interval: \(interval))")
+            return
+        }
+
         connectivityTimer = Timer.scheduledTimer(
-            withTimeInterval: config.networkRecheckInterval,
+            withTimeInterval: interval,
             repeats: true
         ) { [weak self] _ in
             Task { @MainActor in
@@ -176,41 +175,104 @@ extension LicenseSeat {
 
 extension LicenseSeat {
 
+    /// Start a single tracked offline synchronization. Repeated triggers
+    /// replace older work so a stale response cannot win a cache race.
+    func startOfflineAssetSync() {
+        offlineSyncTask?.cancel()
+        offlineSyncTask = Task { @MainActor [weak self] in
+            let operation = Task { @MainActor [weak self] in
+                await self?.syncOfflineAssets()
+            }
+            await operation.value
+        }
+    }
+
     /// Sync offline token and public key from the server.
     /// Downloads the offline token and its corresponding public signing key, caching both locally.
     /// Emits `offlineToken:ready` on success or `offlineToken:fetchError` on failure.
     public func syncOfflineAssets() async {
-        do {
-            let offlineToken = try await getOfflineToken()
-            cache.setOfflineToken(offlineToken)
-
-            // Extract key ID from token
-            let kid = offlineToken.token.kid
-            // Check if we already have this key
-            if cache.getPublicKey(kid) == nil {
-                let publicKey = try await getSigningKey(keyId: kid)
-                cache.setPublicKey(kid, publicKey)
+        guard config.offlineAuthorityEnabled else {
+            stopOfflineRefresh()
+            return
+        }
+        let requestID = UUID()
+        currentOfflineSyncRequestID = requestID
+        defer {
+            if currentOfflineSyncRequestID == requestID {
+                currentOfflineSyncRequestID = nil
             }
+        }
 
+        await waitForInitialization()
+        guard currentOfflineSyncRequestID == requestID else { return }
+
+        // Keep the identity associated with this request stable. A late
+        // response from one activation must never overwrite or revoke its
+        // replacement, even when the key and fingerprint are unchanged.
+        guard let requestedLicense = cache.getLicense() else {
+            let error = LicenseSeatError.noActiveLicense
+            eventBus.emit("sdk:error", ["message": error.localizedDescription])
+            eventBus.emit("offlineToken:fetchError", ["error": error])
+            return
+        }
+        let requestedIdentity = CachedLicenseIdentity(requestedLicense)
+
+        do {
+            let offlineToken = try await getOfflineToken(for: requestedLicense)
+            let kid = offlineToken.token.kid
+            let verification = try await verifyOfflineTokenWithSigningKeyRecovery(offlineToken)
+            try ensureCurrentOfflineSync(requestID, identity: requestedIdentity)
+            try verifyDownloadedOfflineToken(verification.result)
+            try ensureCurrentOfflineSync(requestID, identity: requestedIdentity)
+            try persistOfflineAssets(offlineToken, publicKey: verification.publicKey)
             eventBus.emit("offlineToken:ready", [
                 "kid": kid,
                 "exp": offlineToken.token.exp
             ])
 
-            // Immediately verify offline token locally so that
-            // active entitlements (and other validation fields) are
-            // cached and available even when we are online.
-            if let offlineResult = await quickVerifyCachedOfflineLocal() {
-                cache.updateValidation(offlineResult)
-                if offlineResult.valid {
-                    eventBus.emit("validation:offline-success", offlineResult)
-                } else {
-                    eventBus.emit("validation:offline-failed", offlineResult)
-                }
-            }
-
         } catch {
-            log("Failed to sync offline assets:", error)
+            guard currentOfflineSyncRequestID == requestID else { return }
+            if let apiError = error as? APIError,
+               apiError.invalidatesCachedLicense {
+                handleAuthoritativeInvalidation(apiError, expectedIdentity: requestedIdentity)
+            }
+            log("Failed to sync offline assets:", LogRedaction.describe(error))
+            eventBus.emit("offlineToken:fetchError", [
+                "licenseKey": requestedLicense.licenseKey,
+                "error": error
+            ])
+        }
+    }
+
+    private func ensureCurrentOfflineSync(
+        _ requestID: UUID,
+        identity: CachedLicenseIdentity
+    ) throws {
+        try Task.checkCancellation()
+        guard currentOfflineSyncRequestID == requestID,
+              cachedLicenseMatches(identity) else {
+            throw CancellationError()
+        }
+    }
+
+    private func verifyDownloadedOfflineToken(_ result: ValidationResponse) throws {
+        // Verify a downloaded grant before it can replace the previous cache.
+        // Malformed or mismatched responses therefore cannot poison working
+        // offline recovery.
+        guard result.valid else {
+            throw LicenseSeatError.validationFailed(
+                reason: result.code ?? "Offline token verification failed."
+            )
+        }
+    }
+
+    private func persistOfflineAssets(
+        _ offlineToken: OfflineTokenResponse,
+        publicKey: String
+    ) throws {
+        guard cache.setPublicKey(offlineToken.token.kid, publicKey),
+              cache.setOfflineToken(offlineToken) else {
+            throw LicenseSeatError.cacheError
         }
     }
 
@@ -218,12 +280,21 @@ extension LicenseSeat {
     func scheduleOfflineRefresh() {
         stopOfflineRefresh()
 
+        let interval = config.offlineTokenRefreshInterval
+        guard config.offlineAuthorityEnabled,
+              interval.isFinite,
+              interval >= 1,
+              interval <= LicenseSeatConfig.maximumScheduledInterval else {
+            log("Offline token refresh disabled (interval: \(interval))")
+            return
+        }
+
         offlineRefreshTimer = Timer.scheduledTimer(
-            withTimeInterval: config.offlineTokenRefreshInterval,
+            withTimeInterval: interval,
             repeats: true
         ) { [weak self] _ in
             Task { @MainActor in
-                await self?.syncOfflineAssets()
+                self?.startOfflineAssetSync()
             }
         }
     }
@@ -235,48 +306,38 @@ extension LicenseSeat {
     }
 
     /// Get offline token from server
-    private func getOfflineToken() async throws -> OfflineTokenResponse {
+    private func getOfflineToken(for license: License) async throws -> OfflineTokenResponse {
         guard let productSlug = config.productSlug else {
             throw LicenseSeatError.productSlugRequired
         }
-
-        guard let license = cache.getLicense() else {
-            let error = LicenseSeatError.noActiveLicense
-            eventBus.emit("sdk:error", ["message": error.localizedDescription])
-            throw error
-        }
+        try validateRequestIdentity(
+            productSlug: productSlug,
+            licenseKey: license.licenseKey
+        )
+        try validateFingerprint(
+            license.deviceId,
+            allowLegacyShortValue: true
+        )
 
         eventBus.emit("offlineToken:fetching", ["licenseKey": license.licenseKey])
-
-        do {
-            var body: [String: Any] = [:]
-            body["device_id"] = license.deviceId
-
-            // POST /products/{slug}/licenses/{key}/offline_token
-            let response: OfflineTokenResponse = try await apiClient.post(
-                path: "/products/\(productSlug)/licenses/\(license.licenseKey)/offline_token",
-                body: body
-            )
-
-            eventBus.emit("offlineToken:fetched", [
-                "licenseKey": license.licenseKey
-            ])
-
-            return response
-
-        } catch {
-            log("Failed to get offline token for \(license.licenseKey):", error)
-            eventBus.emit("offlineToken:fetchError", [
-                "licenseKey": license.licenseKey,
-                "error": error
-            ])
-            throw error
-        }
+        let response: OfflineTokenResponse = try await apiClient.post(
+            pathComponents: ["products", productSlug, "licenses", "offline-token"],
+            body: [
+                "license_key": license.licenseKey,
+                "fingerprint": license.deviceId
+            ]
+        )
+        eventBus.emit("offlineToken:fetched", ["licenseKey": license.licenseKey])
+        return response
     }
 
     /// Get signing key (public key) from server
     internal func getSigningKey(keyId: String) async throws -> String {
-        guard !keyId.isEmpty else {
+        guard keyId.utf8.count <= 255,
+              keyId.range(
+                  of: "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+                  options: .regularExpression
+              ) != nil else {
             throw LicenseSeatError.invalidKeyId
         }
 
@@ -284,14 +345,23 @@ extension LicenseSeat {
 
         // GET /signing_keys/{key_id}
         let response: SigningKeyResponse = try await apiClient.get(
-            path: "/signing_keys/\(keyId)"
+            pathComponents: ["signing_keys", keyId]
         )
 
-        guard !response.publicKey.isEmpty else {
+        guard response.object == "signing_key",
+              response.keyId == keyId,
+              response.algorithm.caseInsensitiveCompare("Ed25519") == .orderedSame,
+              response.status.caseInsensitiveCompare("active") == .orderedSame,
+              isValidEd25519PublicKey(response.publicKey) else {
             throw LicenseSeatError.invalidPublicKey
         }
 
         log("Successfully fetched signing key for kid: \(keyId)")
         return response.publicKey
+    }
+
+    internal func isValidEd25519PublicKey(_ publicKey: String) -> Bool {
+        guard let bytes = try? Base64URL.decode(publicKey) else { return false }
+        return bytes.count == 32
     }
 }

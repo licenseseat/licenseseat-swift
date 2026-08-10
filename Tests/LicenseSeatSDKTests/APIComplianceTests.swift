@@ -13,7 +13,7 @@ import Foundation
 // MARK: - ActivationResponse Decoding Tests
 
 /// Tests for ActivationResponse decoding (new v1 API format)
-final class ActivationResponseDecodingTests: XCTestCase {
+final class ActivationResponseDecodingTests: LicenseSeatTestCase {
 
     private let decoder: JSONDecoder = {
         let d = JSONDecoder()
@@ -26,8 +26,8 @@ final class ActivationResponseDecodingTests: XCTestCase {
         let json = """
         {
             "object": "activation",
-            "id": "act-12345-uuid",
-            "device_id": "device-abc-123",
+            "id": 123,
+            "fingerprint": "device-abc-123",
             "device_name": "John's MacBook Pro",
             "license_key": "LS-PRO-2025",
             "activated_at": "2025-01-15T10:00:00Z",
@@ -48,7 +48,7 @@ final class ActivationResponseDecodingTests: XCTestCase {
                     {"key": "pro-features", "expires_at": null, "metadata": null}
                 ],
                 "metadata": null,
-                "product": {"slug": "my-app", "name": "My App"}
+                "product": {"object": "product", "slug": "my-app", "name": "My App"}
             }
         }
         """
@@ -56,7 +56,7 @@ final class ActivationResponseDecodingTests: XCTestCase {
         let result = try decoder.decode(ActivationResponse.self, from: Data(json.utf8))
 
         XCTAssertEqual(result.object, "activation")
-        XCTAssertEqual(result.id, "act-12345-uuid")
+        XCTAssertEqual(result.id, "123")
         XCTAssertEqual(result.deviceId, "device-abc-123")
         XCTAssertEqual(result.deviceName, "John's MacBook Pro")
         XCTAssertEqual(result.licenseKey, "LS-PRO-2025")
@@ -119,7 +119,7 @@ final class ActivationResponseDecodingTests: XCTestCase {
 
 // MARK: - DeactivationResponse Decoding Tests
 
-final class DeactivationResponseDecodingTests: XCTestCase {
+final class DeactivationResponseDecodingTests: LicenseSeatTestCase {
 
     private let decoder: JSONDecoder = {
         let d = JSONDecoder()
@@ -131,7 +131,7 @@ final class DeactivationResponseDecodingTests: XCTestCase {
         let json = """
         {
             "object": "deactivation",
-            "activation_id": "act-12345-uuid",
+            "activation_id": 123,
             "deactivated_at": "2025-01-20T15:30:00Z"
         }
         """
@@ -139,7 +139,7 @@ final class DeactivationResponseDecodingTests: XCTestCase {
         let result = try decoder.decode(DeactivationResponse.self, from: Data(json.utf8))
 
         XCTAssertEqual(result.object, "deactivation")
-        XCTAssertEqual(result.activationId, "act-12345-uuid")
+        XCTAssertEqual(result.activationId, "123")
         XCTAssertNotNil(result.deactivatedAt)
     }
 }
@@ -147,7 +147,7 @@ final class DeactivationResponseDecodingTests: XCTestCase {
 // MARK: - ValidationResponse Decoding Tests
 
 /// Tests for ValidationResponse decoding (new v1 API format)
-final class ValidationResponseDecodingTests: XCTestCase {
+final class ValidationResponseDecodingTests: LicenseSeatTestCase {
 
     private let decoder: JSONDecoder = {
         let d = JSONDecoder()
@@ -256,8 +256,8 @@ final class ValidationResponseDecodingTests: XCTestCase {
                 "product": {"slug": "app", "name": "App"}
             },
             "activation": {
-                "id": "act-999-uuid",
-                "device_id": "my-device",
+                "id": 999,
+                "fingerprint": "my-device",
                 "device_name": "My Mac",
                 "license_key": "TEST-KEY",
                 "activated_at": "2025-01-01T00:00:00Z",
@@ -274,14 +274,14 @@ final class ValidationResponseDecodingTests: XCTestCase {
         XCTAssertEqual(result.warnings?.count, 1)
         XCTAssertEqual(result.warnings?[0].code, "expiring_soon")
         XCTAssertNotNil(result.activation)
-        XCTAssertEqual(result.activation?.id, "act-999-uuid")
+        XCTAssertEqual(result.activation?.id, "999")
         XCTAssertEqual(result.activation?.deviceId, "my-device")
     }
 }
 
 // MARK: - OfflineTokenResponse Decoding Tests
 
-final class OfflineTokenResponseDecodingTests: XCTestCase {
+final class OfflineTokenResponseDecodingTests: LicenseSeatTestCase {
 
     private let decoder: JSONDecoder = {
         let d = JSONDecoder()
@@ -300,7 +300,7 @@ final class OfflineTokenResponseDecodingTests: XCTestCase {
                 "plan_key": "pro_annual",
                 "mode": "hardware_locked",
                 "seat_limit": 5,
-                "device_id": "device-abc-123",
+                "fingerprint": "device-abc-123",
                 "iat": 1737504000,
                 "exp": 1740096000,
                 "nbf": 1737504000,
@@ -340,11 +340,48 @@ final class OfflineTokenResponseDecodingTests: XCTestCase {
         XCTAssertEqual(result.signature.value, "base64-signature-value")
         XCTAssertFalse(result.canonical.isEmpty)
     }
+
+    func testOfflineTokenPayloadIgnoresDeviceBindingAliases() throws {
+        // The signed offline payload accepts only the canonical `fingerprint`
+        // spelling (what the Ruby signer emits). `device_id` and
+        // `device_fingerprint` are online-response aliases; honoring them
+        // here would advertise compatibility the canonical equivalence check
+        // does not grant, so decode must drop them.
+        let json = """
+        {
+            "schema_version": 1,
+            "license_key": "LS-PRO-2025",
+            "product_slug": "my-app",
+            "plan_key": "pro_annual",
+            "mode": "hardware_locked",
+            "seat_limit": 5,
+            "device_id": "device-abc-123",
+            "device_fingerprint": "device-abc-123",
+            "iat": 1737504000,
+            "exp": 1740096000,
+            "nbf": 1737504000,
+            "license_expires_at": null,
+            "kid": "org-xxx-offline-v1",
+            "entitlements": [],
+            "metadata": null
+        }
+        """
+
+        let payload = try decoder.decode(
+            OfflineTokenResponse.TokenPayload.self,
+            from: Data(json.utf8)
+        )
+
+        XCTAssertNil(
+            payload.deviceId,
+            "Alias-keyed device bindings must not decode; only `fingerprint` is honored"
+        )
+    }
 }
 
 // MARK: - SigningKeyResponse Decoding Tests
 
-final class SigningKeyResponseDecodingTests: XCTestCase {
+final class SigningKeyResponseDecodingTests: LicenseSeatTestCase {
 
     private let decoder: JSONDecoder = {
         let d = JSONDecoder()
@@ -377,7 +414,7 @@ final class SigningKeyResponseDecodingTests: XCTestCase {
 
 // MARK: - HealthResponse Decoding Tests
 
-final class HealthResponseDecodingTests: XCTestCase {
+final class HealthResponseDecodingTests: LicenseSeatTestCase {
 
     private let decoder: JSONDecoder = {
         let d = JSONDecoder()
@@ -406,7 +443,7 @@ final class HealthResponseDecodingTests: XCTestCase {
 
 // MARK: - Entitlement Decoding Tests
 
-final class EntitlementDecodingTests: XCTestCase {
+final class EntitlementDecodingTests: LicenseSeatTestCase {
 
     private let decoder: JSONDecoder = {
         let d = JSONDecoder()
@@ -459,7 +496,7 @@ final class EntitlementDecodingTests: XCTestCase {
 
 // MARK: - Configuration Tests
 
-final class ConfigurationTests: XCTestCase {
+final class ConfigurationTests: LicenseSeatTestCase {
 
     func testProductionAPIBaseURLConstant() {
         XCTAssertEqual(LicenseSeatConfig.productionAPIBaseURL, "https://licenseseat.com/api/v1")
@@ -511,7 +548,7 @@ final class ConfigurationTests: XCTestCase {
 
 // MARK: - APIError Tests
 
-final class APIErrorDecodingTests: XCTestCase {
+final class APIErrorDecodingTests: LicenseSeatTestCase {
 
     func testParsesNewErrorFormat() {
         let errorJSON: [String: Any] = [
@@ -555,6 +592,25 @@ final class APIErrorDecodingTests: XCTestCase {
         XCTAssertEqual(error.message, "Something went wrong")
     }
 
+    func testParsesJSONAPIErrorFormatUsedByMachineFileEndpoints() {
+        let errorJSON: [String: Any] = [
+            "errors": [[
+                "code": "DEVICE_NOT_ACTIVATED",
+                "title": "Device not activated",
+                "detail": "Activate this fingerprint before requesting a machine file.",
+                "meta": ["fingerprint": "device-123"]
+            ]]
+        ]
+
+        let error = APIError(from: errorJSON, status: 422)
+
+        XCTAssertEqual(error.code, "DEVICE_NOT_ACTIVATED")
+        XCTAssertEqual(error.message, "Activate this fingerprint before requesting a machine file.")
+        XCTAssertEqual(error.details?["fingerprint"] as? String, "device-123")
+        XCTAssertTrue(error.isLicenseTerminalError)
+        XCTAssertTrue(error.invalidatesCachedLicense)
+    }
+
     func testErrorClassification() {
         let networkError = APIError(message: "Timeout", status: 0)
         XCTAssertTrue(networkError.isNetworkError)
@@ -574,10 +630,59 @@ final class APIErrorDecodingTests: XCTestCase {
         let terminalError = APIError(code: "revoked", message: "License revoked", status: 422)
         XCTAssertTrue(terminalError.isLicenseTerminalError)
 
+        let gemBaseControllerError = APIError(
+            code: "license_invalid",
+            message: "License invalid",
+            status: 422
+        )
+        XCTAssertTrue(gemBaseControllerError.invalidatesCachedLicense)
+
+        let forbiddenError = APIError(code: "forbidden", message: "Wrong scope", status: 403)
+        XCTAssertFalse(forbiddenError.invalidatesCachedLicense)
+
+        let goneError = APIError(message: "Activation gone", status: 410)
+        XCTAssertTrue(goneError.invalidatesCachedLicense)
+
         let retryableError = APIError(message: "Service unavailable", status: 503)
         XCTAssertTrue(retryableError.isRetryable)
 
+        XCTAssertTrue(APIError(message: "Internal error", status: 500).isRetryable)
+        XCTAssertFalse(APIError(message: "Not implemented", status: 501).isRetryable)
+        XCTAssertTrue(APIError(message: "Bad gateway", status: 502).isRetryable)
+
         let nonRetryableError = APIError(message: "Not found", status: 404)
         XCTAssertFalse(nonRetryableError.isRetryable)
+
+        let configurationError = APIError(
+            code: "invalid_base_url",
+            message: "Invalid API base URL",
+            status: 0
+        )
+        XCTAssertFalse(configurationError.isNetworkError)
+        XCTAssertFalse(configurationError.isRetryable)
+    }
+}
+
+// MARK: - Type-erased metadata equality
+
+final class AnyCodableEqualityTests: LicenseSeatTestCase {
+    func testNestedJSONValuesCompareRecursively() {
+        let lhs = AnyCodable([
+            "array": [1, true, "value", NSNull()] as [Any],
+            "object": ["nested": 42] as [String: Any]
+        ] as [String: Any])
+        let rhs = AnyCodable([
+            "object": ["nested": 42] as [String: Any],
+            "array": [1, true, "value", NSNull()] as [Any]
+        ] as [String: Any])
+
+        XCTAssertEqual(lhs, rhs)
+    }
+
+    func testNestedJSONDifferenceIsDetected() {
+        let lhs = AnyCodable(["values": [1, 2, 3] as [Any]] as [String: Any])
+        let rhs = AnyCodable(["values": [1, 2, 4] as [Any]] as [String: Any])
+
+        XCTAssertNotEqual(lhs, rhs)
     }
 }

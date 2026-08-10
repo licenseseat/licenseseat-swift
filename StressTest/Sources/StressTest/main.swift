@@ -1,6 +1,7 @@
 import Foundation
 import LicenseSeat
 import Combine
+import Darwin
 
 // MARK: - Configuration (from environment variables)
 let API_URL = ProcessInfo.processInfo.environment["LICENSESEAT_API_URL"] ?? "http://localhost:3000/api/v1"
@@ -9,9 +10,15 @@ let PRODUCT_SLUG = ProcessInfo.processInfo.environment["LICENSESEAT_PRODUCT_SLUG
 let LICENSE_KEY = ProcessInfo.processInfo.environment["LICENSESEAT_LICENSE_KEY"] ?? ""
 
 // MARK: - Test Utilities
-var passedTests = 0
-var failedTests = 0
-var cancellables = Set<AnyCancellable>()
+@MainActor var passedTests = 0
+@MainActor var failedTests = 0
+@MainActor var cancellables = Set<AnyCancellable>()
+
+enum ConcurrentOutcome: Sendable {
+    case success
+    case superseded
+    case failure(String)
+}
 
 func printHeader(_ title: String) {
     print("\n" + String(repeating: "=", count: 70))
@@ -23,17 +30,17 @@ func printTest(_ name: String) {
     print("\n-> Testing: \(name)")
 }
 
-func pass(_ message: String = "OK") {
+@MainActor func pass(_ message: String = "OK") {
     passedTests += 1
     print("   PASS: \(message)")
 }
 
-func fail(_ message: String) {
+@MainActor func fail(_ message: String) {
     failedTests += 1
     print("   FAIL: \(message)")
 }
 
-func assert(_ condition: Bool, _ message: String) {
+@MainActor func assert(_ condition: Bool, _ message: String) {
     if condition { pass(message) } else { fail(message) }
 }
 
@@ -43,13 +50,14 @@ func log(_ message: String) {
 
 // MARK: - Stress Test
 @main
+@MainActor
 struct TelemetryStressTest {
     static func main() async {
         guard !API_KEY.isEmpty, !PRODUCT_SLUG.isEmpty, !LICENSE_KEY.isEmpty else {
             print("Missing environment variables. Set:")
             print("   LICENSESEAT_API_KEY, LICENSESEAT_PRODUCT_SLUG, LICENSESEAT_LICENSE_KEY")
             print("   Optional: LICENSESEAT_API_URL (default: http://localhost:3000/api/v1)")
-            return
+            exit(EXIT_FAILURE)
         }
 
         printHeader("Telemetry, Heartbeat & Activation Stress Test")
@@ -80,22 +88,13 @@ struct TelemetryStressTest {
         sdk.reset()
 
         printTest("Activate license (telemetry enabled)")
-        var activationId: String?
         do {
             let license = try await sdk.activate(licenseKey: LICENSE_KEY)
             pass("Activation successful with telemetry")
-            activationId = license.activationId
             log("Device ID: \(license.deviceId)")
             log("Activation ID: \(license.activationId)")
         } catch let error as APIError {
-            if error.code == "already_activated" {
-                pass("Already activated (reusing seat)")
-                if let cached = sdk.currentLicense() {
-                    activationId = cached.activationId
-                }
-            } else {
-                fail("Activation failed: \(error.code ?? "unknown") - \(error.message)")
-            }
+            fail("Activation failed: \(error.code ?? "unknown") - \(error.message)")
         } catch {
             fail("Activation error: \(error)")
         }
@@ -196,7 +195,7 @@ struct TelemetryStressTest {
                 log("Enriched telemetry round #\(i) error: \(error)")
             }
         }
-        assert(enrichedOps >= 4, "Most enriched telemetry operations succeeded (\(enrichedOps)/6)")
+        assert(enrichedOps == 6, "All enriched telemetry operations succeeded (\(enrichedOps)/6)")
 
         // ============================================================
         // SCENARIO 5: Telemetry disabled -- verify server still works
@@ -209,7 +208,7 @@ struct TelemetryStressTest {
             try await sdk.deactivate()
             pass("Deactivated OK")
         } catch {
-            log("Deactivation issue: \(error) (continuing)")
+            fail("Could not release telemetry test seat: \(error)")
         }
 
         let noTelemetryConfig = LicenseSeatConfig(
@@ -232,11 +231,7 @@ struct TelemetryStressTest {
             log("Device ID: \(license.deviceId)")
             log("Activation ID: \(license.activationId)")
         } catch let error as APIError {
-            if error.code == "already_activated" {
-                pass("Already activated (seat reused, no telemetry)")
-            } else {
-                fail("No-telemetry activation failed: \(error.code ?? "unknown") - \(error.message)")
-            }
+            fail("No-telemetry activation failed: \(error.code ?? "unknown") - \(error.message)")
         } catch {
             fail("No-telemetry activation error: \(error)")
         }
@@ -262,8 +257,13 @@ struct TelemetryStressTest {
         // ============================================================
         printHeader("SCENARIO 6: Standalone Heartbeat Timer")
 
-        // Deactivate no-telemetry SDK
-        try? await noTelemetrySDK.deactivate()
+        printTest("Deactivate no-telemetry session before timer test")
+        do {
+            try await noTelemetrySDK.deactivate()
+            pass("No-telemetry session deactivated")
+        } catch {
+            fail("Could not release no-telemetry test seat: \(error)")
+        }
 
         let heartbeatConfig = LicenseSeatConfig(
             apiBaseUrl: API_URL,
@@ -287,11 +287,7 @@ struct TelemetryStressTest {
             _ = try await heartbeatSDK.activate(licenseKey: LICENSE_KEY)
             pass("Activated for standalone heartbeat test")
         } catch let error as APIError {
-            if error.code == "already_activated" {
-                pass("Already activated")
-            } else {
-                fail("Heartbeat timer activation failed: \(error.message)")
-            }
+            fail("Heartbeat timer activation failed: \(error.message)")
         } catch {
             fail("Heartbeat timer activation error: \(error)")
         }
@@ -309,8 +305,13 @@ struct TelemetryStressTest {
         // ============================================================
         printHeader("SCENARIO 7: Auto-Validation + Heartbeat Cycles")
 
-        // Deactivate heartbeat SDK
-        try? await heartbeatSDK.deactivate()
+        printTest("Deactivate standalone-heartbeat session")
+        do {
+            try await heartbeatSDK.deactivate()
+            pass("Standalone-heartbeat session deactivated")
+        } catch {
+            fail("Could not release standalone-heartbeat test seat: \(error)")
+        }
 
         let autoConfig = LicenseSeatConfig(
             apiBaseUrl: API_URL,
@@ -334,11 +335,7 @@ struct TelemetryStressTest {
             _ = try await autoSDK.activate(licenseKey: LICENSE_KEY)
             pass("Activated for auto-validation")
         } catch let error as APIError {
-            if error.code == "already_activated" {
-                pass("Already activated")
-            } else {
-                fail("Auto-test activation failed: \(error.message)")
-            }
+            fail("Auto-test activation failed: \(error.message)")
         } catch {
             fail("Auto-test activation error: \(error)")
         }
@@ -356,56 +353,93 @@ struct TelemetryStressTest {
         printHeader("SCENARIO 8: Concurrent Validation Stress")
 
         printTest("Fire 10 concurrent validations")
-        let concurrentResults = await withTaskGroup(of: Bool.self) { group in
+        let concurrentResults = await withTaskGroup(of: ConcurrentOutcome.self) { group in
             for i in 1...10 {
                 group.addTask {
                     do {
                         let result = try await autoSDK.validate(licenseKey: LICENSE_KEY)
-                        return result.valid
+                        return result.valid ? .success : .failure("validation #\(i) was invalid")
+                    } catch let error as LicenseSeatError {
+                        if case .validationFailed(let reason) = error,
+                           reason.localizedCaseInsensitiveContains("superseded") {
+                            return .superseded
+                        }
+                        return .failure("validation #\(i): \(error)")
                     } catch {
-                        print("   Concurrent validation #\(i) error: \(error)")
-                        return false
+                        return .failure("validation #\(i): \(error)")
                     }
                 }
             }
 
-            var successes = 0
-            for await result in group {
-                if result { successes += 1 }
+            var outcomes = [ConcurrentOutcome]()
+            for await outcome in group {
+                outcomes.append(outcome)
             }
-            return successes
+            return outcomes
         }
-        assert(concurrentResults >= 8, "At least 8/10 concurrent validations succeeded (\(concurrentResults)/10)")
+        let validationSuccesses = concurrentResults.filter { outcome in
+            if case .success = outcome { return true }
+            return false
+        }.count
+        let validationFailures = concurrentResults.compactMap { outcome -> String? in
+            if case .failure(let message) = outcome { return message }
+            return nil
+        }
+        validationFailures.forEach { log($0) }
+        assert(validationSuccesses >= 1, "At least the newest concurrent validation succeeded")
+        assert(validationFailures.isEmpty, "Older validations were safely superseded, not failed")
+        assert(autoSDK.currentLicense()?.licenseKey == LICENSE_KEY, "Concurrent validation preserved the active grant")
 
         printTest("Fire 5 concurrent heartbeats")
-        let concurrentHeartbeats = await withTaskGroup(of: Bool.self) { group in
+        let concurrentHeartbeats = await withTaskGroup(of: ConcurrentOutcome.self) { group in
             for i in 1...5 {
                 group.addTask {
                     do {
                         try await autoSDK.heartbeat()
-                        return true
+                        return .success
+                    } catch let error as LicenseSeatError {
+                        if case .validationFailed(let reason) = error,
+                           reason.localizedCaseInsensitiveContains("superseded") {
+                            return .superseded
+                        }
+                        return .failure("heartbeat #\(i): \(error)")
                     } catch {
-                        print("   Concurrent heartbeat #\(i) error: \(error)")
-                        return false
+                        return .failure("heartbeat #\(i): \(error)")
                     }
                 }
             }
 
-            var successes = 0
-            for await result in group {
-                if result { successes += 1 }
+            var outcomes = [ConcurrentOutcome]()
+            for await outcome in group {
+                outcomes.append(outcome)
             }
-            return successes
+            return outcomes
         }
-        assert(concurrentHeartbeats >= 4, "At least 4/5 concurrent heartbeats succeeded (\(concurrentHeartbeats)/5)")
+        let concurrentHeartbeatSuccesses = concurrentHeartbeats.filter { outcome in
+            if case .success = outcome { return true }
+            return false
+        }.count
+        let heartbeatFailures = concurrentHeartbeats.compactMap { outcome -> String? in
+            if case .failure(let message) = outcome { return message }
+            return nil
+        }
+        heartbeatFailures.forEach { log($0) }
+        assert(concurrentHeartbeatSuccesses >= 1, "At least the newest concurrent heartbeat succeeded")
+        assert(heartbeatFailures.isEmpty, "Older heartbeats were safely superseded, not failed")
+        assert(autoSDK.currentLicense()?.licenseKey == LICENSE_KEY, "Concurrent heartbeats preserved the active grant")
 
         // ============================================================
         // SCENARIO 9: Offline Token Download & Verification
         // ============================================================
         printHeader("SCENARIO 9: Offline Token Download & Verification")
 
-        // Deactivate current session
-        try? await autoSDK.deactivate()
+        printTest("Deactivate auto-validation session")
+        do {
+            try await autoSDK.deactivate()
+            pass("Auto-validation session deactivated")
+        } catch {
+            fail("Could not release auto-validation test seat: \(error)")
+        }
 
         let offlineConfig = LicenseSeatConfig(
             apiBaseUrl: API_URL,
@@ -424,8 +458,7 @@ struct TelemetryStressTest {
             _ = try await offlineSDK.activate(licenseKey: LICENSE_KEY)
             pass("Activated for offline token test")
         } catch let error as APIError {
-            if error.code == "already_activated" { pass("Already activated") }
-            else { fail("Offline activation failed: \(error.code ?? "unknown") - \(error.message)") }
+            fail("Offline activation failed: \(error.code ?? "unknown") - \(error.message)")
         } catch { fail("Offline activation error: \(error)") }
 
         printTest("Step 2: Sync offline assets (token + public key)")
@@ -463,7 +496,7 @@ struct TelemetryStressTest {
             fail("No offline token was cached - download may have failed")
         } else if offlineResult.code == "no_public_key" {
             fail("Public key not cached - signing key download may have failed")
-        } else if offlineResult.code == "invalid_signature" {
+        } else if offlineResult.code == "signature_invalid" {
             fail("Offline token signature verification failed")
         } else {
             fail("Offline validation failed: \(offlineResult.code ?? "unknown")")
@@ -473,15 +506,12 @@ struct TelemetryStressTest {
         do {
             try await offlineSDK.deactivate()
             pass("Deactivated offline test session")
-        } catch { log("Deactivation issue: \(error) (continuing)") }
+        } catch { fail("Could not release offline test seat: \(error)") }
 
         // ============================================================
         // SCENARIO 10: Full lifecycle with telemetry verification
         // ============================================================
         printHeader("SCENARIO 10: Full Lifecycle (activate -> validate -> heartbeat -> deactivate)")
-
-        printTest("Deactivate current session")
-        try? await autoSDK.deactivate()
 
         let lifecycleConfig = LicenseSeatConfig(
             apiBaseUrl: API_URL,
@@ -505,8 +535,7 @@ struct TelemetryStressTest {
             _ = try await lifecycleSDK.activate(licenseKey: LICENSE_KEY)
             pass("Activated")
         } catch let error as APIError {
-            if error.code == "already_activated" { pass("Already activated") }
-            else { fail("Activate: \(error.message)") }
+            fail("Activate: \(error.message)")
         } catch { fail("Activate: \(error)") }
 
         printTest("Step 2: Validate")
@@ -529,9 +558,11 @@ struct TelemetryStressTest {
         } catch { fail("Deactivate: \(error)") }
 
         printTest("Event log completeness")
+        try? await Task.sleep(nanoseconds: 200_000_000)
         log("Events: \(eventLog)")
-        assert(eventLog.contains("activation:success") || eventLog.isEmpty, "Activation event logged")
-        assert(eventLog.contains("validation:success") || eventLog.isEmpty, "Validation event logged")
+        assert(eventLog.contains("activation:success"), "Activation event logged")
+        assert(eventLog.contains("validation:success"), "Validation event logged")
+        assert(eventLog.contains("deactivation:success"), "Deactivation event logged")
 
         // ============================================================
         // SUMMARY
@@ -565,6 +596,7 @@ struct TelemetryStressTest {
             """)
         } else {
             print("\n   \(failedTests) test(s) failed. Review output above.\n")
+            exit(EXIT_FAILURE)
         }
     }
 }

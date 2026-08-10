@@ -7,17 +7,33 @@
 //
 
 import Foundation
+#if canImport(CoreFoundation)
+import CoreFoundation
+#endif
 
 /// Canonical JSON serializer for consistent signature verification
 enum CanonicalJSON {
+    private static let maxDepth = 20
+    private static let maxNodes = 10_000
+    private static let maxKeyBytes = 256
+    private static let maxStringBytes = 64 * 1024
+    private static let maxCanonicalBytes = 1024 * 1024
     
     /// Convert object to canonical JSON string
     static func stringify(_ object: Any) throws -> String {
-        let canonicalObject = try canonicalize(object)
+        var nodes = 0
+        let canonicalObject = try canonicalize(
+            object,
+            depth: 0,
+            nodes: &nodes
+        )
         let data = try JSONSerialization.data(
             withJSONObject: canonicalObject,
             options: [.sortedKeys, .withoutEscapingSlashes]
         )
+        guard data.count <= maxCanonicalBytes else {
+            throw CanonicalJSONError.sizeLimitExceeded
+        }
         
         guard let string = String(data: data, encoding: .utf8) else {
             throw CanonicalJSONError.encodingFailed
@@ -27,42 +43,70 @@ enum CanonicalJSON {
     }
     
     /// Recursively canonicalize an object
-    private static func canonicalize(_ object: Any) throws -> Any {
+    private static func canonicalize(
+        _ object: Any,
+        depth: Int,
+        nodes: inout Int
+    ) throws -> Any {
+        try recordNode(at: depth, nodes: &nodes)
+
         if let dictionary = object as? [String: Any] {
-            // Sort dictionary keys
-            var canonical: [String: Any] = [:]
-            for key in dictionary.keys.sorted() {
-                canonical[key] = try canonicalize(dictionary[key]!)
-            }
-            return canonical
-            
+            return try canonicalizeDictionary(
+                dictionary,
+                depth: depth,
+                nodes: &nodes
+            )
         } else if let array = object as? [Any] {
-            // Canonicalize array elements
-            return try array.map { try canonicalize($0) }
-            
+            return try array.map {
+                try canonicalize($0, depth: depth + 1, nodes: &nodes)
+            }
         } else if let number = object as? NSNumber {
-            // Normalize numbers
-            return normalizeNumber(number)
-            
+            return try normalizeNumber(number)
         } else if object is NSNull {
-            // Null is canonical
             return NSNull()
-            
         } else if let string = object as? String {
-            // Strings are canonical
+            guard string.utf8.count <= maxStringBytes else {
+                throw CanonicalJSONError.sizeLimitExceeded
+            }
             return string
-            
         } else if let bool = object as? Bool {
-            // Booleans are canonical
             return bool
-            
         } else {
             throw CanonicalJSONError.unsupportedType(String(describing: type(of: object)))
         }
     }
+
+    private static func recordNode(at depth: Int, nodes: inout Int) throws {
+        guard depth <= maxDepth else {
+            throw CanonicalJSONError.depthLimitExceeded
+        }
+        nodes += 1
+        guard nodes <= maxNodes else {
+            throw CanonicalJSONError.nodeLimitExceeded
+        }
+    }
+
+    private static func canonicalizeDictionary(
+        _ dictionary: [String: Any],
+        depth: Int,
+        nodes: inout Int
+    ) throws -> [String: Any] {
+        var canonical: [String: Any] = [:]
+        for key in dictionary.keys.sorted() {
+            guard key.utf8.count <= maxKeyBytes else {
+                throw CanonicalJSONError.sizeLimitExceeded
+            }
+            canonical[key] = try canonicalize(
+                dictionary[key]!,
+                depth: depth + 1,
+                nodes: &nodes
+            )
+        }
+        return canonical
+    }
     
     /// Normalize number representation
-    private static func normalizeNumber(_ number: NSNumber) -> Any {
+    private static func normalizeNumber(_ number: NSNumber) throws -> Any {
         // Check if it's a boolean disguised as NSNumber
 #if canImport(CoreFoundation)
         if CFBooleanGetTypeID() == CFGetTypeID(number) {
@@ -78,6 +122,9 @@ enum CanonicalJSON {
         
         // Check if it's an integer
         let double = number.doubleValue
+        guard double.isFinite else {
+            throw CanonicalJSONError.nonFiniteNumber
+        }
         if double.truncatingRemainder(dividingBy: 1) == 0 && 
            double >= Double(Int64.min) && 
            double <= Double(Int64.max) {
@@ -93,6 +140,10 @@ enum CanonicalJSON {
 enum CanonicalJSONError: LocalizedError {
     case encodingFailed
     case unsupportedType(String)
+    case depthLimitExceeded
+    case nodeLimitExceeded
+    case sizeLimitExceeded
+    case nonFiniteNumber
     
     var errorDescription: String? {
         switch self {
@@ -100,6 +151,14 @@ enum CanonicalJSONError: LocalizedError {
             return "Failed to encode canonical JSON"
         case .unsupportedType(let type):
             return "Unsupported type for canonical JSON: \(type)"
+        case .depthLimitExceeded:
+            return "Canonical JSON nesting is too deep"
+        case .nodeLimitExceeded:
+            return "Canonical JSON contains too many values"
+        case .sizeLimitExceeded:
+            return "Canonical JSON exceeds the supported size"
+        case .nonFiniteNumber:
+            return "Canonical JSON numbers must be finite"
         }
     }
-} 
+}

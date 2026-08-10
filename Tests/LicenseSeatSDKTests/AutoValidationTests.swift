@@ -1,23 +1,26 @@
 import XCTest
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
+#if canImport(Combine)
 import Combine
+#endif
 @testable import LicenseSeat
 
 // swiftlint:disable implicitly_unwrapped_optional
-final class AutoValidationTests: XCTestCase {
+@MainActor
+final class AutoValidationTests: LicenseSeatTestCase {
     private var sdk: LicenseSeat!
     private var cancellables: Set<AnyCancellable> = []
     
     override func tearDown() {
-        super.tearDown()
-        // Ensure any background tasks are cancelled before resetting the protocol.
-        if let instance = sdk {
-            Task { @MainActor in
-                instance.reset()
-            }
+        MainActor.assumeIsolated {
+            sdk?.reset()
+            sdk = nil
+            MockURLProtocol.reset()
+            cancellables.removeAll()
         }
-        sdk = nil
-        MockURLProtocol.reset()
-        cancellables.removeAll()
+        super.tearDown()
     }
     
     private static let testProductSlug = "test-app"
@@ -40,7 +43,7 @@ final class AutoValidationTests: XCTestCase {
                 json = [
                     "object": "activation",
                     "id": "act-12345-uuid",
-                    "device_id": "test-device",
+                    "fingerprint": "test-device",
                     "device_name": "Test Device",
                     "license_key": licenseKey,
                     "activated_at": ISO8601DateFormatter().string(from: Date()),
@@ -109,7 +112,8 @@ final class AutoValidationTests: XCTestCase {
             apiBaseUrl: "https://example.com",
             apiKey: "test-api-key",
             productSlug: Self.testProductSlug,
-            storagePrefix: "auto_validation_test_",
+            storagePrefix: "auto_validation_test_\(UUID().uuidString)_",
+            deviceIdentifier: "test-device",
             autoValidateInterval: 0.2,
             debug: false
         )
@@ -129,6 +133,55 @@ final class AutoValidationTests: XCTestCase {
         // Activate license (starts auto-validation)
         _ = try await sdk.activate(licenseKey: licenseKey)
 
-        await fulfillment(of: [fired], timeout: 1.0)
+        await assertFulfillment(of: [fired], timeout: 1.0)
     }
-} 
+
+    @MainActor
+    func testDisabledAutoValidationDoesNotSendLaunchRequestForCachedLicense() async {
+        let unexpectedRequest = expectation(description: "No automatic online request")
+        unexpectedRequest.isInverted = true
+
+        MockURLProtocol.requestHandler = { request in
+            unexpectedRequest.fulfill()
+            let url = try XCTUnwrap(request.url)
+            let response = try XCTUnwrap(HTTPURLResponse(
+                url: url,
+                statusCode: 500,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            ))
+            return (response, Data("{}".utf8))
+        }
+
+        let sessionConfiguration = URLSessionConfiguration.ephemeral
+        sessionConfiguration.protocolClasses = [MockURLProtocol.self]
+        let session = URLSession(configuration: sessionConfiguration)
+        let config = LicenseSeatConfig(
+            apiBaseUrl: "https://example.com",
+            apiKey: "test-api-key",
+            productSlug: Self.testProductSlug,
+            storagePrefix: "disabled_auto_validation_test_\(UUID().uuidString)_",
+            deviceIdentifier: "test-device",
+            autoValidateInterval: 0,
+            heartbeatInterval: 0,
+            offlineTokenRefreshInterval: 0
+        )
+
+        // The initialization task is main-actor isolated, so this synchronous
+        // seed deterministically precedes its first read of protected storage.
+        sdk = LicenseSeat(config: config, urlSession: session)
+        XCTAssertTrue(sdk.cache.setLicense(License(
+            licenseKey: "CACHED-LICENSE",
+            deviceId: "test-device",
+            activationId: "cached-activation",
+            activatedAt: Date(timeIntervalSince1970: 1_700_000_000),
+            lastValidated: Date(timeIntervalSince1970: 1_700_000_100)
+        )))
+
+        await sdk.waitForInitialization()
+
+        XCTAssertNil(sdk.validationTask)
+        XCTAssertNil(sdk.backgroundValidationTask)
+        await assertFulfillment(of: [unexpectedRequest], timeout: 0.2)
+    }
+}

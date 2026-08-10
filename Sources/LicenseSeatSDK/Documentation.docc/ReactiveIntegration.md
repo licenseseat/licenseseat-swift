@@ -1,515 +1,210 @@
 # Reactive Integration
 
-Build reactive UIs with Combine publishers and SwiftUI integration.
+Bind LicenseSeat state to Combine, SwiftUI, AppKit, or UIKit without duplicating licensing policy in the UI layer.
 
-## Overview
+## Status Publisher
 
-LicenseSeat provides first-class Combine support with built-in publishers for all major events. This enables reactive programming patterns, seamless SwiftUI integration, and declarative UI updates based on license state changes.
-
-## Core Publishers
-
-### Status Publisher
-
-Monitor license status changes in real-time:
+The status publisher emits license-state transitions and removes duplicates:
 
 ```swift
 import Combine
 import LicenseSeat
 
-// Subscribe to status changes via static publisher
-LicenseSeat.statusPublisher
-    .sink { status in
-        switch status {
-        case .active(let details):
-            enableFullFeatures()
-        case .inactive:
-            showActivationScreen()
-        case .invalid:
-            showErrorScreen()
-        default:
-            break
-        }
-    }
-    .store(in: &cancellables)
-```
-
-### Network Status Publisher
-
-React to connectivity changes:
-
-```swift
-LicenseSeat.shared.networkStatusPublisher
-    .removeDuplicates()
-    .sink { isOnline in
-        updateConnectionIndicator(online: isOnline)
-    }
-    .store(in: &cancellables)
-```
-
-### Event Publisher
-
-Subscribe to specific SDK events:
-
-```swift
-// All events
-LicenseSeat.shared.eventPublisher
-    .filter { $0.name.hasPrefix("validation:") }
-    .sink { event in
-        logValidationEvent(event)
-    }
-    .store(in: &cancellables)
-
-// Specific event
-LicenseSeat.shared.eventPublisher(for: "activation:success")
-    .sink { event in
-        showSuccessMessage()
-    }
-    .store(in: &cancellables)
-```
-
-### Entitlement Publisher
-
-Monitor specific feature access:
-
-```swift
-LicenseSeat.shared.entitlementPublisher(for: "premium-features")
-    .map { $0.active }
-    .removeDuplicates()
-    .sink { hasAccess in
-        premiumButton.isEnabled = hasAccess
-    }
-    .store(in: &cancellables)
-```
-
-## SwiftUI Integration
-
-### Property Wrappers (Recommended)
-
-The simplest way to integrate with SwiftUI:
-
-```swift
-import SwiftUI
-import LicenseSeat
-
-struct ContentView: View {
-    @LicenseState private var status
-    @EntitlementState("premium") private var hasPremium
-    
-    var body: some View {
-        VStack {
-            // Status-based UI
-            switch status {
-            case .active:
-                Text("License Active")
-                    .foregroundColor(.green)
-            case .inactive:
-                Button("Activate License") {
-                    showActivation = true
-                }
-            default:
-                ProgressView()
-            }
-            
-            // Feature gating
-            if hasPremium {
-                PremiumFeatureView()
-            }
-        }
-    }
-}
-```
-
-### ObservableObject ViewModel
-
-For more complex scenarios:
-
-```swift
 @MainActor
-class LicenseViewModel: ObservableObject {
-    @Published var status: LicenseStatus = .inactive(message: "No license")
-    @Published var isOnline = true
-    @Published var isValidating = false
-    @Published var entitlements: Set<String> = []
-    
+final class LicenseViewModel: ObservableObject {
+    @Published private(set) var status = LicenseStatus.inactive(message: "Starting")
     private var cancellables = Set<AnyCancellable>()
-    
+
     init() {
-        // Configure SDK if not already done
-        if ProcessInfo.processInfo.environment["LICENSESEAT_CONFIGURED"] == nil {
-            LicenseSeat.configure(apiKey: Config.apiKey)
-        }
-        
-        // Bind status using static publisher
+        status = LicenseSeat.shared.getStatus()
+
         LicenseSeat.statusPublisher
-            .receive(on: DispatchQueue.main)
-            .assign(to: &$status)
-        
-        // Bind network status
-        LicenseSeat.shared.networkStatusPublisher
-            .receive(on: DispatchQueue.main)
-            .assign(to: &$isOnline)
-        
-        // Track validation state
-        LicenseSeat.shared.eventPublisher(for: "validation:start")
-            .map { _ in true }
-            .receive(on: DispatchQueue.main)
-            .assign(to: &$isValidating)
-        
-        LicenseSeat.shared.eventPublisher
-            .filter { ["validation:success", "validation:failed", "validation:error"].contains($0.name) }
-            .map { _ in false }
-            .receive(on: DispatchQueue.main)
-            .assign(to: &$isValidating)
-        
-        // Track active entitlements
-        LicenseSeat.statusPublisher
-            .compactMap { status -> [String]? in
-                switch status {
-                case .active(let details), .offlineValid(let details):
-                    return details.entitlements.map { $0.key }
-                default:
-                    return nil
-                }
-            }
-            .map { Set($0) }
-            .receive(on: DispatchQueue.main)
-            .assign(to: &$entitlements)
-    }
-    
-    func activate(licenseKey: String) async {
-        do {
-            _ = try await LicenseSeat.activate(licenseKey)
-        } catch {
-            // Error handling
-        }
-    }
-    
-    func hasEntitlement(_ key: String) -> Bool {
-        entitlements.contains(key)
-    }
-}
-```
-
-### SwiftUI Views
-
-```swift
-struct LicenseStatusView: View {
-    @StateObject private var license = LicenseViewModel()
-    
-    var body: some View {
-        VStack(spacing: 20) {
-            // Status indicator
-            HStack {
-                Circle()
-                    .fill(statusColor)
-                    .frame(width: 10, height: 10)
-                
-                Text(statusText)
-                    .font(.headline)
-                
-                if !license.isOnline {
-                    Label("Offline", systemImage: "wifi.slash")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-            }
-            
-            // Validation progress
-            if license.isValidating {
-                ProgressView("Validating license...")
-            }
-            
-            // Feature gates
-            if license.hasEntitlement("premium-features") {
-                PremiumFeaturesView()
-            } else {
-                UpgradePromptView()
-            }
-        }
-        .padding()
-    }
-    
-    private var statusColor: Color {
-        switch license.status {
-        case .active, .offlineValid:
-            return .green
-        case .inactive:
-            return .gray
-        case .invalid, .offlineInvalid:
-            return .red
-        case .pending:
-            return .orange
-        }
-    }
-    
-    private var statusText: String {
-        switch license.status {
-        case .active:
-            return "License Active"
-        case .offlineValid:
-            return "License Valid (Offline)"
-        case .inactive:
-            return "No License"
-        case .invalid:
-            return "Invalid License"
-        case .offlineInvalid:
-            return "Invalid License (Offline)"
-        case .pending:
-            return "Checking License..."
-        }
-    }
-}
-```
-
-### Activation Flow
-
-```swift
-struct ActivationView: View {
-    @State private var licenseKey = ""
-    @State private var isActivating = false
-    @State private var error: Error?
-    @EnvironmentObject var license: LicenseViewModel
-    
-    var body: some View {
-        Form {
-            Section("Enter License Key") {
-                TextField("XXXX-XXXX-XXXX-XXXX", text: $licenseKey)
-                    .textFieldStyle(.roundedBorder)
-                    .disabled(isActivating)
-            }
-            
-            Section {
-                Button("Activate") {
-                    activate()
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(licenseKey.isEmpty || isActivating)
-                
-                if isActivating {
-                    ProgressView()
-                        .frame(maxWidth: .infinity)
-                }
-            }
-            
-            if let error = error {
-                Section {
-                    Label(error.localizedDescription, systemImage: "exclamationmark.triangle")
-                        .foregroundColor(.red)
-                }
-            }
-        }
-        .navigationTitle("Activate License")
-    }
-    
-    private func activate() {
-        isActivating = true
-        error = nil
-        
-        Task {
-            do {
-                try await LicenseSeat.activate(licenseKey)
-                // Navigation handled by parent based on status change
-            } catch {
-                self.error = error
-            }
-            isActivating = false
-        }
-    }
-}
-```
-
-## Advanced Patterns
-
-### Debounced Validation
-
-```swift
-class DebouncedValidator: ObservableObject {
-    @Published var licenseKey = ""
-    @Published var validationResult: LicenseValidationResult?
-    
-    private var cancellables = Set<AnyCancellable>()
-    
-    init() {
-        $licenseKey
-            .debounce(for: .seconds(1), scheduler: DispatchQueue.main)
-            .removeDuplicates()
-            .filter { !$0.isEmpty }
-            .sink { [weak self] key in
-                Task {
-                    self?.validationResult = try? await LicenseSeat.shared.validate(
-                        licenseKey: key,
-                        options: ValidationOptions()
-                    )
-                }
+            .sink { [weak self] status in
+                self?.status = status
             }
             .store(in: &cancellables)
     }
 }
 ```
 
-### Event Aggregation
+Read the current value before subscribing because this publisher represents transitions rather than a `CurrentValueSubject`.
+
+Treat `.active` and `.offlineValid` as licensed:
 
 ```swift
-extension LicenseSeat {
-    /// Publisher that emits true when any validation is in progress
-    static var isValidatingPublisher: AnyPublisher<Bool, Never> {
-        let start = shared.eventPublisher(for: "validation:start").map { _ in true }
-        let end = shared.eventPublisher
-            .filter { ["validation:success", "validation:failed", "validation:error"].contains($0.name) }
-            .map { _ in false }
-        
-        return Publishers.Merge(start, end)
-            .removeDuplicates()
-            .eraseToAnyPublisher()
-    }
-    
-    /// Publisher for validation results
-    static var validationResultPublisher: AnyPublisher<LicenseValidationResult?, Never> {
-        shared.eventPublisher
-            .compactMap { event -> LicenseValidationResult? in
-                switch event.name {
-                case "validation:success", "validation:offline-success":
-                    return event.data as? LicenseValidationResult
-                default:
-                    return nil
-                }
-            }
-            .eraseToAnyPublisher()
+var isLicensed: Bool {
+    switch status {
+    case .active, .offlineValid:
+        return true
+    default:
+        return false
     }
 }
 ```
 
-### Reactive Entitlement Checking
+## Entitlement Publisher
 
 ```swift
-struct FeatureGate<Content: View>: View {
-    let entitlement: String
-    let content: () -> Content
-    let fallback: () -> AnyView
-    
-    @State private var hasAccess = false
-    
+LicenseSeat.shared.entitlementPublisher(for: "export")
+    .map(\.active)
+    .removeDuplicates()
+    .sink { canExport in
+        exportButton.isEnabled = canExport
+    }
+    .store(in: &cancellables)
+```
+
+The store convenience publisher prepends the current entitlement value:
+
+```swift
+LicenseSeatStore.shared.entitlementPublisher(for: "export")
+    .sink { status in
+        canExport = status.active
+    }
+    .store(in: &cancellables)
+```
+
+Entitlement evaluation always checks the parent validation's `valid` flag and the entitlement's own expiry.
+
+## Event Publishers
+
+Use a filtered publisher for one event:
+
+```swift
+LicenseSeat.shared.eventPublisher(for: "validation:error")
+    .sink { event in
+        if let error = event.error {
+            logger.error("Validation failed: \(error.localizedDescription)")
+        }
+    }
+    .store(in: &cancellables)
+```
+
+Use the all-events publisher for diagnostics or analytics:
+
+```swift
+LicenseSeat.shared.eventPublisher
+    .sink { event in
+        analytics.record(event.name)
+    }
+    .store(in: &cancellables)
+```
+
+The all-events publisher does not depend on a hard-coded event-name mirror; future SDK events flow through automatically.
+
+## Connectivity
+
+```swift
+LicenseSeat.shared.networkStatusPublisher
+    .sink { [weak self] isOnline in
+        self?.showsOfflineBanner = !isOnline
+    }
+    .store(in: &cancellables)
+```
+
+Connectivity is presentation state, not authorization state. Continue to gate features from ``LicenseStatus`` and ``EntitlementStatus``.
+
+## SwiftUI Property Wrappers
+
+Configure the canonical store or static SDK before constructing views:
+
+```swift
+@main
+struct MyApp: App {
+    init() {
+        LicenseSeat.configure(
+            apiKey: "pk_live_…",
+            productSlug: "my-product"
+        )
+    }
+
+    var body: some Scene {
+        WindowGroup { ContentView() }
+    }
+}
+```
+
+Static configuration binds ``LicenseSeatStore/shared`` to the same instance, so property wrappers observe static activation calls:
+
+```swift
+struct ContentView: View {
+    @LicenseState private var status
+    @EntitlementState("export") private var canExport
+
     var body: some View {
         Group {
-            if hasAccess {
-                content()
-            } else {
-                fallback()
-            }
-        }
-        .onReceive(LicenseSeat.shared.entitlementPublisher(for: entitlement)) { status in
-            hasAccess = status.active
-        }
-    }
-}
-
-// Usage
-FeatureGate(entitlement: "advanced-analytics") {
-    AnalyticsView()
-} fallback: {
-    AnyView(
-        VStack {
-            Image(systemName: "chart.line.uptrend.xyaxis")
-                .font(.largeTitle)
-            Text("Upgrade to Pro for Analytics")
-            Button("Upgrade") { showUpgrade() }
-        }
-    )
-}
-```
-
-### Offline Mode Indicator
-
-```swift
-struct OfflineModeBanner: View {
-    @State private var isOffline = false
-    @State private var lastSync: Date?
-    
-    var body: some View {
-        if isOffline {
-            HStack {
-                Image(systemName: "wifi.slash")
-                Text("Offline Mode")
-                Spacer()
-                if let lastSync = lastSync {
-                    Text("Last sync: \(lastSync, style: .relative)")
-                        .font(.caption)
-                }
-            }
-            .padding()
-            .background(Color.orange.opacity(0.2))
-            .onReceive(LicenseSeat.shared.networkStatusPublisher) { online in
-                isOffline = !online
-                if online {
-                    lastSync = Date()
-                }
+            switch status {
+            case .active, .offlineValid:
+                MainView(canExport: canExport)
+            case .pending:
+                ProgressView("Checking license…")
+            default:
+                ActivationView()
             }
         }
     }
 }
 ```
 
-## Testing Reactive Code
-
-### Publisher Testing
+## Activation View Model
 
 ```swift
-func testStatusPublisherEmitsChanges() async throws {
-    // Configure test instance
-    LicenseSeat.configure(apiKey: "test_key")
-    
-    let expectation = XCTestExpectation(description: "Status change")
-    var receivedStatuses: [LicenseStatus] = []
-    
+@MainActor
+final class ActivationViewModel: ObservableObject {
+    @Published var licenseKey = ""
+    @Published private(set) var isActivating = false
+    @Published private(set) var errorMessage: String?
+
+    func activate() async {
+        guard !licenseKey.isEmpty else { return }
+
+        isActivating = true
+        defer { isActivating = false }
+
+        do {
+            _ = try await LicenseSeat.activate(licenseKey)
+            errorMessage = nil
+        } catch let error as APIError {
+            errorMessage = error.message
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+}
+```
+
+Do not debounce or pre-validate a license key by repeatedly calling the production API while the user types. Submit an explicit activation action.
+
+## Main-Actor Contract
+
+``LicenseSeat`` and ``LicenseSeatStore`` are main-actor isolated. UI code naturally satisfies this contract. Background work should cross explicitly:
+
+```swift
+let status = await MainActor.run {
+    LicenseSeat.shared.getStatus()
+}
+```
+
+Event handlers and Combine event delivery occur on the main queue. Avoid blocking handlers; start asynchronous work when necessary.
+
+## Testing Reactive State
+
+Use expectations tied to semantic states, not fixed sleeps:
+
+```swift
+func testActivationPublishesActive() async throws {
+    let active = expectation(description: "active status")
     let cancellable = LicenseSeat.statusPublisher
-        .sink { status in
-            receivedStatuses.append(status)
-            if receivedStatuses.count >= 2 {
-                expectation.fulfill()
-            }
+        .first { status in
+            if case .active = status { return true }
+            return false
         }
-    
-    // Activate license
+        .sink { _ in active.fulfill() }
+
     _ = try await LicenseSeat.activate("TEST-KEY")
-    
-    wait(for: [expectation], timeout: 5)
-    
-    XCTAssertTrue(receivedStatuses.contains { status in
-        if case .active = status { return true }
-        return false
-    })
-    
+    await fulfillment(of: [active], timeout: 2)
     cancellable.cancel()
 }
 ```
 
-### Mock Publisher
-
-```swift
-// Create a test configuration
-let testConfig = LicenseSeatConfig(
-    apiKey: "test",
-    apiBaseUrl: "https://test.licenseseat.com",
-    autoValidateInterval: 0  // Disable auto-validation in tests
-)
-
-let testInstance = LicenseSeat(config: testConfig)
-
-// Use CurrentValueSubject for testing
-let mockStatusSubject = CurrentValueSubject<LicenseStatus, Never>(.inactive(message: "Test"))
-
-// In tests, simulate status changes
-mockStatusSubject.send(.active(details: testDetails))
-```
-
-## Best Practices
-
-1. **Always receive on main queue for UI updates**
-2. **Use `removeDuplicates()` to prevent unnecessary updates**
-3. **Store cancellables to prevent premature deallocation**
-4. **Debounce user input to avoid excessive API calls**
-5. **Handle backpressure with operators like `throttle` or `debounce`**
-6. **Test publishers with expectations and timeouts**
-7. **Use `@Published` properties for SwiftUI binding**
-8. **Prefer property wrappers (`@LicenseState`, `@EntitlementState`) for simple cases**
-9. **Configure the SDK once at app launch before using publishers** 
+Inject a URLSession backed by URLProtocol for deterministic network tests and use unique storage prefixes so persisted state cannot leak between tests.

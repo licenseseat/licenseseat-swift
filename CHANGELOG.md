@@ -5,6 +5,75 @@ All notable changes to LicenseSeat will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.2] - 2026-07-13
+
+### Security
+
+- Verify the Ed25519 algorithm, key ID, canonical sibling payload, schema, license key, product slug, device fingerprint, `iat`, `nbf`, token expiry, underlying license expiry, maximum offline age, and clock rollback on every offline path
+- Store activations, validation state, offline tokens, public keys, and rollback timestamps in Keychain on Apple platforms; migrate legacy plaintext only after a successful protected write
+- Generate new default installation fingerprints as random app-scoped identifiers protected by Keychain instead of deriving them from hardware or mutable system characteristics; migrate existing identifiers without consuming a new seat
+- Preserve the separately owned installation fingerprint when resetting license cache state, including on Linux and during Apple plaintext-to-Keychain migration
+- Require HTTPS for non-loopback API endpoints and scope authoritative cache invalidation to the affected license
+- Reject mismatched activation, validation, signing-key, and offline-token identities before they can replace trusted state
+- Accept only canonical padded Base64 from the Rails API or canonical unpadded Base64URL when decoding Ed25519 material
+- Encode every dynamic API identifier as one opaque URL path segment so license keys and signing-key IDs cannot alter route structure
+- Move license keys and fingerprints out of URL paths and into authenticated JSON request bodies for activation, validation, heartbeat, deactivation, and offline-token issuance
+- Reject cross-origin redirects and require the final response URL to match the intended URL; disable cookies and URL caching in SDK-owned sessions
+- Enforce 1 MiB request and 2 MiB response limits, bounded route/configuration values, protected-header invariants, and finite retry/scheduling limits
+- Validate untrusted JSON with duplicate decoded-key detection and depth, node, collection, string, number, and document bounds before decoding; independently bound canonical JSON generation
+- Treat `maxOfflineDays == 0`, negative values, and values above 36,600 as an explicit fail-closed offline policy shared by startup, fallback, refresh, and manual verification
+- Namespace cache identifiers through SHA-256 instead of interpolating caller-controlled storage prefixes into Keychain accounts, UserDefaults keys, or legacy filesystem paths
+- Bound cached artifacts and Ed25519 key material before persistence or verification, and reject symlinked or oversized legacy cache files during migration
+
+### Fixed
+
+- Decode integer Rails identifiers and the canonical `fingerprint` field returned by the production API
+- Make successful activation immediately active and deny entitlements whenever top-level validation is invalid
+- Remove stale offline grants after an authoritative invalid response and apply terminal invalidation consistently to validation, heartbeat, and token refresh
+- Prevent background offline verification from racing and overwriting a newer online decision
+- Cancel initialization, validation, heartbeat, connectivity, and offline-sync work when resetting or force-reconfiguring, and prevent late work for one license from purging its replacement
+- Correlate cache mutations with the exact license, fingerprint, and activation ID so late same-key responses cannot overwrite replacement activations or consume their offline grants
+- Clear stale offline decisions and grants when an authoritative activation succeeds, and deny cached entitlements whenever the latest offline decision is invalid
+- Preserve automatic recovery after an outage with no valid offline grant
+- Decode real heartbeat responses and emit success only after decoding succeeds
+- Make retry and timer configuration fail safely for negative or non-finite values
+- Retry HTTP 500 (but not 501), and never retry or report caller cancellation as a connectivity outage
+- Keep the protected clock watermark monotonic so a rolled-back system clock cannot move the offline-security baseline backwards
+- Treat only activation/license-specific 404 codes as idempotent deactivation success
+- Preserve explicit `expires_at: null` claims while reconstructing Ruby-signed canonical entitlement payloads
+- Surface an unexpectedly empty typed HTTP success as a decoding error instead of trapping in a generic force cast
+- Advance the protected rollback watermark after successful heartbeats, including deployments that disable periodic validation
+- Honor disabled automatic validation for both launch-time and periodic online requests, while retaining local signed-cache verification and independently configured heartbeat/offline refresh
+- Recover malformed or isolated valid-length signing-key cache corruption by fetching and verifying the authoritative key exactly once before replacing it
+- Preserve the 0.4.1 `LicenseSeatStore.configure` signature as a compatibility overload while adding the explicit-product form, avoiding a source break in this patch release
+- Keep invalid base-URL/path configuration errors from masquerading as connectivity loss while consistently treating HTTP 408 as a transport-offline signal
+- Adopt a cached activation's existing fingerprint into protected installation-identity storage when the host removes a legacy custom identifier, preventing a later deactivation/reactivation from consuming a new seat
+- Reject structurally valid but ambiguous signed payloads with duplicate or escape-equivalent keys before either the sibling token or canonical payload can become authoritative
+- Filter individually expired signed entitlements from an otherwise valid offline grant
+- Keep license and fingerprint credentials out of errors and support diagnostics, including the previously exposed license-key prefix and fingerprint digest
+
+### Changed
+
+- Consolidate the static API and `LicenseSeatStore.shared` onto one canonical SDK instance
+- Replace the Combine all-events allowlist with a true all-event subscription
+- Serialize event delivery so lifecycle notifications retain emission order on every supported platform
+- Add `productSlug` configuration and `heartbeat()` convenience APIs to `LicenseSeatStore`
+- Protect diagnostic device identifiers with a stable truncated SHA-256 digest
+- Add a deterministic Ruby-generated Ed25519 contract fixture proving standard-Base64 and canonical-JSON interoperability
+- Split activation, validation, state, networking, offline-token, and compatibility-decoding responsibilities into focused source files
+- Add a digest-pinned Swift 6.2.4 Linux strict-concurrency build and isolated all-test runner alongside the Apple test matrix
+- Give CI read-only default permissions and pin current official GitHub Actions releases to immutable commit SHAs
+- Enforce an 85% first-party line-coverage floor in the current-Xcode lane, alongside strict parallel and Thread Sanitizer evidence
+- Set the declared minimum to Swift 5.10, matching the `nonisolated(unsafe)` lifecycle storage used for Swift 6-safe timer cleanup and the Xcode 15.4 minimum CI lane
+- Upgrade the Linux Ed25519 fallback from Swift Crypto 2.6.0 to the maintained Swift-5.10-compatible 3.15.x line, and use the current `swiftlang/swift-docc-plugin` 1.5.x package endpoint
+- Make the live StressTest consume the checked-out SDK, compile under strict concurrency, distinguish intentional latest-request-wins supersession from transport failures, and exit nonzero on missing credentials or failed scenarios
+- Repair the interactive example against the current product-scoped API, use the production v1 URL and publishable-key guidance, avoid logging identifiers, keep the main actor responsive while awaiting stdin, and compile both integration harnesses in CI
+- Bundle an Apple privacy manifest for collected licensing/telemetry data and app-local UserDefaults access, and correct the integration disclosures for linked identifiers, source-IP geolocation, optional telemetry, and developer metadata
+- Refresh README and DocC documentation against the actual 0.4.2 API and security behavior
+- Correct the initial changelog entry to the release tag that actually exists (`v0.1.0`)
+
+[0.4.2]: https://github.com/licenseseat/licenseseat-swift/compare/v0.4.1...v0.4.2
+
 ## [0.4.1] - 2026-02-09
 
 ### Fixed
@@ -18,14 +87,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.4.0] - 2026-02-09
 
 ### Added
-- Auto-collected device telemetry sent with every API request (17 fields: sdk_name, sdk_version, os_name, os_version, platform, device_model, device_type, architecture, cpu_cores, memory_gb, locale, language, timezone, app_version, app_build, screen_resolution, display_scale)
+- Auto-collected device telemetry sent with supported licensing POST requests (17 fields: sdk_name, sdk_version, os_name, os_version, platform, device_model, device_type, architecture, cpu_cores, memory_gb, locale, language, timezone, app_version, app_build, screen_resolution, display_scale)
 - Heartbeat endpoint (`heartbeat()`) for periodic health-check pings
 - Auto-heartbeat timer that runs alongside auto-validation (default: every 5 minutes)
 - `heartbeatInterval` configuration option (default 300 seconds, set to 0 to disable)
 - `telemetryEnabled` configuration option to opt out of telemetry (default `true`)
 - `heartbeat:success` event emitted on successful heartbeat pings
 
-## [1.0.0] - 2025-06-20
+## [0.1.0] - 2025-06-30
 
 ### Added
 - Complete Swift SDK with 100% feature parity with JavaScript SDK
@@ -45,11 +114,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - SwiftLint integration for code quality
 
 ### Platform Support
-- macOS 11+
-- iOS 14+
-- tvOS 14+
-- watchOS 7+ (limited features)
-- Linux (core features only)
+- macOS 12+
+- iOS 13+
+- tvOS 13+
+- watchOS 8+ (limited features)
+- Linux core code was present, but the release did not have a passing Linux CI lane
 
 ### Security
 - Ed25519 signature verification for offline licenses
@@ -58,4 +127,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Secure storage with platform-appropriate mechanisms
 
 [0.4.0]: https://github.com/licenseseat/licenseseat-swift/releases/tag/v0.4.0
-[1.0.0]: https://github.com/licenseseat/licenseseat-swift/releases/tag/v1.0.0
+[0.1.0]: https://github.com/licenseseat/licenseseat-swift/releases/tag/v0.1.0

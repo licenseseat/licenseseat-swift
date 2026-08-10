@@ -1,326 +1,97 @@
 # Network Resilience
 
-Build robust applications that handle network failures gracefully.
+Understand retries, connectivity transitions, offline fallback, and authoritative invalidation.
 
-## Overview
+## Retry Policy
 
-LicenseSeat is designed to work reliably in challenging network conditions. With automatic retry logic, exponential backoff, offline fallback, and intelligent connection monitoring, your application remains functional even when connectivity is intermittent or unavailable.
-
-## Retry Logic
-
-### Automatic Retries
-
-The SDK automatically retries failed requests with exponential backoff:
+The SDK uses URLSession and exponential backoff. `maxRetries` is the number of retries after the initial request.
 
 ```swift
 let config = LicenseSeatConfig(
-    maxRetries: 3,        // Number of retry attempts
-    retryDelay: 1.0       // Base delay in seconds
+    apiKey: "pk_live_…",
+    productSlug: "my-product",
+    maxRetries: 3,
+    retryDelay: 1
 )
-
-// Retry delays: 1s, 2s, 4s (exponential backoff)
 ```
 
-### Retry Conditions
+With these values, retry delays are approximately 1, 2, and 4 seconds. Negative retry counts are treated as zero. Negative or non-finite base delays do not trap the process.
 
-The SDK retries on:
-- Network timeouts (URLError)
-- Server errors (502, 503, 504)
-- Rate limiting (429)
-- Connection failures
+Requests are retried for:
 
-The SDK does NOT retry on:
-- Client errors (4xx)
-- Server errors (500, 501)
-- Authentication failures
+- URLSession transport errors;
+- HTTP 408 and 429;
+- HTTP 500 and 502 through 599.
 
-## Connection Monitoring
+The SDK does not retry ordinary 4xx business decisions or HTTP 501. Caller cancellation is neither retried nor reported as an offline transition. A decoded success payload that violates the expected identity contract also fails immediately.
 
-### Network Status Events
+## Offline Fallback
+
+The default mode is `.networkOnly`:
 
 ```swift
-// Monitor connectivity changes
-licenseSeat.on("network:online") { _ in
-    updateUIForOnline()
+var config = LicenseSeatConfig.default
+config.offlineFallbackMode = .networkOnly
+```
+
+This mode attempts the cached signed token for transport errors, status 0, HTTP 408, and 5xx responses. It does not use offline data to hide a 4xx response.
+
+`.always` also attempts local verification for non-terminal failures. Terminal license decisions are processed before fallback in both modes, so revoked, suspended, expired, inactive, missing, or deactivated licenses cannot be resurrected from cache.
+
+An offline token must still pass its signature, canonical-payload, identity, fingerprint, time, license-expiry, grace, and rollback checks. A network outage is not sufficient to grant access.
+
+## Connectivity Lifecycle
+
+Apple platforms use `NWPathMonitor`. Other supported environments use periodic `/health` checks controlled by `networkRecheckInterval`.
+
+When connectivity is lost, automatic validation, heartbeat, and offline refresh stop. The active license key is retained. When connectivity returns, the SDK restarts those schedules and synchronizes offline assets.
+
+```swift
+let subscription = LicenseSeat.shared.on("network:offline") { _ in
+    showOfflineBanner()
 }
 
-licenseSeat.on("network:offline") { _ in
-    updateUIForOffline()
+let recovery = LicenseSeat.shared.on("network:online") { _ in
+    hideOfflineBanner()
 }
+```
 
-// Using Combine
-licenseSeat.networkStatusPublisher
+With Combine:
+
+```swift
+LicenseSeat.shared.networkStatusPublisher
+    .removeDuplicates()
     .sink { isOnline in
-        connectionIndicator.isHidden = isOnline
+        networkBannerVisible = !isOnline
     }
     .store(in: &cancellables)
 ```
 
-### Platform-Specific Monitoring
+## Invalid Offline Fallback
 
-- **macOS/iOS**: Uses `NWPathMonitor` for instant detection
-- **Linux**: Falls back to periodic heartbeat checks
+If the network is unavailable and no valid signed grant exists, validation fails closed. The SDK emits `validation:offline-failed`, but it retains the automatic-validation identity so a future server recovery or network reconnection can validate again. A transient outage therefore does not permanently disable recovery.
 
-## Handling Network Failures
+## Cache Invalidation Policy
 
-### Graceful Degradation
+The SDK clears cached grants for HTTP 410 or terminal codes such as:
 
-```swift
-do {
-    let result = try await licenseSeat.validate(licenseKey: "KEY")
-    // Online validation succeeded
-} catch let error as APIError where error.status == 0 {
-    // Network failure - SDK will attempt offline validation
-    print("Network unavailable, using cached license")
-} catch {
-    // Other errors
-    handleError(error)
-}
-```
+- `license_not_found`;
+- `revoked`, `suspended`, or `expired`;
+- `not_active`;
+- `device_not_activated` or `activation_not_found`;
+- their `license_…` compatibility forms.
 
-### Offline Queue Pattern
+Invalidation is scoped to the exact cached license key, fingerprint, and activation ID that initiated the request. An unrelated key—or a late response for a replaced activation—cannot erase current state.
 
-```swift
-class ResilientLicenseManager {
-    private var pendingValidations: [String] = []
-    private let sdk = LicenseSeat.shared
-    
-    func validateWhenPossible(licenseKey: String) {
-        sdk.on("network:online") { [weak self] _ in
-            self?.processPendingValidations()
-        }
-        
-        if sdk.isOnline {
-            Task { try? await sdk.validate(licenseKey: licenseKey) }
-        } else {
-            pendingValidations.append(licenseKey)
-        }
-    }
-    
-    private func processPendingValidations() {
-        let pending = pendingValidations
-        pendingValidations.removeAll()
-        
-        for key in pending {
-            Task { try? await sdk.validate(licenseKey: key) }
-        }
-    }
-}
-```
+HTTP 401, 403, 408, 429, malformed-request errors, and non-terminal 404/422 responses do not automatically purge a signed grant.
 
-## Configuration Options
+## Application Guidance
 
-### Network Timeouts
+- Keep `.networkOnly` unless a documented product requirement justifies `.always`.
+- Do not add an application-level bypass after signature or claim verification fails.
+- Treat `.active` and `.offlineValid` as the licensed states.
+- Surface connectivity separately from license validity.
+- Keep retry counts and timer intervals bounded for the product's UX.
+- Test outage, 5xx, 403 scope failure, revoked, expired-token, and reconnection paths.
 
-```swift
-// The SDK uses these timeouts internally:
-// - Request timeout: 30 seconds
-// - Resource timeout: 60 seconds
-
-// For offline retry when disconnected:
-let config = LicenseSeatConfig(
-    networkRecheckInterval: 30  // Check every 30 seconds
-)
-```
-
-### Custom Retry Strategy
-
-```swift
-// Implement custom retry logic
-class CustomRetryHandler {
-    private let sdk = LicenseSeat.shared
-    private var retryCount = 0
-    
-    func validateWithCustomRetry(licenseKey: String) async throws -> LicenseValidationResult {
-        while retryCount < 5 {
-            do {
-                let result = try await sdk.validate(licenseKey: licenseKey)
-                retryCount = 0
-                return result
-            } catch {
-                retryCount += 1
-                let delay = Double(retryCount) * 2.0
-                try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
-                
-                if retryCount >= 5 {
-                    throw error
-                }
-            }
-        }
-        throw LicenseSeatError.networkError
-    }
-}
-```
-
-## Best Practices
-
-### 1. Always Enable Offline Fallback
-
-```swift
-let config = LicenseSeatConfig(
-    strictOfflineFallback: true  // Default is strict, but be explicit
-)
-```
-
-### 2. Handle Transient Failures
-
-```swift
-licenseSeat.on("validation:auto-failed") { data in
-    // Don't immediately show error - might be transient
-    // The SDK will retry automatically
-}
-```
-
-### 3. Provide Network Feedback
-
-```swift
-class NetworkStatusView: UIView {
-    override init(frame: CGRect) {
-        super.init(frame: frame)
-        
-        LicenseSeat.shared.networkStatusPublisher
-            .removeDuplicates()
-            .sink { [weak self] isOnline in
-                self?.updateAppearance(online: isOnline)
-            }
-            .store(in: &cancellables)
-    }
-    
-    private func updateAppearance(online: Bool) {
-        backgroundColor = online ? .systemGreen : .systemOrange
-        label.text = online ? "Online" : "Offline Mode"
-    }
-}
-```
-
-### 4. Batch Operations
-
-```swift
-// Batch multiple operations to reduce network overhead
-extension LicenseSeat {
-    func validateMultiple(keys: [String]) async -> [String: LicenseValidationResult] {
-        await withTaskGroup(of: (String, LicenseValidationResult?).self) { group in
-            for key in keys {
-                group.addTask {
-                    let result = try? await self.validate(licenseKey: key)
-                    return (key, result)
-                }
-            }
-            
-            var results: [String: LicenseValidationResult] = [:]
-            for await (key, result) in group {
-                if let result = result {
-                    results[key] = result
-                }
-            }
-            return results
-        }
-    }
-}
-```
-
-## Error Handling
-
-### Network-Specific Errors
-
-```swift
-func handleLicenseError(_ error: Error) {
-    switch error {
-    case let apiError as APIError:
-        switch apiError.status {
-        case 0:
-            showOfflineMessage()
-        case 429:
-            showRateLimitMessage()
-        case 502...504:
-            showServerMaintenanceMessage()
-        default:
-            showGenericError(apiError.message)
-        }
-    case is URLError:
-        showNetworkError()
-    default:
-        showGenericError(error.localizedDescription)
-    }
-}
-```
-
-### Retry Exhaustion
-
-```swift
-licenseSeat.on("validation:error") { data in
-    if let error = data["error"] as? APIError,
-       error.message.contains("after") && error.message.contains("retries") {
-        // All retries exhausted
-        showPersistentNetworkError()
-    }
-}
-```
-
-## Performance Optimization
-
-### Connection Pooling
-
-The SDK reuses HTTP connections automatically through URLSession.
-
-### Request Deduplication
-
-```swift
-// Prevent duplicate requests
-class ValidationCoordinator {
-    private var inFlightValidations: [String: Task<LicenseValidationResult, Error>] = [:]
-    
-    func validate(licenseKey: String) async throws -> LicenseValidationResult {
-        if let existing = inFlightValidations[licenseKey] {
-            return try await existing.value
-        }
-        
-        let task = Task {
-            try await LicenseSeat.shared.validate(licenseKey: licenseKey)
-        }
-        
-        inFlightValidations[licenseKey] = task
-        defer { inFlightValidations[licenseKey] = nil }
-        
-        return try await task.value
-    }
-}
-```
-
-## Testing Network Scenarios
-
-### Simulating Network Conditions
-
-```swift
-#if DEBUG
-// Use Network Link Conditioner on macOS/iOS
-// Or inject custom URLSession for testing:
-
-let config = URLSessionConfiguration.ephemeral
-config.protocolClasses = [MockURLProtocol.self]
-let session = URLSession(configuration: config)
-
-let sdk = LicenseSeat(
-    config: .default,
-    urlSession: session
-)
-#endif
-```
-
-### Testing Offline Mode
-
-```swift
-func testOfflineFallback() async throws {
-    // 1. Activate license online
-    let license = try await sdk.activate(licenseKey: "TEST")
-    
-    // 2. Simulate network failure
-    MockURLProtocol.requestHandler = { _ in
-        throw URLError(.notConnectedToInternet)
-    }
-    
-    // 3. Validation should still work via offline
-    let result = try await sdk.validate(licenseKey: "TEST")
-    XCTAssertTrue(result.offline)
-    XCTAssertTrue(result.valid)
-} 
+See <doc:OfflineValidation> for the cryptographic decision flow.

@@ -1,282 +1,221 @@
+import Combine
+import Darwin
 import Foundation
 import LicenseSeat
-#if canImport(Combine)
-import Combine
-#endif
 
-// Example app demonstrating LicenseSeat usage
+/// Interactive macOS client that exercises the public 0.4.2 SDK surface.
+///
+/// Required environment variables:
+/// - `LICENSESEAT_API_KEY` (a publishable `pk_...` key)
+/// - `LICENSESEAT_PRODUCT_SLUG`
+///
+/// `LICENSESEAT_API_URL` is optional and defaults to the production v1 API.
 @main
+@MainActor
 struct LicenseSeatExample {
+    private static var cancellables = Set<AnyCancellable>()
+
     static func main() async {
-        print("🚀 LicenseSeat Example")
-        print("=======================\n")
-        
-        // Configure SDK
-        var config = LicenseSeatConfig(
-            apiBaseUrl: ProcessInfo.processInfo.environment["LICENSESEAT_API_URL"] ?? "https://api.licenseseat.com",
-            apiKey: ProcessInfo.processInfo.environment["LICENSESEAT_API_KEY"],
-            autoValidateInterval: 60, // 1-minute auto-validation while online
-            networkRecheckInterval: 2, // 2-second heartbeat while offline
-            debug: true
+        let environment = ProcessInfo.processInfo.environment
+        guard let apiKey = environment["LICENSESEAT_API_KEY"], !apiKey.isEmpty,
+              let productSlug = environment["LICENSESEAT_PRODUCT_SLUG"], !productSlug.isEmpty
+        else {
+            print("Set LICENSESEAT_API_KEY and LICENSESEAT_PRODUCT_SLUG before running the example.")
+            exit(EXIT_FAILURE)
+        }
+
+        let config = LicenseSeatConfig(
+            apiBaseUrl: environment["LICENSESEAT_API_URL"]
+                ?? LicenseSeatConfig.productionAPIBaseURL,
+            apiKey: apiKey,
+            productSlug: productSlug,
+            autoValidateInterval: 60,
+            heartbeatInterval: 300,
+            networkRecheckInterval: 2,
+            offlineFallbackMode: .networkOnly
         )
-        
-        // Enable strict offline fallback (network/error only)
-        config.strictOfflineFallback = true
-        
         let sdk = LicenseSeat(config: config)
-        
-        // Set up event monitoring
-        var cancellables = Set<AnyCancellable>()
-        
-        // Monitor all events
-        sdk.eventPublisher
-            .sink { event in
-                print("📡 Event: \(event.name)")
-                if let dict = event.dictionary {
-                    print("   Data: \(dict)")
-                }
-            }
-            .store(in: &cancellables)
-        
-        // Monitor license status
+
         sdk.statusPublisher
             .sink { status in
-                print("\n📋 License Status Changed:")
-                switch status {
-                case .active(let details):
-                    print("   ✅ Active - License: \(details.license)")
-                    print("   📅 Activated: \(details.activatedAt)")
-                    print("   🎯 Entitlements: \(details.entitlements.count)")
-                case .inactive(let message):
-                    print("   ❌ Inactive - \(message)")
-                case .invalid(let message):
-                    print("   ⚠️ Invalid - \(message)")
-                case .pending(let message):
-                    print("   ⏳ Pending - \(message)")
-                case .offlineValid(let details):
-                    print("   ✅ Valid (Offline) - License: \(details.license)")
-                case .offlineInvalid(let message):
-                    print("   ❌ Invalid (Offline) - \(message)")
-                }
+                print("\nLicense status changed:")
+                printStatus(status)
             }
             .store(in: &cancellables)
-        
-        // Monitor auto-validation events specifically
-        sdk.on("autovalidation:cycle") { data in
-            print("\n⏰ AUTO-VALIDATION CYCLE:", data)
-            print("Enter choice: ", terminator: "")
-            fflush(stdout)
-        }.store(in: &cancellables)
-        
-        sdk.on("validation:success") { data in
-            print("\n✅ AUTO-VALIDATION SUCCESS")
-            print("Enter choice: ", terminator: "")
-            fflush(stdout)
-        }.store(in: &cancellables)
-        
-        sdk.on("validation:auto-failed") { data in
-            print("\n❌ AUTO-VALIDATION FAILED:", data)
-            print("Enter choice: ", terminator: "")
-            fflush(stdout)
-        }.store(in: &cancellables)
-        
-        // Give SDK a moment to initialize and check for cached license
-        try? await Task.sleep(nanoseconds: 100_000_000) // 0.1 seconds
-        
-        // Check current status
-        let currentStatus = sdk.getStatus()
-        print("📊 Initial SDK Status: \(currentStatus)")
-        
-        if let license = sdk.currentLicense() {
-            print("📄 Found cached license: \(license.licenseKey)")
-            print("   Device: \(license.deviceIdentifier)")
-            print("   Activated: \(license.activatedAt)")
-        } else {
-            print("❌ No cached license found - activate one to start auto-validation")
+
+        for event in [
+            "activation:success",
+            "activation:error",
+            "validation:success",
+            "validation:failed",
+            "validation:offline-success",
+            "validation:offline-failed",
+            "heartbeat:success",
+            "heartbeat:error",
+            "deactivation:success",
+            "license:revoked",
+        ] {
+            sdk.on(event) { _ in
+                // Event payloads can contain license or device identifiers.
+                // Demonstrate safe logging by printing only the event name.
+                print("\nSDK event: \(event)")
+            }.store(in: &cancellables)
         }
-        
-        // Run interactive menu directly (blocking). This keeps the process
-        // alive until the user chooses to exit.
+
+        // Initialization verifies protected cached state asynchronously.
+        try? await Task.sleep(nanoseconds: 100_000_000)
+        print("LicenseSeat SDK \(LicenseSeatConfig.sdkVersion)")
+        print("Product: \(productSlug)")
+        printStatus(sdk.getStatus())
+
         await interactiveMenu(sdk: sdk)
     }
-    
-    // MARK: - Interactive Menu (runs on main actor)
 
     private static func interactiveMenu(sdk: LicenseSeat) async {
-        func menu() {
-            print("\n📋 LicenseSeat Example Menu")
-            print("1. Activate License")
-            print("2. Validate License")
-            print("3. Check Entitlement")
-            print("4. Show Status")
-            print("5. Deactivate License")
-            print("6. Test Auth")
-            print("7. Reset SDK")
-            print("8. Exit")
-            print("\nEnter choice: ", terminator: "")
-            fflush(stdout)
-        }
         while true {
-            menu()
-            guard let choice = readLine() else { continue }
+            print("""
+
+            LicenseSeat Example
+            1. Activate license
+            2. Validate active license
+            3. Send heartbeat
+            4. Check entitlement
+            5. Show status
+            6. Deactivate license
+            7. Check API health
+            8. Reset local license state
+            9. Exit
+            """)
+
+            guard let choice = await readInput("Choice: ") else { return }
             switch choice {
             case "1":
                 await activateLicense(sdk: sdk)
             case "2":
                 await validateLicense(sdk: sdk)
             case "3":
-                await checkEntitlement(sdk: sdk)
+                await sendHeartbeat(sdk: sdk)
             case "4":
-                await showStatus(sdk: sdk)
+                await checkEntitlement(sdk: sdk)
             case "5":
-                await deactivateLicense(sdk: sdk)
+                printStatus(sdk.getStatus())
             case "6":
-                await testAuth(sdk: sdk)
+                await deactivateLicense(sdk: sdk)
             case "7":
-                await MainActor.run { sdk.reset() }
-                print("✅ SDK reset complete")
+                await checkHealth(sdk: sdk)
             case "8":
-                print("👋 Goodbye!")
+                sdk.reset()
+                print("Local grant state cleared; the installation identifier was retained.")
+            case "9":
                 return
             default:
-                print("❌ Invalid choice")
+                print("Invalid choice")
             }
         }
     }
-    
-    static func activateLicense(sdk: LicenseSeat) async {
-        print("\nEnter license key: ", terminator: "")
-        guard let key = readLine(), !key.isEmpty else {
-            print("❌ Invalid license key")
+
+    private static func activateLicense(sdk: LicenseSeat) async {
+        guard let key = await readInput("License key: "), !key.isEmpty else {
+            print("A license key is required.")
             return
         }
-        
+
         do {
             let license = try await sdk.activate(
                 licenseKey: key,
                 options: ActivationOptions(
-                    metadata: [
-                        "app": "LicenseSeatExample",
-                        "version": "1.0.0"
-                    ]
+                    metadata: ["integration": "LicenseSeatExample"]
                 )
             )
-            
-            print("\n✅ License Activated!")
-            print("   License: \(license.licenseKey)")
-            print("   Device: \(license.deviceIdentifier)")
-            print("   Activated: \(license.activatedAt)")
-            
+            print("Activated \(redactedKey(license.licenseKey)) at \(license.activatedAt).")
         } catch {
-            print("❌ Activation failed: \(error)")
+            print("Activation failed: \(error.localizedDescription)")
         }
     }
-    
-    static func validateLicense(sdk: LicenseSeat) async {
-        guard let license = await sdk.currentLicense() else {
-            print("❌ No active license to validate")
+
+    private static func validateLicense(sdk: LicenseSeat) async {
+        guard let license = sdk.currentLicense() else {
+            print("No active license to validate.")
             return
         }
-        
+
         do {
             let result = try await sdk.validate(licenseKey: license.licenseKey)
-            
-            print("\n✅ Validation Result:")
-            print("   Valid: \(result.valid)")
-            print("   Offline: \(result.offline)")
-            if let reason = result.reason {
-                print("   Reason: \(reason)")
-            }
-            if let entitlements = result.activeEntitlements {
-                print("   Active Entitlements: \(entitlements.count)")
-                for ent in entitlements {
-                    print("     - \(ent.key): \(ent.name ?? "Unnamed")")
-                }
-            }
-            
+            print("Valid: \(result.valid)")
+            if let code = result.code { print("Code: \(code)") }
+            if let message = result.message { print("Message: \(message)") }
+            let keys = result.license.activeEntitlements.map(\.key).joined(separator: ", ")
+            print("Active entitlements: \(keys.isEmpty ? "none" : keys)")
         } catch {
-            print("❌ Validation failed: \(error)")
+            print("Validation failed: \(error.localizedDescription)")
         }
     }
-    
-    static func checkEntitlement(sdk: LicenseSeat) async {
-        print("\nEnter entitlement key: ", terminator: "")
-        guard let key = readLine(), !key.isEmpty else {
-            print("❌ Invalid entitlement key")
+
+    private static func sendHeartbeat(sdk: LicenseSeat) async {
+        do {
+            try await sdk.heartbeat()
+            print("Heartbeat accepted.")
+        } catch {
+            print("Heartbeat failed: \(error.localizedDescription)")
+        }
+    }
+
+    private static func checkEntitlement(sdk: LicenseSeat) async {
+        guard let key = await readInput("Entitlement key: "), !key.isEmpty else {
+            print("An entitlement key is required.")
             return
         }
-        
-        let status = await sdk.checkEntitlement(key)
-        
-        print("\n🎯 Entitlement '\(key)':")
-        print("   Active: \(status.active)")
-        if let reason = status.reason {
-            print("   Reason: \(reason)")
-        }
-        if let expires = status.expiresAt {
-            print("   Expires: \(expires)")
-        }
-        if let entitlement = status.entitlement {
-            print("   Name: \(entitlement.name ?? "Unnamed")")
-            print("   Description: \(entitlement.description ?? "No description")")
-        }
+
+        let status = sdk.checkEntitlement(key)
+        print("Active: \(status.active)")
+        if let reason = status.reason { print("Reason: \(reason)") }
+        if let expiresAt = status.expiresAt { print("Expires: \(expiresAt)") }
     }
-    
-    static func showStatus(sdk: LicenseSeat) async {
-        let status = await sdk.getStatus()
-        
-        print("\n📊 Current Status:")
-        switch status {
-        case .active(let details):
-            print("   ✅ Active")
-            print("   License: \(details.license)")
-            print("   Device: \(details.device)")
-            print("   Activated: \(details.activatedAt)")
-            print("   Last Validated: \(details.lastValidated)")
-            print("   Entitlements: \(details.entitlements.count)")
-            
-        case .inactive(let message):
-            print("   ❌ Inactive: \(message)")
-            
-        case .invalid(let message):
-            print("   ⚠️ Invalid: \(message)")
-            
-        case .pending(let message):
-            print("   ⏳ Pending: \(message)")
-            
-        case .offlineValid(let details):
-            print("   ✅ Valid (Offline)")
-            print("   License: \(details.license)")
-            
-        case .offlineInvalid(let message):
-            print("   ❌ Invalid (Offline): \(message)")
-        }
-    }
-    
-    static func deactivateLicense(sdk: LicenseSeat) async {
-        guard await sdk.currentLicense() != nil else {
-            print("❌ No active license to deactivate")
-            return
-        }
-        
+
+    private static func deactivateLicense(sdk: LicenseSeat) async {
         do {
             try await sdk.deactivate()
-            print("✅ License deactivated successfully")
+            print("License deactivated and local grant state cleared.")
         } catch {
-            print("❌ Deactivation failed: \(error)")
+            print("Deactivation failed: \(error.localizedDescription)")
         }
     }
-    
-    static func testAuth(sdk: LicenseSeat) async {
+
+    private static func checkHealth(sdk: LicenseSeat) async {
         do {
-            let result = try await sdk.testAuth()
-            print("\n✅ Auth Test:")
-            print("   Success: \(result.success)")
-            if let message = result.message {
-                print("   Message: \(message)")
-            }
+            let health = try await sdk.healthCheck()
+            print("API status: \(health.status), version: \(health.apiVersion)")
         } catch {
-            print("❌ Auth test failed: \(error)")
+            print("Health check failed: \(error.localizedDescription)")
         }
     }
-} 
+
+    private static func printStatus(_ status: LicenseStatus) {
+        switch status {
+        case let .active(details):
+            print("Active: \(redactedKey(details.license)); \(details.entitlements.count) entitlements")
+        case let .offlineValid(details):
+            print("Offline-valid: \(redactedKey(details.license))")
+        case let .inactive(message):
+            print("Inactive: \(message)")
+        case let .invalid(message):
+            print("Invalid: \(message)")
+        case let .pending(message):
+            print("Pending: \(message)")
+        case let .offlineInvalid(message):
+            print("Offline-invalid: \(message)")
+        }
+    }
+
+    private static func redactedKey(_ key: String) -> String {
+        String(key.prefix(8)) + "..."
+    }
+
+    /// Read stdin on a detached task so main-actor timers and URLSession
+    /// callbacks continue to run while the CLI waits at a prompt.
+    private static func readInput(_ prompt: String) async -> String? {
+        print(prompt, terminator: "")
+        fflush(stdout)
+        return await Task.detached { readLine() }.value
+    }
+}

@@ -4,7 +4,7 @@ import Combine
 #endif
 @testable import LicenseSeat
 
-final class EventBusTests: XCTestCase {
+final class EventBusTests: LicenseSeatTestCase {
 
     var eventBus: EventBus!
     var cancellables: [AnyCancellable] = []
@@ -41,6 +41,38 @@ final class EventBusTests: XCTestCase {
 
         XCTAssertEqual(eventBus.subscriptionCount(for: "event1"), 1)
         XCTAssertEqual(eventBus.subscriptionCount(for: "event2"), 2)
+    }
+
+    func testAnyEventSubscriptionReceivesUnknownFutureEventName() {
+        let received = expectation(description: "all-event handler")
+        let cancellable = eventBus.onAny { name, payload in
+            XCTAssertEqual(name, "future:event-added-after-release")
+            XCTAssertEqual(payload as? Int, 42)
+            received.fulfill()
+        }
+
+        eventBus.emit("future:event-added-after-release", 42)
+
+        wait(for: [received], timeout: 1)
+        cancellable.cancel()
+    }
+
+    func testEmissionsAreDeliveredInOrder() {
+        let received = expectation(description: "ordered delivery")
+        received.expectedFulfillmentCount = 3
+        var values: [Int] = []
+        let cancellable = eventBus.on("ordered") { payload in
+            values.append(payload as! Int)
+            received.fulfill()
+        }
+
+        eventBus.emit("ordered", 1)
+        eventBus.emit("ordered", 2)
+        eventBus.emit("ordered", 3)
+
+        wait(for: [received], timeout: 1)
+        XCTAssertEqual(values, [1, 2, 3])
+        cancellable.cancel()
     }
 
     // MARK: - Cancellation Tests
@@ -134,6 +166,7 @@ final class EventBusTests: XCTestCase {
         var cancellable: AnyCancellable? = eventBus.on("dealloc:test") { _ in }
 
         XCTAssertEqual(eventBus.subscriptionCount(for: "dealloc:test"), 1)
+        XCTAssertNotNil(cancellable)
 
         // Deallocate the cancellable
         cancellable = nil
@@ -146,3 +179,101 @@ final class EventBusTests: XCTestCase {
         XCTAssertEqual(eventBus.subscriptionCount(for: "dealloc:test"), 0)
     }
 }
+
+#if canImport(Combine)
+@MainActor
+final class CombineDemandTests: LicenseSeatTestCase {
+    func testEventPublisherHonorsFiniteSubscriberDemand() async {
+        let config = LicenseSeatConfig(
+            productSlug: "demand-test",
+            storagePrefix: "combine_demand_\(UUID().uuidString)_",
+            autoValidateInterval: 0,
+            heartbeatInterval: 0,
+            offlineTokenRefreshInterval: 0
+        )
+        let seat = LicenseSeat(config: config)
+        await seat.waitForInitialization()
+
+        let firstValue = expectation(description: "first demanded value")
+        let secondValue = expectation(description: "second demanded value")
+        let subscriber = FiniteDemandSubscriber { value in
+            if value == 1 {
+                firstValue.fulfill()
+            } else if value == 3 {
+                secondValue.fulfill()
+            }
+        }
+        defer {
+            subscriber.cancel()
+            seat.reset()
+        }
+
+        seat.eventPublisher(for: "demand:test").receive(subscriber: subscriber)
+        seat.eventBus.emit("demand:test", 1)
+        seat.eventBus.emit("demand:test", 2)
+
+        await assertFulfillment(of: [firstValue], timeout: 1)
+        try? await Task.sleep(nanoseconds: 100_000_000)
+        XCTAssertEqual(subscriber.values, [1], "Values without demand must be dropped")
+
+        subscriber.requestOne()
+        seat.eventBus.emit("demand:test", 3)
+
+        await assertFulfillment(of: [secondValue], timeout: 1)
+        XCTAssertEqual(subscriber.values, [1, 3])
+    }
+}
+
+private final class FiniteDemandSubscriber: Subscriber {
+    typealias Input = LicenseSeat.Event
+    typealias Failure = Never
+
+    private let lock = NSLock()
+    private let onValue: (Int) -> Void
+    private var subscription: Subscription?
+    private var receivedValues: [Int] = []
+
+    init(onValue: @escaping (Int) -> Void) {
+        self.onValue = onValue
+    }
+
+    var values: [Int] {
+        lock.lock()
+        defer { lock.unlock() }
+        return receivedValues
+    }
+
+    func receive(subscription: Subscription) {
+        lock.lock()
+        self.subscription = subscription
+        lock.unlock()
+        subscription.request(.max(1))
+    }
+
+    func receive(_ input: LicenseSeat.Event) -> Subscribers.Demand {
+        guard let value = input.data as? Int else { return .none }
+        lock.lock()
+        receivedValues.append(value)
+        lock.unlock()
+        onValue(value)
+        return .none
+    }
+
+    func receive(completion: Subscribers.Completion<Never>) {}
+
+    func requestOne() {
+        lock.lock()
+        let subscription = subscription
+        lock.unlock()
+        subscription?.request(.max(1))
+    }
+
+    func cancel() {
+        lock.lock()
+        let subscription = subscription
+        self.subscription = nil
+        lock.unlock()
+        subscription?.cancel()
+    }
+}
+#endif

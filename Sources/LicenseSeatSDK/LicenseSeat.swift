@@ -10,17 +10,11 @@
 import FoundationNetworking
 #endif
 import Foundation
-#if canImport(Combine)
-import Combine
-#endif
-#if canImport(UIKit)
-import UIKit
-#elseif canImport(AppKit)
-import AppKit
-#endif
 #if canImport(Network)
 import Network
 #endif
+
+// MARK: - LicenseSeat Main Class
 
 /// The main entry point for the LicenseSeat SDK.
 ///
@@ -30,7 +24,7 @@ import Network
 /// - Automatic re-validation
 /// - Entitlement checking
 /// - Event-driven architecture
-/// - Device fingerprinting
+/// - App-scoped installation identity for seat binding
 /// - Network connectivity monitoring
 ///
 /// ## Basic Usage
@@ -70,19 +64,50 @@ import Network
 ///
 /// ## Thread Safety
 ///
-/// All public methods are safe to call from any thread. UI updates from event handlers
-/// and publishers should be dispatched to the main queue when necessary.
-// MARK: - LicenseSeat Main Class
+/// The SDK is isolated to the main actor. Calls made from background work should
+/// cross to `MainActor`; event handlers and Combine publishers are delivered on
+/// the main queue.
 @MainActor
 public final class LicenseSeat {
+
+    /// Stable identity for correlating an asynchronous response with the exact
+    /// cached activation that initiated it. A license key alone is insufficient:
+    /// the same key can be reactivated on another device or receive a new
+    /// activation ID while an older request is still in flight.
+    internal struct CachedLicenseIdentity: Equatable, Sendable {
+        let licenseKey: String
+        let deviceId: String
+        let activationId: String
+
+        init(_ license: License) {
+            licenseKey = license.licenseKey
+            deviceId = license.deviceId
+            activationId = license.activationId
+        }
+
+        static func == (lhs: CachedLicenseIdentity, rhs: CachedLicenseIdentity) -> Bool {
+            lhs.licenseKey == rhs.licenseKey &&
+                lhs.deviceId == rhs.deviceId &&
+                lhs.activationId == rhs.activationId
+        }
+    }
 
     // MARK: - Properties
 
     /// Canonical singleton instance used by the convenience static APIs.
-    private static var _shared: LicenseSeat = LicenseSeat()
+    internal static var _shared: LicenseSeat = LicenseSeat()
 
     /// Thread-safe accessor for the shared instance.
     public static var shared: LicenseSeat { _shared }
+
+    /// Replaces the process-wide instance without creating a second singleton
+    /// path. `LicenseSeatStore.shared` uses this hook so the static, Combine,
+    /// and SwiftUI APIs always observe the same SDK state.
+    internal static func installShared(_ instance: LicenseSeat) {
+        guard _shared !== instance else { return }
+        _shared.shutdown()
+        _shared = instance
+    }
 
     /// Current configuration
     public let config: LicenseSeatConfig
@@ -98,12 +123,12 @@ public final class LicenseSeat {
 
     /// Network connectivity monitor
     #if canImport(Network)
-    private var networkMonitor: NWPathMonitor?
-    private let networkQueue = DispatchQueue(label: "com.licenseseat.sdk.network")
+    internal var networkMonitor: NWPathMonitor?
+    internal let networkQueue = DispatchQueue(label: "com.licenseseat.sdk.network")
     #endif
 
     /// Timer for automatic validation
-    internal var validationTimer: Timer?
+    nonisolated(unsafe) internal var validationTimer: Timer?
 
     /// Concurrency task for automatic validation (run-loop independent)
     internal var validationTask: Task<Void, Never>?
@@ -111,20 +136,34 @@ public final class LicenseSeat {
     /// Concurrency task for standalone heartbeat pings
     internal var heartbeatTask: Task<Void, Never>?
 
+    /// Initialization and one-shot background work are retained so reset,
+    /// deactivation, and forced reconfiguration can cancel stale operations.
+    internal var initializationTask: Task<Void, Never>?
+    internal var backgroundValidationTask: Task<Void, Never>?
+    internal var offlineSyncTask: Task<Void, Never>?
+
     /// Timer for connectivity polling (fallback when NWPathMonitor unavailable)
-    internal var connectivityTimer: Timer?
+    nonisolated(unsafe) internal var connectivityTimer: Timer?
 
     /// Timer for offline token refresh
-    internal var offlineRefreshTimer: Timer?
+    nonisolated(unsafe) internal var offlineRefreshTimer: Timer?
 
     /// Current auto-validation license key
     internal var currentAutoLicenseKey: String?
 
     /// Online/offline status
-    public private(set) var isOnline = true
+    public internal(set) var isOnline = true
 
     /// Last offline validation result to avoid duplicate events
-    private var lastOfflineValidation: ValidationResponse?
+    internal var lastOfflineValidation: ValidationResponse?
+
+    /// Identifies the newest activation request. Main-actor isolation prevents
+    /// data races, but actor reentrancy still allows an older network response
+    /// to arrive after a newer activation or reset unless it is correlated.
+    internal var currentActivationRequestID: UUID?
+    internal var currentValidationRequestID: UUID?
+    internal var currentHeartbeatRequestID: UUID?
+    internal var currentOfflineSyncRequestID: UUID?
 
     // MARK: - Initialization
 
@@ -143,473 +182,163 @@ public final class LicenseSeat {
             }
         }
 
-        Task {
-            await initialize()
+        initializationTask = Task { @MainActor [weak self] in
+            await self?.initialize()
         }
     }
 
     /// Initialize SDK components
     private func initialize() async {
-        log("LicenseSeat SDK initialized", config)
+        guard !Task.isCancelled else { return }
+        // Configuration contains authentication and installation-adjacent
+        // values. Never interpolate it into automatic logs.
+        log("LicenseSeat SDK initialized")
 
         // Set up network monitoring
         setupNetworkMonitoring()
 
         // Check for cached license
         if let cachedLicense = cache.getLicense() {
+            if config.deviceIdentifier == nil {
+                DeviceIdentifier.adoptCachedLicenseIdentifier(cachedLicense.deviceId)
+            }
             eventBus.emit("license:loaded", cachedLicense)
 
-            // Quick offline verification for instant UX
-            Task {
-                if let offlineResult = await quickVerifyCachedOfflineLocal() {
-                    cache.updateValidation(offlineResult)
+            // Complete local verification before starting the online request.
+            // Ordering these operations prevents a late local task from
+            // overwriting an authoritative invalid response from the server.
+            if let offlineResult = await quickVerifyCachedOfflineLocal() {
+                guard !Task.isCancelled else { return }
+                if cache.updateValidation(offlineResult, markValidatedOnline: false) {
                     if offlineResult.valid {
                         eventBus.emit("validation:offline-success", offlineResult)
                     } else {
                         eventBus.emit("validation:offline-failed", offlineResult)
                     }
                     lastOfflineValidation = offlineResult
+                } else {
+                    eventBus.emit("validation:offline-failed", [
+                        "code": "cache_error"
+                    ])
                 }
             }
 
             // Start auto-validation and heartbeat if API key is configured
-            if config.apiKey != nil {
+            if config.apiKey != nil, !Task.isCancelled {
                 startAutoValidation(licenseKey: cachedLicense.licenseKey)
-                startHeartbeat(licenseKey: cachedLicense.licenseKey)
+                startHeartbeat()
+                if config.offlineAuthorityEnabled {
+                    scheduleOfflineRefresh()
+                }
 
-                // Background validation
-                Task {
-                    do {
-                        try await validate(licenseKey: cachedLicense.licenseKey)
-                    } catch {
-                        log("Background validation failed:", error)
+                // Launch-time online validation follows the same opt-out as
+                // periodic validation. Hosts that set the interval to zero own
+                // the online cadence; local signed-cache verification above,
+                // heartbeat, and offline-token refresh remain independent.
+                if config.automaticValidationEnabled {
+                    startBackgroundValidation(for: cachedLicense)
+                }
+            }
+        }
+    }
 
-                        if let apiError = error as? APIError,
-                           apiError.status == 401 || apiError.status == 501 {
-                            log("Authentication issue during validation, using cached license data")
-                            eventBus.emit("validation:auth-failed", [
-                                "licenseKey": cachedLicense.licenseKey,
-                                "error": error,
-                                "cached": true
-                            ])
-                        }
+    /// Start the opt-in launch validation without making initialization own
+    /// URLSession cancellation. FoundationNetworking can otherwise be left
+    /// completing a request while reset tears down its scheduler task.
+    private func startBackgroundValidation(for cachedLicense: License) {
+        backgroundValidationTask?.cancel()
+        backgroundValidationTask = Task { @MainActor [weak self] in
+            let operation = Task { @MainActor [weak self] in
+                guard let self else { return }
+                do {
+                    _ = try await self.validate(licenseKey: cachedLicense.licenseKey)
+                } catch {
+                    self.log("Background validation failed:", LogRedaction.describe(error))
+
+                    if let apiError = error as? APIError,
+                       apiError.status == 401 || apiError.status == 501 {
+                        self.log("Authentication issue during validation, using cached license data")
+                        self.eventBus.emit("validation:auth-failed", [
+                            "licenseKey": cachedLicense.licenseKey,
+                            "error": error,
+                            "cached": true
+                        ])
                     }
                 }
             }
+            await operation.value
         }
     }
 
-    // MARK: - Public API
-
-    /// Activate a license
-    /// - Parameters:
-    ///   - licenseKey: The license key to activate
-    ///   - options: Additional activation options
-    /// - Returns: The activated license
-    /// - Throws: ``LicenseSeatError`` or ``APIError`` if activation fails
-    public func activate(
-        licenseKey: String,
-        options: ActivationOptions = ActivationOptions()
-    ) async throws -> License {
-        guard let productSlug = config.productSlug else {
-            throw LicenseSeatError.productSlugRequired
-        }
-
-        let deviceId = options.deviceId ?? config.deviceIdentifier ?? DeviceIdentifier.generate()
-
-        var body: [String: Any] = [
-            "device_id": deviceId
-        ]
-
-        if let deviceName = options.deviceName {
-            body["device_name"] = deviceName
-        }
-
-        if let metadata = options.metadata {
-            body["metadata"] = metadata
-        }
-
-        eventBus.emit("activation:start", ["licenseKey": licenseKey, "deviceId": deviceId])
-
-        do {
-            // POST /products/{slug}/licenses/{key}/activate
-            let activation: ActivationResponse = try await apiClient.post(
-                path: "/products/\(productSlug)/licenses/\(licenseKey)/activate",
-                body: body
-            )
-
-            // Create and cache license
-            let license = License(
-                licenseKey: licenseKey,
-                deviceId: deviceId,
-                activationId: activation.id,
-                activatedAt: activation.activatedAt,
-                lastValidated: Date()
-            )
-
-            cache.setLicense(license)
-
-            // Start auto-validation and heartbeat
-            startAutoValidation(licenseKey: licenseKey)
-            startHeartbeat(licenseKey: licenseKey)
-
-            // Sync offline assets
-            Task {
-                await syncOfflineAssets()
-            }
-            scheduleOfflineRefresh()
-
-            eventBus.emit("activation:success", license)
-            return license
-
-        } catch {
-            eventBus.emit("activation:error", ["licenseKey": licenseKey, "error": error])
-            throw error
-        }
+    /// Await launch-time cache verification before beginning a public network
+    /// operation. This prevents initialization and an immediate activation or
+    /// reset from racing over the same protected state.
+    internal func waitForInitialization() async {
+        await initializationTask?.value
     }
 
-    /// Validate a license
-    /// - Parameters:
-    ///   - licenseKey: License key to validate
-    ///   - options: Validation options
-    /// - Returns: Validation result
-    /// - Throws: ``LicenseSeatError`` or ``APIError`` if validation cannot be completed
-    public func validate(
-        licenseKey: String,
-        options: ValidationOptions = ValidationOptions()
-    ) async throws -> ValidationResponse {
-        guard let productSlug = config.productSlug else {
-            throw LicenseSeatError.productSlugRequired
-        }
+    // MARK: - Lifecycle and Invalidation
 
-        eventBus.emit("validation:start", ["licenseKey": licenseKey])
-
-        do {
-            let deviceId = options.deviceId ?? cache.getDeviceId()
-            var body: [String: Any] = [:]
-
-            if let deviceId = deviceId {
-                body["device_id"] = deviceId
-            }
-
-            // POST /products/{slug}/licenses/{key}/validate
-            let result: ValidationResponse = try await apiClient.post(
-                path: "/products/\(productSlug)/licenses/\(licenseKey)/validate",
-                body: body.isEmpty ? nil : body
-            )
-
-            // Update cache
-            if let cachedLicense = cache.getLicense(),
-               cachedLicense.licenseKey == licenseKey {
-                cache.updateValidation(result)
-            }
-
-            if result.valid {
-                eventBus.emit("validation:success", result)
-                cache.setLastSeenTimestamp(Date().timeIntervalSince1970)
-            } else {
-                eventBus.emit("validation:failed", result)
-                stopAutoValidation()
-                currentAutoLicenseKey = nil
-            }
-
-            return result
-
-        } catch {
-            eventBus.emit("validation:error", ["licenseKey": licenseKey, "error": error])
-
-            // Check for semantic failures from backend
-            if let apiError = error as? APIError,
-               (400...499).contains(apiError.status),
-               apiError.status != 401, apiError.status != 429 {
-                // Purge cached data - server is authoritative
-                cache.clear()
-                stopAutoValidation()
-                currentAutoLicenseKey = nil
-                lastOfflineValidation = nil
-
-                eventBus.emit("license:revoked", [
-                    "code": apiError.status,
-                    "message": apiError.message
-                ])
-
-                throw error
-            }
-
-            // Try offline fallback for transport errors
-            if shouldFallbackToOffline(error: error) {
-                let offlineResult = await verifyCachedOffline()
-                if let cachedLicense = cache.getLicense(),
-                   cachedLicense.licenseKey == licenseKey {
-                    cache.updateValidation(offlineResult)
-                }
-
-                if offlineResult.valid {
-                    if lastOfflineValidation?.valid != true {
-                        eventBus.emit("validation:offline-success", offlineResult)
-                    }
-                    lastOfflineValidation = offlineResult
-                    return offlineResult
-                } else {
-                    eventBus.emit("validation:offline-failed", offlineResult)
-                    stopAutoValidation()
-                    currentAutoLicenseKey = nil
-                }
-            }
-
-            throw error
-        }
+    /// Apply a terminal server decision consistently no matter which endpoint
+    /// observed it (validation, heartbeat, or offline-token refresh).
+    internal func cachedLicenseMatches(_ identity: CachedLicenseIdentity) -> Bool {
+        guard let currentLicense = cache.getLicense() else { return false }
+        return CachedLicenseIdentity(currentLicense) == identity
     }
 
-    /// Deactivate the current license
-    /// - Throws: ``LicenseSeatError/noActiveLicense`` if no license is active
-    /// - Throws: ``APIError`` if server request fails
-    public func deactivate() async throws {
-        guard let productSlug = config.productSlug else {
-            throw LicenseSeatError.productSlugRequired
-        }
+    internal func handleAuthoritativeInvalidation(
+        _ error: APIError,
+        expectedIdentity: CachedLicenseIdentity
+    ) {
+        guard cachedLicenseMatches(expectedIdentity) else { return }
 
-        guard let license = cache.getLicense() else {
-            throw LicenseSeatError.noActiveLicense
-        }
-
-        eventBus.emit("deactivation:start", license)
-
-        func completeLocalDeactivation() {
-            cache.clearLicense()
-            cache.clearOfflineToken()
-            stopAutoValidation()
-            stopHeartbeat()
-            stopOfflineRefresh()
-        }
-
-        func shouldTreatAsSuccess(_ error: Error) -> Bool {
-            guard let apiError = error as? APIError else { return false }
-            switch apiError.status {
-            case 404, 410:
-                return true
-            case 422:
-                if let code = apiError.code {
-                    return ["revoked", "already_deactivated", "not_active", "not_found", "suspended", "expired"].contains(code)
-                }
-                return false
-            default:
-                return false
-            }
-        }
-
-        do {
-            // POST /products/{slug}/licenses/{key}/deactivate
-            let _: DeactivationResponse = try await apiClient.post(
-                path: "/products/\(productSlug)/licenses/\(license.licenseKey)/deactivate",
-                body: ["device_id": license.deviceId]
-            )
-
-            completeLocalDeactivation()
-            eventBus.emit("deactivation:success", [:])
-        } catch {
-            if shouldTreatAsSuccess(error) {
-                completeLocalDeactivation()
-                eventBus.emit("deactivation:success", [:])
-                return
-            }
-            eventBus.emit("deactivation:error", ["error": error, "license": license])
-            throw error
-        }
-    }
-
-    /// Send a heartbeat for the current license
-    /// - Throws: ``LicenseSeatError/productSlugRequired`` if product slug is not configured
-    public func heartbeat() async throws {
-        guard let productSlug = config.productSlug else {
-            throw LicenseSeatError.productSlugRequired
-        }
-
-        guard let license = cache.getLicense() else {
-            log("No active license for heartbeat")
-            return
-        }
-
-        let deviceId = license.deviceId
-
-        let body: [String: Any] = ["device_id": deviceId]
-
-        let _: HeartbeatResponse = try await apiClient.post(
-            path: "/products/\(productSlug)/licenses/\(license.licenseKey)/heartbeat",
-            body: body
-        )
-
-        eventBus.emit("heartbeat:success", [:])
-        log("Heartbeat sent successfully")
-    }
-
-    /// Check if a specific entitlement is active
-    /// - Parameter entitlementKey: The entitlement key to check
-    /// - Returns: Entitlement status including active state and expiration
-    public func checkEntitlement(_ entitlementKey: String) -> EntitlementStatus {
-        guard let license = cache.getLicense(),
-              let validation = license.validation else {
-            return EntitlementStatus(active: false, reason: .noLicense, expiresAt: nil, entitlement: nil)
-        }
-
-        let entitlements = validation.license.activeEntitlements
-        guard let entitlement = entitlements.first(where: { $0.key == entitlementKey }) else {
-            return EntitlementStatus(active: false, reason: .notFound, expiresAt: nil, entitlement: nil)
-        }
-
-        if let expiresAt = entitlement.expiresAt {
-            if expiresAt < Date() {
-                return EntitlementStatus(
-                    active: false,
-                    reason: .expired,
-                    expiresAt: expiresAt,
-                    entitlement: entitlement
-                )
-            }
-        }
-
-        return EntitlementStatus(active: true, reason: nil, expiresAt: entitlement.expiresAt, entitlement: entitlement)
-    }
-
-    /// Get current license status
-    /// - Returns: Current status of the license
-    public func getStatus() -> LicenseStatus {
-        guard let license = cache.getLicense() else {
-            return .inactive(message: "No license activated")
-        }
-
-        guard let validation = license.validation else {
-            return .pending(message: "License pending validation")
-        }
-
-        if !validation.valid {
-            let message = validation.message ?? validation.code ?? "License invalid"
-            return .invalid(message: message)
-        }
-
-        let details = LicenseStatusDetails(
-            license: license.licenseKey,
-            device: license.deviceId,
-            activatedAt: license.activatedAt,
-            lastValidated: license.lastValidated,
-            entitlements: validation.license.activeEntitlements
-        )
-
-        return .active(details: details)
-    }
-
-    /// Get the current cached license
-    public func currentLicense() -> License? {
-        cache.getLicense()
-    }
-
-    /// Check API health
-    public func healthCheck() async throws -> HealthResponse {
-        // GET /health
-        try await apiClient.get(path: "/health")
-    }
-
-    /// Reset SDK state
-    public func reset() {
-        stopAutoValidation()
-        stopHeartbeat()
-        stopOfflineRefresh()
-        cache.clear()
-        lastOfflineValidation = nil
-        eventBus.emit("sdk:reset", [:])
-    }
-
-    /// Purge any cached license and related offline assets.
-    public func purgeCachedLicense() {
+        cancelBackgroundLicenseOperations()
         cache.clear()
         stopAutoValidation()
         stopHeartbeat()
         stopOfflineRefresh()
         currentAutoLicenseKey = nil
         lastOfflineValidation = nil
-        eventBus.emit("sdk:reset", [:])
+
+        eventBus.emit("license:revoked", [
+            "code": error.code ?? "unknown",
+            "status": error.status,
+            "message": error.message
+        ])
     }
 
-    // MARK: - Event Handling
-
-    /// Subscribe to SDK events
-    /// - Parameters:
-    ///   - event: Event name
-    ///   - handler: Event handler
-    /// - Returns: Cancellable subscription
-    @discardableResult
-    public func on(_ event: String, handler: @escaping (Any) -> Void) -> AnyCancellable {
-        eventBus.on(event, handler: handler)
+    internal func cancelBackgroundLicenseOperations() {
+        backgroundValidationTask?.cancel()
+        backgroundValidationTask = nil
+        offlineSyncTask?.cancel()
+        offlineSyncTask = nil
     }
 
-    // MARK: - Private Methods
-
-    private func setupNetworkMonitoring() {
+    /// Stop all work owned by an instance that is being replaced, without
+    /// deleting the protected activation that its replacement should adopt.
+    internal func shutdown() {
+        currentActivationRequestID = nil
+        currentValidationRequestID = nil
+        currentHeartbeatRequestID = nil
+        currentOfflineSyncRequestID = nil
+        initializationTask?.cancel()
+        initializationTask = nil
+        cancelBackgroundLicenseOperations()
+        validationTimer?.invalidate()
+        validationTimer = nil
+        connectivityTimer?.invalidate()
+        connectivityTimer = nil
+        offlineRefreshTimer?.invalidate()
+        offlineRefreshTimer = nil
+        validationTask?.cancel()
+        validationTask = nil
+        heartbeatTask?.cancel()
+        heartbeatTask = nil
+        apiClient.onNetworkStatusChange = nil
         #if canImport(Network)
-        networkMonitor = NWPathMonitor()
-        networkMonitor?.pathUpdateHandler = { [weak self] path in
-            Task { @MainActor [weak self] in
-                guard let self else { return }
-
-                let wasOnline = self.isOnline
-                self.isOnline = path.status == .satisfied
-
-                if !wasOnline && self.isOnline {
-                    self.handleNetworkReconnection()
-                } else if wasOnline && !self.isOnline {
-                    self.handleNetworkDisconnection()
-                }
-            }
-        }
-        networkMonitor?.start(queue: networkQueue)
-        #else
-        startConnectivityPolling()
+        networkMonitor?.cancel()
+        networkMonitor = nil
         #endif
-    }
-
-    internal func handleNetworkStatusChange(isOnline: Bool) {
-        let wasOnline = self.isOnline
-        self.isOnline = isOnline
-
-        if !wasOnline && isOnline {
-            handleNetworkReconnection()
-        } else if wasOnline && !isOnline {
-            handleNetworkDisconnection()
-        }
-    }
-
-    private func handleNetworkReconnection() {
-        eventBus.emit("network:online", [:])
-        stopConnectivityPolling()
-
-        if let licenseKey = currentAutoLicenseKey, validationTimer == nil && validationTask == nil {
-            startAutoValidation(licenseKey: licenseKey)
-        }
-
-        Task {
-            await syncOfflineAssets()
-        }
-    }
-
-    private func handleNetworkDisconnection() {
-        eventBus.emit("network:offline", [:])
-        stopAutoValidation()
-        startConnectivityPolling()
-    }
-
-    private func shouldFallbackToOffline(error: Error) -> Bool {
-        switch config.offlineFallbackMode {
-        case .always:
-            return true
-        case .networkOnly:
-            if error is URLError { return true }
-            if let apiError = error as? APIError {
-                if apiError.status == 0 { return true }
-                if apiError.status == 408 { return true }
-                if (500...599).contains(apiError.status) { return true }
-            }
-            return false
-        }
     }
 
     internal func log(_ items: Any...) {
@@ -619,6 +348,9 @@ public final class LicenseSeat {
     }
 
     deinit {
+        initializationTask?.cancel()
+        backgroundValidationTask?.cancel()
+        offlineSyncTask?.cancel()
         validationTimer?.invalidate()
         connectivityTimer?.invalidate()
         offlineRefreshTimer?.invalidate()
@@ -628,79 +360,4 @@ public final class LicenseSeat {
         networkMonitor?.cancel()
         #endif
     }
-}
-
-// MARK: - Supporting Types
-
-/// Options for license activation
-public struct ActivationOptions: Sendable {
-    public var deviceId: String?
-    public var deviceName: String?
-    public var metadata: [String: Any]?
-
-    public init(
-        deviceId: String? = nil,
-        deviceName: String? = nil,
-        metadata: [String: Any]? = nil
-    ) {
-        self.deviceId = deviceId
-        self.deviceName = deviceName
-        self.metadata = metadata
-    }
-}
-
-/// Options for license validation
-public struct ValidationOptions: Sendable {
-    public var deviceId: String?
-
-    public init(deviceId: String? = nil) {
-        self.deviceId = deviceId
-    }
-}
-
-// MARK: - Global Lifecycle Helpers (Static Convenience)
-
-public extension LicenseSeat {
-    /// Creates (or recreates) the shared instance with a custom configuration.
-    @MainActor
-    static func configure(
-        apiKey: String,
-        productSlug: String,
-        apiBaseURL: URL? = nil,
-        force: Bool = false,
-        options customize: (inout LicenseSeatConfig) -> Void = { _ in }
-    ) {
-        if _shared.config.apiKey != nil && !force { return }
-        var cfg = LicenseSeatConfig.default
-        cfg.apiKey = apiKey
-        cfg.productSlug = productSlug
-        if let apiBaseURL {
-            cfg.apiBaseUrl = apiBaseURL.absoluteString
-        }
-        customize(&cfg)
-        _shared = LicenseSeat(config: cfg)
-    }
-
-    /// Activate a license through the shared instance.
-    @discardableResult
-    static func activate(_ key: String, options: ActivationOptions = ActivationOptions()) async throws -> License {
-        try await shared.activate(licenseKey: key, options: options)
-    }
-
-    /// Deactivate the current license through the shared instance.
-    static func deactivate() async throws {
-        try await shared.deactivate()
-    }
-
-    /// Check the status of a single entitlement.
-    static func entitlement(_ id: String) -> EntitlementStatus {
-        shared.checkEntitlement(id)
-    }
-
-    #if canImport(Combine)
-    /// Publisher mirroring ``statusPublisher`` on the shared instance for quick subscriptions.
-    static var statusPublisher: AnyPublisher<LicenseStatus, Never> {
-        shared.statusPublisher
-    }
-    #endif
 }
