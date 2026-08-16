@@ -186,7 +186,7 @@ final class ReleasesTests: LicenseSeatTestCase {
 
     // MARK: - Query String Construction
 
-    func testQueryItemsAreAppendedToTheEndpointURL() throws {
+    func testQueryItemsAreAppendedToTheEndpointURL() async throws {
         let client = makeAPIClient()
         let baseURL = try XCTUnwrap(client.validatedBaseURL())
 
@@ -205,7 +205,7 @@ final class ReleasesTests: LicenseSeatTestCase {
         )
     }
 
-    func testNoQueryItemsLeavesTheURLUnchanged() throws {
+    func testNoQueryItemsLeavesTheURLUnchanged() async throws {
         let client = makeAPIClient()
         let baseURL = try XCTUnwrap(client.validatedBaseURL())
 
@@ -221,7 +221,7 @@ final class ReleasesTests: LicenseSeatTestCase {
         XCTAssertNil(url?.query)
     }
 
-    func testQueryBuilderRejectsKeysOutsideTheAllowlist() {
+    func testQueryBuilderRejectsKeysOutsideTheAllowlist() async {
         let client = makeAPIClient()
 
         XCTAssertNil(client.encodedQuery([
@@ -233,7 +233,7 @@ final class ReleasesTests: LicenseSeatTestCase {
         ]))
     }
 
-    func testQueryBuilderRejectsRepeatedKeys() {
+    func testQueryBuilderRejectsRepeatedKeys() async {
         let client = makeAPIClient()
 
         XCTAssertNil(client.encodedQuery([
@@ -242,7 +242,7 @@ final class ReleasesTests: LicenseSeatTestCase {
         ]))
     }
 
-    func testQueryBuilderRejectsMoreItemsThanAllowedKeys() {
+    func testQueryBuilderRejectsMoreItemsThanAllowedKeys() async {
         let client = makeAPIClient()
 
         XCTAssertNil(client.encodedQuery([
@@ -253,7 +253,7 @@ final class ReleasesTests: LicenseSeatTestCase {
         ]))
     }
 
-    func testQueryBuilderRejectsMissingEmptyAndUntrimmedValues() {
+    func testQueryBuilderRejectsMissingEmptyAndUntrimmedValues() async {
         let client = makeAPIClient()
 
         XCTAssertNil(client.encodedQuery([URLQueryItem(name: "channel", value: nil)]))
@@ -261,7 +261,7 @@ final class ReleasesTests: LicenseSeatTestCase {
         XCTAssertNil(client.encodedQuery([URLQueryItem(name: "channel", value: " beta")]))
     }
 
-    func testQueryBuilderRejectsControlCharactersAndOversizedValues() {
+    func testQueryBuilderRejectsControlCharactersAndOversizedValues() async {
         let client = makeAPIClient()
 
         XCTAssertNil(client.encodedQuery([
@@ -275,7 +275,7 @@ final class ReleasesTests: LicenseSeatTestCase {
         ]))
     }
 
-    func testQueryBuilderEncodesReservedCharactersIntoASingleValue() throws {
+    func testQueryBuilderEncodesReservedCharactersIntoASingleValue() async throws {
         let client = makeAPIClient()
         let baseURL = try XCTUnwrap(client.validatedBaseURL())
 

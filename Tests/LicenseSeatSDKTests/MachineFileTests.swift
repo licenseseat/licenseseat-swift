@@ -170,7 +170,7 @@ final class MachineFileTests: LicenseSeatTestCase {
 
     // MARK: - Golden Fixture: Valid
 
-    func testServerFixtureVerifiesEndToEnd() throws {
+    func testServerFixtureVerifiesEndToEnd() async throws {
         let machineFile = try Self.machineFile("valid")
 
         XCTAssertEqual(machineFile.algorithm, MachineFile.algorithmIdentifier)
@@ -220,7 +220,7 @@ final class MachineFileTests: LicenseSeatTestCase {
         XCTAssertFalse(payload.hasEntitlement("enterprise"))
     }
 
-    func testServerFixtureEmitsVerifiedEvent() throws {
+    func testServerFixtureEmitsVerifiedEvent() async throws {
         var observed: [String] = []
         let subscription = sdk.on("machineFile:verified") { _ in
             observed.append("verified")
@@ -230,15 +230,18 @@ final class MachineFileTests: LicenseSeatTestCase {
         let result = try sdk.verifyMachineFile(try Self.machineFile("valid"))
         XCTAssertTrue(result.valid)
 
-        let expectation = expectation(description: "verified event delivered")
-        DispatchQueue.main.async { expectation.fulfill() }
-        wait(for: [expectation], timeout: 2)
+        // Drain one main-queue hop so the bus delivery lands. A synchronous
+        // wait(for:) would block the main actor this async test runs on and
+        // the queued fulfill could never execute.
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            DispatchQueue.main.async { continuation.resume() }
+        }
         XCTAssertEqual(observed, ["verified"])
     }
 
     // MARK: - Golden Fixture: Rejections
 
-    func testExpiredServerFixtureIsRejectedAsExpired() throws {
+    func testExpiredServerFixtureIsRejectedAsExpired() async throws {
         let result = try sdk.verifyMachineFile(try Self.machineFile("expired"))
 
         XCTAssertFalse(result.valid)
@@ -247,7 +250,7 @@ final class MachineFileTests: LicenseSeatTestCase {
         XCTAssertEqual(result.code, try Self.expectedCode("expired"))
     }
 
-    func testTamperedServerFixtureIsRejectedBeforeDecryption() throws {
+    func testTamperedServerFixtureIsRejectedBeforeDecryption() async throws {
         // One flipped ciphertext character. The signature covers `enc`, so this
         // must fail on the signature and never reach AES at all.
         let result = try sdk.verifyMachineFile(
@@ -259,7 +262,7 @@ final class MachineFileTests: LicenseSeatTestCase {
         XCTAssertEqual(result.code, try Self.expectedCode("tampered_signature"))
     }
 
-    func testResignedTamperedCiphertextFailsTheAuthenticationTag() throws {
+    func testResignedTamperedCiphertextFailsTheAuthenticationTag() async throws {
         // Signature valid, ciphertext modified: proves the GCM tag is enforced
         // independently and is not implied by the outer signature.
         let result = try sdk.verifyMachineFile(
@@ -274,7 +277,7 @@ final class MachineFileTests: LicenseSeatTestCase {
         )
     }
 
-    func testFixtureSignedByAnotherKeyIsRejected() throws {
+    func testFixtureSignedByAnotherKeyIsRejected() async throws {
         let result = try sdk.verifyMachineFile(try Self.machineFile("wrong_key"))
 
         XCTAssertFalse(result.valid)
@@ -282,7 +285,7 @@ final class MachineFileTests: LicenseSeatTestCase {
         XCTAssertEqual(result.code, try Self.expectedCode("wrong_key"))
     }
 
-    func testValidFixtureIsRejectedUnderTheWrongPublicKey() throws {
+    func testValidFixtureIsRejectedUnderTheWrongPublicKey() async throws {
         let result = try sdk.verifyMachineFile(
             try Self.machineFile("valid"),
             publicKeyB64: Self.fixture.wrongPublicKey
@@ -294,7 +297,7 @@ final class MachineFileTests: LicenseSeatTestCase {
 
     // MARK: - Identity Binding
 
-    func testFingerprintMismatchIsRejectedBeforeAnyCryptography() throws {
+    func testFingerprintMismatchIsRejectedBeforeAnyCryptography() async throws {
         let result = try sdk.verifyMachineFile(
             try Self.machineFile("valid"),
             fingerprint: "a-completely-different-device"
@@ -304,7 +307,7 @@ final class MachineFileTests: LicenseSeatTestCase {
         XCTAssertEqual(result.code, "fingerprint_mismatch")
     }
 
-    func testWrongFingerprintCannotDeriveTheDecryptionKey() throws {
+    func testWrongFingerprintCannotDeriveTheDecryptionKey() async throws {
         // Strip the plaintext relationship metadata so the early binding check
         // cannot short-circuit: the device binding must still hold because the
         // AES key is derived from the fingerprint itself.
@@ -318,7 +321,7 @@ final class MachineFileTests: LicenseSeatTestCase {
         XCTAssertEqual(result.code, "decryption_failed")
     }
 
-    func testWrongLicenseKeyIsRejected() throws {
+    func testWrongLicenseKeyIsRejected() async throws {
         let result = try sdk.verifyMachineFile(
             try Self.machineFile("valid"),
             licenseKey: "MF-FIXTURE-0000-0000-0000"
@@ -328,7 +331,7 @@ final class MachineFileTests: LicenseSeatTestCase {
         XCTAssertEqual(result.code, "license_mismatch")
     }
 
-    func testProductMismatchIsRejected() throws {
+    func testProductMismatchIsRejected() async throws {
         let otherProduct = LicenseSeat(
             config: Self.makeConfig(productSlug: "some-other-app"),
             urlSession: Self.makeMockedSession()
@@ -343,7 +346,7 @@ final class MachineFileTests: LicenseSeatTestCase {
         XCTAssertEqual(result.code, "product_mismatch")
     }
 
-    func testActivationMismatchIsRejected() throws {
+    func testActivationMismatchIsRejected() async throws {
         let reactivated = LicenseSeat(
             config: Self.makeConfig(),
             urlSession: Self.makeMockedSession()
@@ -361,7 +364,7 @@ final class MachineFileTests: LicenseSeatTestCase {
         XCTAssertEqual(result.code, "activation_mismatch")
     }
 
-    func testMissingSigningKeyThrowsRatherThanReportingInvalid() throws {
+    func testMissingSigningKeyThrowsRatherThanReportingInvalid() async throws {
         let bare = LicenseSeat(
             config: Self.makeConfig(),
             urlSession: Self.makeMockedSession()
@@ -376,7 +379,7 @@ final class MachineFileTests: LicenseSeatTestCase {
         }
     }
 
-    func testOfflineAuthorityDisabledFailsClosed() throws {
+    func testOfflineAuthorityDisabledFailsClosed() async throws {
         // Since 0.5.0, disabling offline authority is an explicit flag;
         // maxOfflineDays == 0 means "no additional host age cap".
         let disabled = LicenseSeat(
@@ -393,7 +396,7 @@ final class MachineFileTests: LicenseSeatTestCase {
         XCTAssertEqual(result.code, "offline_disabled")
     }
 
-    func testMaximumOfflineAgeCapsAnOtherwiseValidArtifact() throws {
+    func testMaximumOfflineAgeCapsAnOtherwiseValidArtifact() async throws {
         // Host policy is an independent ceiling: a three day old artifact whose
         // own signed window runs for another month must still be retired by a
         // one day `maxOfflineDays`.
@@ -428,7 +431,7 @@ final class MachineFileTests: LicenseSeatTestCase {
 
     // MARK: - Response Decoding
 
-    func testResponseDecodingRejectsUnknownMembers() throws {
+    func testResponseDecodingRejectsUnknownMembers() async throws {
         var object = try XCTUnwrap(
             try JSONSerialization.jsonObject(
                 with: Self.responseData("valid")
@@ -448,7 +451,7 @@ final class MachineFileTests: LicenseSeatTestCase {
         )
     }
 
-    func testResponseDecodingRejectsAnUnsupportedAlgorithm() throws {
+    func testResponseDecodingRejectsAnUnsupportedAlgorithm() async throws {
         var object = try XCTUnwrap(
             try JSONSerialization.jsonObject(
                 with: Self.responseData("valid")
@@ -468,7 +471,7 @@ final class MachineFileTests: LicenseSeatTestCase {
         )
     }
 
-    func testResponseDecodingRejectsInconsistentLifetimeClaims() throws {
+    func testResponseDecodingRejectsInconsistentLifetimeClaims() async throws {
         var object = try XCTUnwrap(
             try JSONSerialization.jsonObject(
                 with: Self.responseData("valid")
@@ -615,7 +618,7 @@ final class MachineFileTests: LicenseSeatTestCase {
 
     // MARK: - Cache
 
-    func testCachedMachineFileRoundTripsAndIsClearedOnReset() throws {
+    func testCachedMachineFileRoundTripsAndIsClearedOnReset() async throws {
         let machineFile = try Self.machineFile("valid")
 
         XCTAssertTrue(sdk.cache.setMachineFile(machineFile))
@@ -728,7 +731,7 @@ final class MachineFileTests: LicenseSeatTestCase {
         )
     }
 
-    func testSignedGracePeriodExtendsAnExpiredArtifact() throws {
+    func testSignedGracePeriodExtendsAnExpiredArtifact() async throws {
         let now = Int(Date().timeIntervalSince1970)
         let artifact = try makeSyntheticMachineFile(
             iat: now - (10 * 86_400),
@@ -745,7 +748,7 @@ final class MachineFileTests: LicenseSeatTestCase {
         XCTAssertEqual(result.payload?.gracePeriod, 3 * 86_400)
     }
 
-    func testExpiryWithoutGraceIsNotExtended() throws {
+    func testExpiryWithoutGraceIsNotExtended() async throws {
         let now = Int(Date().timeIntervalSince1970)
         let artifact = try makeSyntheticMachineFile(
             iat: now - (10 * 86_400),
@@ -762,7 +765,7 @@ final class MachineFileTests: LicenseSeatTestCase {
         XCTAssertEqual(result.code, "token_expired")
     }
 
-    func testGraceCannotOutlastItsSignedBound() throws {
+    func testGraceCannotOutlastItsSignedBound() async throws {
         let now = Int(Date().timeIntervalSince1970)
         let artifact = try makeSyntheticMachineFile(
             iat: now - (10 * 86_400),
@@ -780,7 +783,7 @@ final class MachineFileTests: LicenseSeatTestCase {
         XCTAssertEqual(result.code, "invalid_machine_file_claims")
     }
 
-    func testNotYetValidArtifactIsRejected() throws {
+    func testNotYetValidArtifactIsRejected() async throws {
         let now = Int(Date().timeIntervalSince1970)
         let artifact = try makeSyntheticMachineFile(
             iat: now - 60,
@@ -798,7 +801,7 @@ final class MachineFileTests: LicenseSeatTestCase {
         XCTAssertEqual(result.code, "token_not_yet_valid")
     }
 
-    func testFutureIssuanceIsTreatedAsClockTampering() throws {
+    func testFutureIssuanceIsTreatedAsClockTampering() async throws {
         let now = Int(Date().timeIntervalSince1970)
         let artifact = try makeSyntheticMachineFile(
             iat: now + 7_200,
@@ -814,7 +817,7 @@ final class MachineFileTests: LicenseSeatTestCase {
         XCTAssertEqual(result.code, "clock_tamper")
     }
 
-    func testInnerAndOuterKeyIdMustAgree() throws {
+    func testInnerAndOuterKeyIdMustAgree() async throws {
         let now = Int(Date().timeIntervalSince1970)
         let artifact = try makeSyntheticMachineFile(
             keyId: "outer-key",
@@ -832,7 +835,7 @@ final class MachineFileTests: LicenseSeatTestCase {
         XCTAssertEqual(result.code, "invalid_machine_file_claims")
     }
 
-    func testSignedLifetimeMustMatchItsWindow() throws {
+    func testSignedLifetimeMustMatchItsWindow() async throws {
         let now = Int(Date().timeIntervalSince1970)
         let artifact = try makeSyntheticMachineFile(
             iat: now - 60,
@@ -849,7 +852,7 @@ final class MachineFileTests: LicenseSeatTestCase {
         XCTAssertEqual(result.code, "invalid_machine_file_claims")
     }
 
-    func testZeroWidthWindowIsNeverAGrant() throws {
+    func testZeroWidthWindowIsNeverAGrant() async throws {
         let now = Int(Date().timeIntervalSince1970)
         let artifact = try makeSyntheticMachineFile(
             iat: now - 60,
@@ -868,7 +871,7 @@ final class MachineFileTests: LicenseSeatTestCase {
         XCTAssertEqual(result.code, "invalid_machine_file_claims")
     }
 
-    func testMalformedArmorIsRejected() throws {
+    func testMalformedArmorIsRejected() async throws {
         let result = try sdk.verifyMachineFile(
             MachineFile(certificate: "-----BEGIN MACHINE FILE-----\nnot base64!\n-----END MACHINE FILE-----"),
             publicKeyB64: Self.fixture.publicKey

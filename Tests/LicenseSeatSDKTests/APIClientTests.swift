@@ -560,7 +560,7 @@ final class APIClientTests: LicenseSeatTestCase {
         XCTAssertEqual(attempts, 1)
     }
 
-    func testSDKOwnedSessionDelegateRejectsRedirectReplay() {
+    func testSDKOwnedSessionDelegateRejectsRedirectReplay() async {
         let delegate = BoundedSessionDelegate()
         let session = URLSession(
             configuration: .ephemeral,
@@ -709,7 +709,7 @@ final class APIClientTests: LicenseSeatTestCase {
         }
     }
 
-    func testConfiguredRequestTimeoutReachesOwnedSessionConfiguration() {
+    func testConfiguredRequestTimeoutReachesOwnedSessionConfiguration() async {
         let defaultConfiguration = APIClient.makeOwnedSessionConfiguration(
             for: LicenseSeatConfig.default
         )
@@ -734,7 +734,7 @@ final class APIClientTests: LicenseSeatTestCase {
         )
     }
 
-    func testInvalidRequestTimeoutFallsBackToTheDefault() {
+    func testInvalidRequestTimeoutFallsBackToTheDefault() async {
         let invalidTimeouts: [TimeInterval] = [0, -5, .infinity, .nan, 301]
 
         for timeout in invalidTimeouts {

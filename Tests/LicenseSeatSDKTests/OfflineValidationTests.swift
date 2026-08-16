@@ -330,7 +330,7 @@ final class OfflineValidationTests: LicenseSeatTestCase {
         XCTAssertEqual(result.code, "token_expired")
     }
 
-    func testTokenIsExpiredAtTheExactExpirationSecond() throws {
+    func testTokenIsExpiredAtTheExactExpirationSecond() async throws {
         let privateKey = Curve25519.Signing.PrivateKey()
         let now = 1_700_000_000
         let offlineToken = try makeOfflineToken(
@@ -556,7 +556,7 @@ final class OfflineValidationTests: LicenseSeatTestCase {
         XCTAssertEqual(result.code, "license_expired")
     }
 
-    func testLicenseIsExpiredAtTheExactExpirationSecond() throws {
+    func testLicenseIsExpiredAtTheExactExpirationSecond() async throws {
         let privateKey = Curve25519.Signing.PrivateKey()
         let now = 1_700_000_000
         let offlineToken = try makeOfflineToken(

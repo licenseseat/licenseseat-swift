@@ -1442,7 +1442,7 @@ final class LicenseSeatSDKTests: LicenseSeatTestCase {
         XCTAssertNil(sdk.lastOfflineValidation)
     }
 
-    func testOfflineInvalidDecisionDeniesPreviouslyCachedEntitlements() throws {
+    func testOfflineInvalidDecisionDeniesPreviouslyCachedEntitlements() async throws {
         guard let sdk else { return XCTFail("SDK was not initialized") }
         let licenseKey = "ENTITLEMENT-OFFLINE-INVALID"
         var validPayload = makeValidationResponse(valid: true, licenseKey: licenseKey)

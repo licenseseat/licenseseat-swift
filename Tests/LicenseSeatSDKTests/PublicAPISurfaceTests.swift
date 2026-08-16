@@ -14,7 +14,7 @@ import LicenseSeat
 final class PublicAPISurfaceTests: LicenseSeatTestCase {
     private static let testProductSlug = "test-app"
 
-    func testBackgroundTaskControlIsPubliclyAvailable() {
+    func testBackgroundTaskControlIsPubliclyAvailable() async {
         var config = LicenseSeatConfig(
             apiKey: "public-surface-key",
             productSlug: Self.testProductSlug,
@@ -47,7 +47,7 @@ final class PublicAPISurfaceTests: LicenseSeatTestCase {
         XCTAssertNil(seat.nextAutoValidationAt)
     }
 
-    func testConfigureReportsWhetherItWasApplied() {
+    func testConfigureReportsWhetherItWasApplied() async {
         let store = LicenseSeatStore(
             config: LicenseSeatConfig(
                 storagePrefix: "public_surface_store_\(UUID().uuidString)_",

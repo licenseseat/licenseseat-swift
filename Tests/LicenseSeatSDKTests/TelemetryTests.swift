@@ -540,12 +540,12 @@ final class HeartbeatTimerTests: LicenseSeatTestCase {
         super.tearDown()
     }
 
-    func testHeartbeatIntervalDefaultValue() {
+    func testHeartbeatIntervalDefaultValue() async {
         let config = LicenseSeatConfig.default
         XCTAssertEqual(config.heartbeatInterval, 300, "Default heartbeat interval should be 300 seconds (5 minutes)")
     }
 
-    func testHeartbeatIntervalCustomValue() {
+    func testHeartbeatIntervalCustomValue() async {
         let config = LicenseSeatConfig(heartbeatInterval: 60)
         XCTAssertEqual(config.heartbeatInterval, 60)
     }
