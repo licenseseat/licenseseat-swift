@@ -55,8 +55,21 @@ struct TelemetryPayload: Encodable, Sendable {
         case displayScale = "display_scale"
     }
 
-    static func collect() -> TelemetryPayload {
+    /// Collect the current device attributes.
+    /// - Parameters:
+    ///   - appVersion: Host-supplied application version. `nil` falls back to
+    ///     the main bundle's `CFBundleShortVersionString`.
+    ///   - appBuild: Host-supplied application build. `nil` falls back to the
+    ///     main bundle's `CFBundleVersion`.
+    ///
+    /// Both overrides and bundle values pass the same bounds check, so an
+    /// oversized or control-character value is omitted instead of shipped.
+    static func collect(
+        appVersion: String? = nil,
+        appBuild: String? = nil
+    ) -> TelemetryPayload {
         let version = ProcessInfo.processInfo.operatingSystemVersion
+        let bundleInfo = Bundle.main.infoDictionary
         return TelemetryPayload(
             sdkName: "swift",
             sdkVersion: LicenseSeatConfig.sdkVersion,
@@ -66,8 +79,10 @@ struct TelemetryPayload: Encodable, Sendable {
             deviceModel: currentDeviceModel(),
             locale: Locale.current.identifier,
             timezone: TimeZone.current.identifier,
-            appVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String,
-            appBuild: Bundle.main.infoDictionary?["CFBundleVersion"] as? String,
+            appVersion: safeAppText(appVersion)
+                ?? safeAppText(bundleInfo?["CFBundleShortVersionString"] as? String),
+            appBuild: safeAppText(appBuild)
+                ?? safeAppText(bundleInfo?["CFBundleVersion"] as? String),
             deviceType: currentDeviceType(),
             architecture: currentArchitecture(),
             cpuCores: currentCPUCores(),
@@ -102,6 +117,19 @@ struct TelemetryPayload: Encodable, Sendable {
     }
 
     // MARK: - Existing helpers
+
+    /// Bound an application-supplied telemetry string the same way the Rust SDK
+    /// bounds its configuration text, so a malformed value is dropped rather
+    /// than embedded in an outbound request body.
+    private static func safeAppText(_ value: String?) -> String? {
+        guard let value,
+              !value.isEmpty,
+              value.utf8.count <= 255,
+              value.unicodeScalars.allSatisfy({ $0.value > 31 && $0.value != 127 }) else {
+            return nil
+        }
+        return value
+    }
 
     private static func currentOSName() -> String {
         #if os(macOS)
@@ -182,11 +210,14 @@ struct TelemetryPayload: Encodable, Sendable {
         #endif
     }
 
+    /// Report the architecture using the vocabulary of Rust's
+    /// `std::env::consts::ARCH`, which the other LicenseSeat SDKs already send.
+    /// Matching values keep dashboard buckets from splitting per SDK.
     private static func currentArchitecture() -> String? {
         #if arch(arm64)
-        return "arm64"
+        return "aarch64"
         #elseif arch(x86_64)
-        return "x64"
+        return "x86_64"
         #else
         return nil
         #endif

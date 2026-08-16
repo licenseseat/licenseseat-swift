@@ -380,6 +380,8 @@ if result.valid {
 | `maxOfflineDays`            | `Int`                 | `0`                                | Maximum signed-grant age; `0` disables all offline authority, enabled values are `1...36,600` |
 | `maxClockSkewMs`            | `TimeInterval`        | `300000` (5 min)                   | Clock tamper tolerance                   |
 | `telemetryEnabled`          | `Bool`                | `true`                             | Send device telemetry with supported licensing POST requests |
+| `appVersion`                | `String?`             | `nil`                              | Telemetry app version; `nil` reads `CFBundleShortVersionString` |
+| `appBuild`                  | `String?`             | `nil`                              | Telemetry app build; `nil` reads `CFBundleVersion`       |
 | `debug`                     | `Bool`                | `false`                            | Enable debug logging                     |
 
 ### Environment-Based Configuration
@@ -741,20 +743,23 @@ License keys and installation identifiers are sent together and are therefore tr
 | `platform` | `native` | Runtime platform |
 | `device_model` | `MacBookPro18,1` | Hardware model identifier |
 | `device_type` | `desktop` | Device category (`desktop`, `phone`, `tablet`, `tv`, `watch`, `headset`) |
-| `architecture` | `arm64` | CPU architecture (`arm64` or `x64`) |
+| `architecture` | `aarch64` | CPU architecture (`aarch64` or `x86_64`) |
 | `cpu_cores` | `10` | Processor count |
 | `memory_gb` | `16` | Physical RAM (rounded GB) |
 | `locale` | `en_US` | Full locale identifier |
 | `language` | `en` | Language code extracted from locale |
 | `timezone` | `America/New_York` | IANA timezone |
-| `app_version` | `2.1.0` | Host app version (`CFBundleShortVersionString`) |
-| `app_build` | `42` | Host app build number (`CFBundleVersion`) |
+| `app_version` | `2.1.0` | Host app version (`appVersion`, else `CFBundleShortVersionString`) |
+| `app_build` | `42` | Host app build number (`appBuild`, else `CFBundleVersion`) |
 | `screen_resolution` | `3024x1964` | Native screen resolution in pixels |
 | `display_scale` | `2.0` | Display scale factor (Retina = 2.0) |
 
 By default, the SDK creates the app-scoped installation identifier, protects it in Keychain on Apple platforms, and migrates older UserDefaults identifiers without changing the active seat. Applications can provide their own stable identifier through `deviceIdentifier` or `ActivationOptions.deviceId`. The SDK still decodes legacy `device_id` and `device_fingerprint` response aliases.
 
 `app_version` and `app_build` are read automatically from the host app's `Info.plist` when present.
+Command-line tools and SPM-embedded hosts without an `Info.plist` can set `appVersion` and `appBuild`
+in `LicenseSeatConfig` instead. Values that are empty, longer than 255 bytes, or contain control
+characters are omitted rather than sent.
 
 ### What the SDK Does Not Automatically Collect
 

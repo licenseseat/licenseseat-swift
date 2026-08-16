@@ -96,6 +96,17 @@ public struct LicenseSeatConfig {
     /// Defaults to `true`; disabling this option alone does not establish legal compliance.
     public var telemetryEnabled: Bool
 
+    /// Application version reported in telemetry. When `nil` the SDK reads
+    /// `CFBundleShortVersionString` from the main bundle, which is unavailable
+    /// for command-line tools and SPM-embedded hosts. Values that are empty,
+    /// longer than 255 bytes, or contain control characters are ignored.
+    public var appVersion: String?
+
+    /// Application build reported in telemetry. When `nil` the SDK reads
+    /// `CFBundleVersion` from the main bundle. The same bounds as
+    /// ``appVersion`` apply.
+    public var appBuild: String?
+
     /// Interval for refreshing offline token (in seconds)
     public var offlineTokenRefreshInterval: TimeInterval
 
@@ -151,6 +162,8 @@ public struct LicenseSeatConfig {
         retryDelay: TimeInterval = 1,
         debug: Bool = false,
         telemetryEnabled: Bool = true,
+        appVersion: String? = nil,
+        appBuild: String? = nil,
         offlineTokenRefreshInterval: TimeInterval = 259200,
         offlineFallbackMode: OfflineFallbackMode = .networkOnly,
         maxOfflineDays: Int = 0,
@@ -168,6 +181,8 @@ public struct LicenseSeatConfig {
         self.retryDelay = retryDelay
         self.debug = debug
         self.telemetryEnabled = telemetryEnabled
+        self.appVersion = appVersion
+        self.appBuild = appBuild
         self.offlineTokenRefreshInterval = offlineTokenRefreshInterval
         self.offlineFallbackMode = offlineFallbackMode
         self.maxOfflineDays = maxOfflineDays
