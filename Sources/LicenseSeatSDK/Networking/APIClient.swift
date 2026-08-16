@@ -20,6 +20,13 @@ final class APIClient {
     private static let maxResponseBytes = 2 * 1024 * 1024
     static let maxRequestBytes = 1024 * 1024
     static let maxPathBytes = 2_048
+    static let maxQueryBytes = 512
+    static let maxQueryValueBytes = 255
+    /// Query parameters widen the request surface, so the SDK only ever emits
+    /// keys it defines itself. A caller-named key could otherwise supply a
+    /// second value for a parameter the server also reads from the route, or
+    /// smuggle a credential into a URL that proxies and logs retain.
+    static let allowedQueryKeys: Set<String> = ["channel", "limit", "platform"]
     private static let maxRetries = 10
     private static let maxRetryDelay: TimeInterval = 60
     static let protectedHeaders: Set<String> = [
@@ -107,11 +114,19 @@ final class APIClient {
 
     /// Make a GET request from discrete route components. Dynamic identifiers
     /// must use this form so reserved characters cannot alter route structure.
+    /// `queryItems` are restricted to ``APIClient/allowedQueryKeys`` and never
+    /// carry credentials, which belong in a request body.
     func get<T: Decodable>(
         pathComponents: [String],
+        queryItems: [URLQueryItem] = [],
         headers: [String: String] = [:]
     ) async throws -> T {
-        try await apiCall(pathComponents: pathComponents, method: "GET", headers: headers)
+        try await apiCall(
+            pathComponents: pathComponents,
+            method: "GET",
+            queryItems: queryItems,
+            headers: headers
+        )
     }
     
     /// Make a POST request from discrete route components. Each component is
@@ -135,6 +150,7 @@ final class APIClient {
         pathComponents: [String],
         method: String,
         body: Any? = nil,
+        queryItems: [URLQueryItem] = [],
         headers: [String: String] = [:]
     ) async throws -> T {
         guard let baseURL = validatedBaseURL() else {
@@ -144,7 +160,11 @@ final class APIClient {
                 status: 0
             )
         }
-        guard let url = endpointURL(baseURL: baseURL, pathComponents: pathComponents) else {
+        guard let url = endpointURL(
+            baseURL: baseURL,
+            pathComponents: pathComponents,
+            queryItems: queryItems
+        ) else {
             throw APIError(
                 code: "invalid_endpoint_path",
                 message: "Invalid API endpoint path",
