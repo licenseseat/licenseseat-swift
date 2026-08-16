@@ -166,6 +166,11 @@ extension LicenseSeat {
         guard !ageOverflow, offlineAge >= -clockSkewSeconds else {
             throw OfflineVerificationFailure(code: "clock_tamper")
         }
+        // Zero means "no additional host-side age cap". The signed `exp`,
+        // license expiry, and rollback watermark validated alongside this check
+        // remain the governing deadlines.
+        guard config.maxOfflineDays > 0 else { return }
+
         let (configuredGrace, graceOverflow) = config.maxOfflineDays
             .multipliedReportingOverflow(by: 86_400)
         let maximumOfflineSeconds = graceOverflow ? Int.max : configuredGrace

@@ -198,6 +198,32 @@ final class OfflineValidationTests: LicenseSeatTestCase {
         XCTAssertNil(result.code)
     }
 
+    func testLastSeenTimestampExposesTheProtectedWatermark() async throws {
+        let privateKey = Curve25519.Signing.PrivateKey()
+        let offlineToken = try makeOfflineToken(privateKey: privateKey)
+        sdk.cache.setOfflineToken(offlineToken)
+        XCTAssertTrue(
+            sdk.cache.setPublicKey(
+                "test-key-id",
+                Base64URL.encode(privateKey.publicKey.rawRepresentation)
+            )
+        )
+        cacheTestLicense()
+        XCTAssertNil(sdk.lastSeenTimestamp())
+
+        let before = Date()
+        let result = await sdk.verifyCachedOffline()
+        XCTAssertTrue(result.valid)
+
+        let watermark = try XCTUnwrap(sdk.lastSeenTimestamp())
+        XCTAssertEqual(
+            watermark.timeIntervalSince1970,
+            try XCTUnwrap(sdk.cache.getLastSeenTimestamp())
+        )
+        XCTAssertGreaterThanOrEqual(watermark, before.addingTimeInterval(-1))
+        XCTAssertLessThanOrEqual(watermark, Date())
+    }
+
     func testRubyGemSignedFixtureVerifiesInSwift() async throws {
         // This deterministic Ruby fixture deliberately includes Unicode,
         // escapes, slashes, nested arrays, Int64.max, negative zero, and
@@ -679,7 +705,97 @@ final class OfflineValidationTests: LicenseSeatTestCase {
         XCTAssertEqual(result.code, "no_public_key")
     }
 
-    func testMaxOfflineDaysZeroDisablesAllOfflineAuthorityAndSync() async throws {
+    func testMaxOfflineDaysZeroAppliesNoAdditionalHostAgeCap() async throws {
+        // A grant issued long ago but still within its own signed `exp` must
+        // authorize under the default policy: zero means "no host-side cap".
+        let privateKey = Curve25519.Signing.PrivateKey()
+        let now = Date()
+        let token = try makeOfflineToken(
+            iat: Int(now.addingTimeInterval(-400 * 86_400).timeIntervalSince1970),
+            exp: Int(now.addingTimeInterval(30 * 86_400).timeIntervalSince1970),
+            privateKey: privateKey
+        )
+        let defaultConfig = LicenseSeatConfig(
+            apiBaseUrl: "https://api.test.com",
+            productSlug: Self.testProductSlug,
+            storagePrefix: "offline_default_\(UUID().uuidString)_",
+            offlineFallbackMode: .always
+        )
+        XCTAssertEqual(defaultConfig.maxOfflineDays, 0)
+        XCTAssertTrue(defaultConfig.offlineFallbackEnabled)
+
+        let defaultSDK = LicenseSeat(
+            config: defaultConfig,
+            urlSession: Self.makeMockedSession()
+        )
+        defer { defaultSDK.reset() }
+        await defaultSDK.waitForInitialization()
+        XCTAssertTrue(defaultSDK.cache.setOfflineToken(token))
+        XCTAssertTrue(defaultSDK.cache.setPublicKey(
+            token.token.kid,
+            Base64URL.encode(privateKey.publicKey.rawRepresentation)
+        ))
+        XCTAssertTrue(defaultSDK.cache.setLicense(License(
+            licenseKey: token.token.licenseKey,
+            deviceId: token.token.fingerprint,
+            activationId: "default-offline-activation",
+            activatedAt: Date(),
+            lastValidated: Date()
+        )))
+
+        let result = await defaultSDK.verifyCachedOffline()
+
+        XCTAssertTrue(result.valid)
+        XCTAssertNil(result.code)
+        XCTAssertTrue(
+            defaultSDK.shouldFallbackToOffline(
+                error: URLError(.notConnectedToInternet)
+            )
+        )
+    }
+
+    func testExpiredGrantStillFailsUnderTheDefaultOfflinePolicy() async throws {
+        // The signed artifact's own expiry remains the governing deadline when
+        // no host-side cap is configured.
+        let privateKey = Curve25519.Signing.PrivateKey()
+        let now = Date()
+        let token = try makeOfflineToken(
+            iat: Int(now.addingTimeInterval(-40 * 86_400).timeIntervalSince1970),
+            exp: Int(now.addingTimeInterval(-86_400).timeIntervalSince1970),
+            privateKey: privateKey
+        )
+        let defaultConfig = LicenseSeatConfig(
+            apiBaseUrl: "https://api.test.com",
+            productSlug: Self.testProductSlug,
+            storagePrefix: "offline_default_expired_\(UUID().uuidString)_",
+            offlineFallbackMode: .always
+        )
+        let defaultSDK = LicenseSeat(
+            config: defaultConfig,
+            urlSession: Self.makeMockedSession()
+        )
+        defer { defaultSDK.reset() }
+        await defaultSDK.waitForInitialization()
+        XCTAssertTrue(defaultSDK.cache.setOfflineToken(token))
+        XCTAssertTrue(defaultSDK.cache.setPublicKey(
+            token.token.kid,
+            Base64URL.encode(privateKey.publicKey.rawRepresentation)
+        ))
+        XCTAssertTrue(defaultSDK.cache.setLicense(License(
+            licenseKey: token.token.licenseKey,
+            deviceId: token.token.fingerprint,
+            activationId: "default-offline-expired-activation",
+            activatedAt: Date(),
+            lastValidated: Date()
+        )))
+
+        let result = await defaultSDK.verifyCachedOffline()
+
+        XCTAssertFalse(result.valid)
+        XCTAssertEqual(result.code, "token_expired")
+    }
+
+    func testDisabledOfflineFallbackDisablesAllOfflineAuthorityAndSync() async throws {
         let privateKey = Curve25519.Signing.PrivateKey()
         let token = try makeOfflineToken(privateKey: privateKey)
         let disabledConfig = LicenseSeatConfig(
@@ -687,7 +803,7 @@ final class OfflineValidationTests: LicenseSeatTestCase {
             productSlug: Self.testProductSlug,
             storagePrefix: "offline_disabled_\(UUID().uuidString)_",
             offlineFallbackMode: .always,
-            maxOfflineDays: 0
+            offlineFallbackEnabled: false
         )
         let disabledSDK = LicenseSeat(
             config: disabledConfig,
@@ -727,22 +843,29 @@ final class OfflineValidationTests: LicenseSeatTestCase {
     }
 
     func testOutOfRangeOfflinePolicyFailsClosed() async throws {
-        let config = LicenseSeatConfig(
-            apiBaseUrl: "https://api.test.com",
-            productSlug: Self.testProductSlug,
-            storagePrefix: "offline_out_of_range_\(UUID().uuidString)_",
-            maxOfflineDays: 36_601
-        )
-        let invalidSDK = LicenseSeat(
-            config: config,
-            urlSession: Self.makeMockedSession()
-        )
-        defer { invalidSDK.reset() }
+        for days in [36_601, -1] {
+            let config = LicenseSeatConfig(
+                apiBaseUrl: "https://api.test.com",
+                productSlug: Self.testProductSlug,
+                storagePrefix: "offline_out_of_range_\(UUID().uuidString)_",
+                maxOfflineDays: days
+            )
+            let invalidSDK = LicenseSeat(
+                config: config,
+                urlSession: Self.makeMockedSession()
+            )
+            defer { invalidSDK.reset() }
 
-        let result = await invalidSDK.verifyCachedOffline()
+            let result = await invalidSDK.verifyCachedOffline()
 
-        XCTAssertFalse(result.valid)
-        XCTAssertEqual(result.code, "invalid_configuration")
+            XCTAssertFalse(result.valid, "maxOfflineDays \(days) must fail closed")
+            XCTAssertEqual(result.code, "invalid_configuration")
+            XCTAssertFalse(
+                invalidSDK.shouldFallbackToOffline(
+                    error: URLError(.notConnectedToInternet)
+                )
+            )
+        }
     }
 
     func testDuplicateEntitlementKeysCannotGrantAuthority() async throws {

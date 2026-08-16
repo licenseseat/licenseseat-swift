@@ -74,7 +74,10 @@ extension APIClient {
             if method == "POST",
                var dictionary = body as? [String: Any],
                config.telemetryEnabled {
-                dictionary["telemetry"] = TelemetryPayload.collect().toDictionary()
+                dictionary["telemetry"] = TelemetryPayload.collect(
+                    appVersion: config.appVersion,
+                    appBuild: config.appBuild
+                ).toDictionary()
                 request.httpBody = try JSONSerialization.data(withJSONObject: dictionary)
             } else {
                 request.httpBody = try JSONSerialization.data(withJSONObject: body)

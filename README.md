@@ -121,6 +121,11 @@ LicenseSeatStore.shared.configure(
 )
 ```
 
+Offline authority is enabled by default: after the SDK downloads a signed grant, that grant keeps
+the app licensed while the backend is unreachable, until the grant's own signed expiry. Set
+`maxOfflineDays` for a shorter host-side cap, or `offlineFallbackEnabled = false` to require an
+online decision for every validation.
+
 ### 2. Activate a License
 
 When a user enters their license key:
@@ -312,7 +317,7 @@ let config = LicenseSeatConfig(
     maxRetries: 3,
     retryDelay: 1,
     offlineFallbackMode: .networkOnly,             // Offline fallback strategy
-    maxOfflineDays: 7,                             // 7-day grace period
+    maxOfflineDays: 7,                             // Cap grants at 7 days
     maxClockSkewMs: 300000,                        // 5-minute clock tolerance
     debug: true
 )
@@ -373,13 +378,17 @@ if result.valid {
 | `autoValidateInterval`      | `TimeInterval`        | `3600` (1 hour)                    | Launch and periodic online validation interval (`≤ 0` disables both; local signed-cache verification remains enabled) |
 | `heartbeatInterval`         | `TimeInterval`        | `300` (5 min)                      | Standalone heartbeat ping interval       |
 | `networkRecheckInterval`    | `TimeInterval`        | `30`                               | Offline connectivity check interval      |
+| `requestTimeout`            | `TimeInterval`        | `30`                               | Per-request timeout for SDK-owned sessions (resource timeout is 2x; injected sessions keep their own policy) |
 | `maxRetries`                | `Int`                 | `3`                                | API retry attempts                       |
 | `retryDelay`                | `TimeInterval`        | `1`                                | Base retry delay (exponential backoff)   |
 | `offlineFallbackMode`       | `OfflineFallbackMode` | `.networkOnly`                     | Offline fallback strategy                |
 | `offlineTokenRefreshInterval` | `TimeInterval`      | `259200` (72 hours)                | Offline token refresh interval           |
-| `maxOfflineDays`            | `Int`                 | `0`                                | Maximum signed-grant age; `0` disables all offline authority, enabled values are `1...36,600` |
+| `offlineFallbackEnabled`    | `Bool`                | `true`                             | Whether a cached signed grant may authorize the app while offline |
+| `maxOfflineDays`            | `Int`                 | `0`                                | Additional host-side signed-grant age cap; `0` adds no cap (the grant's own expiry governs), enabled values are `1...36,600` |
 | `maxClockSkewMs`            | `TimeInterval`        | `300000` (5 min)                   | Clock tamper tolerance                   |
 | `telemetryEnabled`          | `Bool`                | `true`                             | Send device telemetry with supported licensing POST requests |
+| `appVersion`                | `String?`             | `nil`                              | Telemetry app version; `nil` reads `CFBundleShortVersionString` |
+| `appBuild`                  | `String?`             | `nil`                              | Telemetry app build; `nil` reads `CFBundleVersion`       |
 | `debug`                     | `Bool`                | `false`                            | Enable debug logging                     |
 
 ### Environment-Based Configuration
@@ -469,16 +478,22 @@ LicenseSeatStore.shared.configure(
     productSlug: "your-product"
 ) { config in
     config.offlineFallbackMode = .networkOnly     // Network-first fallback mode
-    config.maxOfflineDays = 7                     // 7-day grace period
+    config.maxOfflineDays = 7                     // Cap grants at 7 days
     config.offlineTokenRefreshInterval = 259200   // Refresh every 72 hours
 }
 ```
 
-Offline authority is disabled by default. Set `maxOfflineDays` to an explicit
-value in `1...36,600` only after choosing the maximum outage window your product
-will accept. Zero, negative values, and values above that range fail closed:
-cached grants cannot authorize features, launch-time offline verification is
-skipped, and background offline-token refresh is disabled.
+Offline authority is enabled by default, matching the Rust SDK. `maxOfflineDays`
+is an *additional* host-side age cap measured from the signed `iat` claim: the
+default `0` applies no extra cap, so the grant's own `exp`, the license expiry
+claim, and the clock-rollback watermark govern how long a cached grant lasts.
+Set it to an explicit value in `1...36,600` to expire grants sooner than the
+server does.
+
+Negative values and values above 36,600 fail closed, as does
+`offlineFallbackEnabled = false`: cached grants cannot authorize features,
+launch-time offline verification is skipped, and background offline-token
+refresh is disabled.
 
 ### Offline Fallback Modes
 
@@ -741,20 +756,23 @@ License keys and installation identifiers are sent together and are therefore tr
 | `platform` | `native` | Runtime platform |
 | `device_model` | `MacBookPro18,1` | Hardware model identifier |
 | `device_type` | `desktop` | Device category (`desktop`, `phone`, `tablet`, `tv`, `watch`, `headset`) |
-| `architecture` | `arm64` | CPU architecture (`arm64` or `x64`) |
+| `architecture` | `aarch64` | CPU architecture (`aarch64` or `x86_64`) |
 | `cpu_cores` | `10` | Processor count |
 | `memory_gb` | `16` | Physical RAM (rounded GB) |
 | `locale` | `en_US` | Full locale identifier |
 | `language` | `en` | Language code extracted from locale |
 | `timezone` | `America/New_York` | IANA timezone |
-| `app_version` | `2.1.0` | Host app version (`CFBundleShortVersionString`) |
-| `app_build` | `42` | Host app build number (`CFBundleVersion`) |
+| `app_version` | `2.1.0` | Host app version (`appVersion`, else `CFBundleShortVersionString`) |
+| `app_build` | `42` | Host app build number (`appBuild`, else `CFBundleVersion`) |
 | `screen_resolution` | `3024x1964` | Native screen resolution in pixels |
 | `display_scale` | `2.0` | Display scale factor (Retina = 2.0) |
 
 By default, the SDK creates the app-scoped installation identifier, protects it in Keychain on Apple platforms, and migrates older UserDefaults identifiers without changing the active seat. Applications can provide their own stable identifier through `deviceIdentifier` or `ActivationOptions.deviceId`. The SDK still decodes legacy `device_id` and `device_fingerprint` response aliases.
 
 `app_version` and `app_build` are read automatically from the host app's `Info.plist` when present.
+Command-line tools and SPM-embedded hosts without an `Info.plist` can set `appVersion` and `appBuild`
+in `LicenseSeatConfig` instead. Values that are empty, longer than 255 bytes, or contain control
+characters are omitted rather than sent.
 
 ### What the SDK Does Not Automatically Collect
 
@@ -1043,7 +1061,8 @@ config.offlineFallbackEnabled = true
 config.offlineLicenseRefreshInterval = 259200
 
 // Current
-config.offlineFallbackMode = .networkOnly  // or .always
+config.offlineFallbackEnabled = true       // Whether cached grants may authorize (default true)
+config.offlineFallbackMode = .networkOnly  // When fallback applies: .networkOnly or .always
 config.offlineTokenRefreshInterval = 259200
 ```
 

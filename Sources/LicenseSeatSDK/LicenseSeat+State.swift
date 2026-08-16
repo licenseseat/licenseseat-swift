@@ -92,6 +92,16 @@ public extension LicenseSeat {
         cache.getLicense()
     }
 
+    /// The protected clock watermark: the most recent moment the SDK accepted
+    /// an authoritative online contact or a valid offline verification.
+    ///
+    /// Exposed for diagnostics and parity with the Rust SDK's
+    /// `last_seen_timestamp()`. Offline enforcement always reads the protected
+    /// cache directly, never this accessor.
+    func lastSeenTimestamp() -> Date? {
+        cache.getLastSeenTimestamp().map(Date.init(timeIntervalSince1970:))
+    }
+
     /// Check API health
     func healthCheck() async throws -> HealthResponse {
         await waitForInitialization()

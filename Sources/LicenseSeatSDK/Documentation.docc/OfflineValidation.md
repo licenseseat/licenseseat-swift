@@ -34,13 +34,12 @@ LicenseSeatStore.shared.configure(
 
 `always` requests fallback for other nonterminal failures. It does not override authoritative license invalidation.
 
-Offline authority is disabled by default. `maxOfflineDays` must be in
-`1...36,600` to permit a cached signed token to grant access; it then applies an
-application-side cap measured from the token's signed `iat` claim. Zero,
-negative values, and values above that range fail closed and also disable
-launch-time verification and background offline-token refresh. The signed token
-`exp` and underlying `license_expires_at` are always enforced as additional
-upper bounds.
+Offline authority is enabled by default. `maxOfflineDays` applies an additional
+application-side cap measured from the token's signed `iat` claim; the default
+`0` applies no such cap. Values above 36,600, negative values, and
+`offlineFallbackEnabled = false` fail closed and also disable launch-time
+verification and background offline-token refresh. The signed token `exp` and
+underlying `license_expires_at` are always enforced as upper bounds.
 
 Intervals that are zero, negative, non-finite, or too large for the scheduler disable their corresponding timer safely.
 
@@ -154,8 +153,8 @@ Treat any code other than a valid result as unlicensed. Do not add a permissive 
 
 - Activate and complete at least one successful offline-asset sync before testing an outage.
 - Keep `.networkOnly` unless a deliberate compatibility requirement justifies `.always`.
-- Set `maxOfflineDays` to the product's outage tolerance; leaving it at `0`
-  intentionally disables offline access. The configured window can be shorter
-  than the server token TTL.
+- Set `maxOfflineDays` to the product's outage tolerance when it is shorter than
+  the server token TTL; leaving it at `0` lets the signed token expiry govern.
+  Set `offlineFallbackEnabled = false` to require an online decision instead.
 - Rotate Ed25519 keys by issuing a new unique key ID. Do not reuse a key ID for different key material.
 - On logout, account switching, or license removal, call `deactivate()` or `purgeCachedLicense()` so protected grants do not cross identities.

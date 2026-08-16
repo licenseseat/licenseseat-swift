@@ -102,20 +102,24 @@ public final class LicenseSeatStore {
     ///   - force: Recreate the underlying ``LicenseSeat`` even if it has been configured before.
     ///   - urlSession: Optional session injection for custom networking or tests.
     ///   - customize: Closure to modify the default ``LicenseSeatConfig`` before initialization.
+    /// - Returns: `true` when the configuration was applied. A second call
+    ///   without `force` logs a warning, leaves the existing instance intact,
+    ///   and returns `false`.
+    @discardableResult
     public func configure(apiKey: String,
                           productSlug: String,
                           apiBaseURL: URL? = nil,
                           force: Bool = false,
                           urlSession: URLSession? = nil,
-                          options customize: (inout LicenseSeatConfig) -> Void = { _ in }) {
-        if seat != nil && !force { return }
+                          options customize: (inout LicenseSeatConfig) -> Void = { _ in }) -> Bool {
+        guard canConfigure(force: force) else { return false }
         let config = configured(
             apiKey: apiKey,
             productSlug: productSlug,
             apiBaseURL: apiBaseURL,
             customize: customize
         )
-        configureInstance(
+        return configureInstance(
             config: config,
             force: force,
             urlSession: urlSession
@@ -126,23 +130,36 @@ public final class LicenseSeatStore {
     ///
     /// Set `productSlug` in `options`, or migrate to
     /// ``configure(apiKey:productSlug:apiBaseURL:force:urlSession:options:)``.
+    /// - Returns: `true` when the configuration was applied.
+    @discardableResult
     public func configure(apiKey: String,
                           apiBaseURL: URL? = nil,
                           force: Bool = false,
                           urlSession: URLSession? = nil,
-                          options customize: (inout LicenseSeatConfig) -> Void = { _ in }) {
-        if seat != nil && !force { return }
+                          options customize: (inout LicenseSeatConfig) -> Void = { _ in }) -> Bool {
+        guard canConfigure(force: force) else { return false }
         let config = configured(
             apiKey: apiKey,
             productSlug: nil,
             apiBaseURL: apiBaseURL,
             customize: customize
         )
-        configureInstance(
+        return configureInstance(
             config: config,
             force: force,
             urlSession: urlSession
         )
+    }
+
+    /// One predicate for both configuration entry points so a rejected call is
+    /// always reported the same way instead of returning silently.
+    private func canConfigure(force: Bool) -> Bool {
+        guard seat != nil, !force else { return true }
+        seat?.log(
+            "[Warning] LicenseSeatStore is already configured.",
+            "Ignoring this configure call; pass force: true to replace the existing instance."
+        )
+        return false
     }
 
     private func configured(
@@ -161,12 +178,13 @@ public final class LicenseSeatStore {
         return config
     }
 
+    @discardableResult
     private func configureInstance(
         config: LicenseSeatConfig,
         force: Bool,
         urlSession: URLSession?
-    ) {
-        if seat != nil && !force { return }
+    ) -> Bool {
+        guard canConfigure(force: force) else { return false }
 
         if force {
             seat?.shutdown()
@@ -177,6 +195,7 @@ public final class LicenseSeatStore {
             LicenseSeat.installShared(instance)
         }
         adoptSharedSeat(instance)
+        return true
     }
     
     // MARK: – Public pass-through API

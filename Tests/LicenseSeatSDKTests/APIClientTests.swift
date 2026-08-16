@@ -708,6 +708,47 @@ final class APIClientTests: LicenseSeatTestCase {
             XCTFail("Unexpected error: \(error)")
         }
     }
+
+    func testConfiguredRequestTimeoutReachesOwnedSessionConfiguration() {
+        let defaultConfiguration = APIClient.makeOwnedSessionConfiguration(
+            for: LicenseSeatConfig.default
+        )
+        XCTAssertEqual(LicenseSeatConfig.default.requestTimeout, 30)
+        XCTAssertEqual(defaultConfiguration.timeoutIntervalForRequest, 30)
+        XCTAssertEqual(defaultConfiguration.timeoutIntervalForResource, 60)
+
+        let customConfiguration = APIClient.makeOwnedSessionConfiguration(
+            for: LicenseSeatConfig(requestTimeout: 12)
+        )
+        XCTAssertEqual(customConfiguration.timeoutIntervalForRequest, 12)
+        XCTAssertEqual(customConfiguration.timeoutIntervalForResource, 24)
+
+        // Cookies, caching, and the rest of the transport policy survive the
+        // extracted builder.
+        XCTAssertFalse(customConfiguration.httpShouldSetCookies)
+        XCTAssertEqual(customConfiguration.httpCookieAcceptPolicy, .never)
+        XCTAssertNil(customConfiguration.urlCache)
+        XCTAssertEqual(
+            customConfiguration.requestCachePolicy,
+            .reloadIgnoringLocalCacheData
+        )
+    }
+
+    func testInvalidRequestTimeoutFallsBackToTheDefault() {
+        let invalidTimeouts: [TimeInterval] = [0, -5, .infinity, .nan, 301]
+
+        for timeout in invalidTimeouts {
+            let config = LicenseSeatConfig(requestTimeout: timeout)
+            XCTAssertEqual(
+                config.resolvedRequestTimeout,
+                30,
+                "requestTimeout \(timeout) must fall back to the default"
+            )
+            let configuration = APIClient.makeOwnedSessionConfiguration(for: config)
+            XCTAssertEqual(configuration.timeoutIntervalForRequest, 30)
+            XCTAssertEqual(configuration.timeoutIntervalForResource, 60)
+        }
+    }
 }
 
 // MARK: - Helpers

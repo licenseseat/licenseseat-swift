@@ -387,14 +387,83 @@ final class LicenseSeatStoreTests: LicenseSeatTestCase {
         // First config
         store.configure(apiKey: "key1", urlSession: URLSession.shared)
         let firstSeat = store.seat
-        
+
         // Second config without force - should be ignored
         store.configure(apiKey: "key2", urlSession: URLSession.shared)
         XCTAssertTrue(store.seat === firstSeat)
-        
+
         // Third config with force - should create new seat
         store.configure(apiKey: "key3", force: true, urlSession: URLSession.shared)
         XCTAssertFalse(store.seat === firstSeat)
+    }
+
+    func testRepeatedConfigureReportsThatItWasIgnored() async {
+        // `debug` routes the warning through the SDK's logger, so this also
+        // exercises the message path rather than only the return value.
+        // `store` is created through `init(config:)`, so the first applied
+        // configuration is an explicit replacement.
+        let applied = store.configure(
+            apiKey: "first-key",
+            productSlug: Self.testProductSlug,
+            force: true,
+            urlSession: URLSession.shared
+        ) { config in
+            config.debug = true
+            config.storagePrefix = "configure_result_\(UUID().uuidString)_"
+        }
+        let firstSeat = store.seat
+        XCTAssertTrue(applied)
+        XCTAssertNotNil(firstSeat)
+
+        let ignored = store.configure(
+            apiKey: "second-key",
+            productSlug: Self.testProductSlug,
+            urlSession: URLSession.shared
+        )
+        XCTAssertFalse(ignored, "A second configure without force must report that it was ignored")
+        XCTAssertTrue(store.seat === firstSeat)
+        XCTAssertEqual(store.seat?.config.apiKey, "first-key")
+
+        let ignoredCompatibilityOverload = store.configure(
+            apiKey: "third-key",
+            urlSession: URLSession.shared
+        )
+        XCTAssertFalse(ignoredCompatibilityOverload)
+        XCTAssertTrue(store.seat === firstSeat)
+
+        let forced = store.configure(
+            apiKey: "fourth-key",
+            productSlug: Self.testProductSlug,
+            force: true,
+            urlSession: URLSession.shared
+        )
+        XCTAssertTrue(forced)
+        XCTAssertFalse(store.seat === firstSeat)
+        XCTAssertEqual(store.seat?.config.apiKey, "fourth-key")
+    }
+
+    func testRepeatedStaticConfigureReportsThatItWasIgnored() async {
+        let applied = LicenseSeat.configure(
+            apiKey: "static-first-key",
+            productSlug: Self.testProductSlug,
+            force: true
+        ) { config in
+            config.debug = true
+            config.storagePrefix = "static_configure_result_\(UUID().uuidString)_"
+            config.autoValidateInterval = 0
+            config.heartbeatInterval = 0
+        }
+        let firstShared = LicenseSeat.shared
+        XCTAssertTrue(applied)
+
+        let ignored = LicenseSeat.configure(
+            apiKey: "static-second-key",
+            productSlug: Self.testProductSlug
+        )
+
+        XCTAssertFalse(ignored)
+        XCTAssertTrue(LicenseSeat.shared === firstShared)
+        XCTAssertEqual(LicenseSeat.shared.config.apiKey, "static-first-key")
     }
 
     func testForceReconfigurationShutsDownReplacedInstance() async throws {

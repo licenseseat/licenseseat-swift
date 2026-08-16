@@ -80,9 +80,50 @@ final class TelemetryPayloadTests: LicenseSeatTestCase {
     func testArchitectureIsNonNil() {
         let payload = TelemetryPayload.collect()
         XCTAssertNotNil(payload.architecture)
-        let validArch = ["arm64", "x64"]
+        // Rust's `std::env::consts::ARCH` vocabulary, shared by every SDK so
+        // the dashboard does not bucket the same hardware twice.
+        let validArch = ["aarch64", "x86_64"]
         XCTAssertTrue(validArch.contains(payload.architecture!),
-                       "architecture should be arm64 or x64, got: \(payload.architecture!)")
+                       "architecture should be aarch64 or x86_64, got: \(payload.architecture!)")
+        #if arch(arm64)
+        XCTAssertEqual(payload.architecture, "aarch64")
+        #elseif arch(x86_64)
+        XCTAssertEqual(payload.architecture, "x86_64")
+        #endif
+    }
+
+    func testConfiguredAppVersionAndBuildOverrideBundleValues() {
+        let payload = TelemetryPayload.collect(appVersion: "2.5.1", appBuild: "1842")
+
+        XCTAssertEqual(payload.appVersion, "2.5.1")
+        XCTAssertEqual(payload.appBuild, "1842")
+
+        let dict = payload.toDictionary()
+        XCTAssertEqual(dict["app_version"] as? String, "2.5.1")
+        XCTAssertEqual(dict["app_build"] as? String, "1842")
+    }
+
+    func testNilAppVersionAndBuildFallBackToBundleValues() {
+        let payload = TelemetryPayload.collect()
+        let bundleInfo = Bundle.main.infoDictionary
+
+        XCTAssertEqual(
+            payload.appVersion,
+            bundleInfo?["CFBundleShortVersionString"] as? String
+        )
+        XCTAssertEqual(payload.appBuild, bundleInfo?["CFBundleVersion"] as? String)
+    }
+
+    func testOutOfBoundsAppVersionAndBuildAreOmitted() {
+        let payload = TelemetryPayload.collect(
+            appVersion: String(repeating: "9", count: 256),
+            appBuild: "build\u{0}1"
+        )
+
+        XCTAssertNil(payload.appVersion)
+        XCTAssertNil(payload.appBuild)
+        XCTAssertNil(payload.toDictionary()["app_version"])
+        XCTAssertNil(payload.toDictionary()["app_build"])
     }
 
     func testCpuCoresIsPositive() {
@@ -403,6 +444,81 @@ final class TelemetryAPIIntegrationTests: LicenseSeatTestCase {
 
         XCTAssertNotNil(capturedBody)
         XCTAssertNil(capturedBody?["telemetry"], "telemetry should NOT be in POST body when disabled")
+
+        sdk.reset()
+        MockURLProtocol.reset()
+    }
+
+    func testConfiguredAppVersionAndBuildAreSentWithPOSTBody() async throws {
+        var capturedBody: [String: Any]?
+
+        MockURLProtocol.requestHandler = { request in
+            guard let url = request.url else { throw URLError(.badURL) }
+
+            if url.path.contains("/activate"),
+               let bodyData = TelemetryAPIIntegrationTests.readBody(from: request) {
+                capturedBody = try? JSONSerialization.jsonObject(with: bodyData) as? [String: Any]
+            }
+
+            if url.path.contains("/activate") {
+                let response: [String: Any] = [
+                    "object": "activation",
+                    "id": "act-test-uuid",
+                    "fingerprint": "test-device",
+                    "device_name": NSNull(),
+                    "license_key": "TEST-KEY",
+                    "activated_at": ISO8601DateFormatter().string(from: Date()),
+                    "deactivated_at": NSNull(),
+                    "ip_address": NSNull(),
+                    "metadata": NSNull(),
+                    "license": [
+                        "object": "license",
+                        "key": "TEST-KEY",
+                        "status": "active",
+                        "starts_at": NSNull(),
+                        "expires_at": NSNull(),
+                        "mode": "hardware_locked",
+                        "plan_key": "pro",
+                        "seat_limit": 5,
+                        "active_seats": 1,
+                        "active_entitlements": [],
+                        "metadata": NSNull(),
+                        "product": ["slug": Self.testProductSlug, "name": "Test App"]
+                    ]
+                ]
+                let data = try JSONSerialization.data(withJSONObject: response)
+                return (HTTPURLResponse(url: url, statusCode: 201, httpVersion: nil,
+                                        headerFields: ["Content-Type": "application/json"])!, data)
+            }
+            return (HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil,
+                                    headerFields: ["Content-Type": "application/json"])!,
+                    try JSONSerialization.data(withJSONObject: [:]))
+        }
+
+        let urlConf = URLSessionConfiguration.ephemeral
+        urlConf.protocolClasses = [MockURLProtocol.self]
+        let session = URLSession(configuration: urlConf)
+
+        let config = LicenseSeatConfig(
+            apiBaseUrl: "https://api.test.com",
+            apiKey: "unit-test",
+            productSlug: Self.testProductSlug,
+            storagePrefix: "telemetry_app_version_test_\(UUID().uuidString)_",
+            deviceIdentifier: "test-device",
+            autoValidateInterval: 0,
+            heartbeatInterval: 0,
+            telemetryEnabled: true,
+            appVersion: "3.1.4",
+            appBuild: "2718"
+        )
+        let sdk = LicenseSeat(config: config, urlSession: session)
+        sdk.cache.clear()
+
+        _ = try await sdk.activate(licenseKey: "TEST-KEY")
+
+        let telemetry = capturedBody?["telemetry"] as? [String: Any]
+        XCTAssertEqual(telemetry?["app_version"] as? String, "3.1.4")
+        XCTAssertEqual(telemetry?["app_build"] as? String, "2718")
 
         sdk.reset()
         MockURLProtocol.reset()

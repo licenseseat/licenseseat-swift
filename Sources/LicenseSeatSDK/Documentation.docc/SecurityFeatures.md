@@ -122,10 +122,10 @@ let config = LicenseSeatConfig(
 )
 ```
 
-`maxOfflineDays == 0` disables offline authority entirely. Values in
-`1...36,600` enable it for at most that signed age; negative and larger values
-also fail closed. Token and underlying license expiry remain additional upper
-bounds whenever offline authority is enabled.
+`maxOfflineDays == 0`, the default, applies no additional host-side age cap:
+token and underlying license expiry govern. Values in `1...36,600` expire a
+grant at most that many days after its signed `iat`. Negative and larger values
+fail closed, as does `offlineFallbackEnabled == false`.
 
 ## Application Guidance
 

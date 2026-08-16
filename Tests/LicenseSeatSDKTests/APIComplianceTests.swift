@@ -528,6 +528,7 @@ final class ConfigurationTests: LicenseSeatTestCase {
         XCTAssertEqual(config.autoValidateInterval, 3600) // 1 hour
         XCTAssertEqual(config.heartbeatInterval, 300) // 5 minutes
         XCTAssertEqual(config.networkRecheckInterval, 30)
+        XCTAssertEqual(config.requestTimeout, 30)
         XCTAssertEqual(config.maxRetries, 3)
         XCTAssertEqual(config.retryDelay, 1)
         XCTAssertFalse(config.debug)
@@ -535,6 +536,10 @@ final class ConfigurationTests: LicenseSeatTestCase {
         XCTAssertEqual(config.maxOfflineDays, 0)
         XCTAssertEqual(config.maxClockSkewMs, 300000) // 5 minutes
         XCTAssertEqual(config.offlineFallbackMode, .networkOnly)
+        XCTAssertTrue(config.offlineFallbackEnabled)
+        XCTAssertTrue(config.offlineAuthorityEnabled)
+        XCTAssertNil(config.appVersion)
+        XCTAssertNil(config.appBuild)
     }
 
     func testProductSlugConfiguration() {

@@ -102,6 +102,7 @@ extension HeartbeatTimerTests: @unchecked Sendable {}
 extension LicenseSeatSDKTests: @unchecked Sendable {}
 extension LicenseSeatStoreTests: @unchecked Sendable {}
 extension OfflineValidationTests: @unchecked Sendable {}
+extension PublicAPISurfaceTests: @unchecked Sendable {}
 extension TelemetryAPIIntegrationTests: @unchecked Sendable {}
 
 /// Cross-platform async expectation helper that avoids sending an
