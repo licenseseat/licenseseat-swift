@@ -48,6 +48,10 @@ The official Swift SDK for [LicenseSeat](https://licenseseat.com) — the simple
     - [Offline Fallback Modes](#offline-fallback-modes)
     - [Offline Token Structure](#offline-token-structure)
   - [Heartbeat](#heartbeat)
+  - [License-gated Sparkle updates](#license-gated-sparkle-updates)
+    - [Point Sparkle at the feed](#point-sparkle-at-the-feed)
+    - [Gating the feed on a license](#gating-the-feed-on-a-license)
+    - [Advanced: the releases API](#advanced-the-releases-api)
   - [Event System](#event-system)
     - [Available Events](#available-events)
   - [API Response Format](#api-response-format)
@@ -574,6 +578,130 @@ Set `heartbeatInterval` to `0` to disable auto-heartbeat while keeping auto-vali
 Auto-validation and heartbeat use independent schedules. Disabling heartbeat
 does not disable validation, and disabling validation does not create extra
 heartbeat traffic.
+
+---
+
+## License-gated Sparkle updates
+
+LicenseSeat generates the appcast from the releases you publish and serves it
+at a stable URL. For Sparkle, the entire integration is one `Info.plist` key —
+**this rail needs no SDK code at all**, and works the same whether or not your
+app links LicenseSeat.
+
+### Point Sparkle at the feed
+
+```xml
+<key>SUFeedURL</key>
+<string>https://licenseseat.com/p/your-product/appcast.xml</string>
+```
+
+`appcast.xml` is the stable channel. Pre-release channels have their own URL:
+
+| Channel | Feed URL |
+|---------|----------|
+| stable  | `https://licenseseat.com/p/your-product/appcast.xml` |
+| beta    | `https://licenseseat.com/p/your-product/appcast/beta.xml` |
+| alpha   | `https://licenseseat.com/p/your-product/appcast/alpha.xml` |
+
+Each feed is cumulative — beta carries stable and beta, alpha carries all three —
+so a pre-release user never falls behind a stable build. Items are emitted with
+`sparkle:version`,
+`sparkle:shortVersionString`, `sparkle:channel`, `sparkle:minimumSystemVersion`,
+`sparkle:minimumAutoupdateVersion`, `sparkle:criticalUpdate`,
+`sparkle:phasedRolloutInterval`, release notes (inline and as a link), delta
+enclosures, and Ed25519 enclosure signatures under both the `sparkle:edSignature`
+and `sparkle:signature` spellings — so WinSparkle and NetSparkle read the same
+feed. Signed feeds (`SURequireSignedFeed`) are a per-product server setting and
+require an active Sparkle signing key.
+
+### Gating the feed on a license
+
+A product's update feed is open by default: anyone can read it and download the
+artifacts. Switching the product to the `licensed` update-feed policy makes both
+the feed and the artifact downloads license-aware:
+
+- An unidentified request receives an **empty feed**, never a 4xx — update
+  frameworks surface an HTTP error as a failed update check rather than as
+  "no update available".
+- A license whose `updates` entitlement carries an expiry only sees releases
+  published before it, so a lapsed customer keeps their last entitled build
+  instead of hitting an error state.
+- Artifact downloads require the same identity as the feed.
+
+Identity travels either as an `Authorization: Bearer <license key>` header or as
+a `license_key` query parameter, and is needed on both the feed request and the
+artifact request. Two `SPUUpdaterDelegate` hooks cover both:
+
+```swift
+import Sparkle
+import LicenseSeat
+
+final class UpdateGate: NSObject, SPUUpdaterDelegate {
+    private var licenseKey: String? {
+        LicenseSeatStore.shared.seat?.currentLicense()?.licenseKey
+    }
+
+    /// Feed request: appended to SUFeedURL as `?license_key=…`.
+    func feedParameters(
+        for updater: SPUUpdater,
+        sendingSystemProfile sendingProfile: Bool
+    ) -> [[String: String]] {
+        guard let licenseKey else { return [] }
+        return [["key": "license_key", "value": licenseKey]]
+    }
+
+    /// Artifact request: Sparkle downloads the enclosure URL directly, so the
+    /// credential has to be attached to that request too.
+    func updater(
+        _ updater: SPUUpdater,
+        willDownloadUpdate item: SUAppcastItem,
+        with request: NSMutableURLRequest
+    ) {
+        guard let licenseKey else { return }
+        request.setValue("Bearer \(licenseKey)", forHTTPHeaderField: "Authorization")
+    }
+}
+```
+
+An unlicensed user simply sees no updates, which is the intended behavior. If
+your product's feed policy is open, skip the delegate entirely.
+
+### Advanced: the releases API
+
+The SDK can also query the releases API directly, for the flows an appcast does
+not cover: an in-app "what's new" list, a custom update check on a platform
+Sparkle does not serve, or an artifact your app downloads itself.
+
+```swift
+let seat = LicenseSeatStore.shared.seat
+
+// The newest published build for this product, channel, and platform.
+let latest = try await seat?.getLatestRelease(channel: "stable", platform: "macos")
+
+// Recent history, newest first. `limit` is 1...100; the server default is 20.
+let recent = try await seat?.listReleases(channel: "stable", limit: 10) ?? []
+
+// A short-lived, signed authorization for one gated artifact.
+let token = try await seat?.generateDownloadToken(
+    version: "2.1.0",
+    licenseKey: licenseKey,
+    platform: "macos"
+)
+```
+
+`getLatestRelease` and `listReleases` read public endpoints and need only a
+configured product slug. `generateDownloadToken` needs an API key.
+
+A few things worth knowing:
+
+- A release published for platform `any` is returned for every platform filter,
+  so `Release.platform` is not always the platform you asked for.
+- The download token is a bearer credential bound to one license and one
+  release, and expires in minutes (5 by default). Pass it to the artifact URL as
+  `?token=…`, mint a fresh one per download, and do not persist it.
+- Responses are checked before they are returned: a release that does not
+  describe the configured product and the requested filters, or a token that is
+  already expired, is rejected rather than handed to your update logic.
 
 ---
 
