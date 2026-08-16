@@ -101,6 +101,8 @@ extension EntitlementTests: @unchecked Sendable {}
 extension HeartbeatTimerTests: @unchecked Sendable {}
 extension LicenseSeatSDKTests: @unchecked Sendable {}
 extension LicenseSeatStoreTests: @unchecked Sendable {}
+extension MachineFileTests: @unchecked Sendable {}
+extension ReleasesTests: @unchecked Sendable {}
 extension OfflineValidationTests: @unchecked Sendable {}
 extension PublicAPISurfaceTests: @unchecked Sendable {}
 extension TelemetryAPIIntegrationTests: @unchecked Sendable {}
