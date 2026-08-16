@@ -10,9 +10,25 @@ import Foundation
 
 extension LicenseSeat {
 
-    /// Start automatic license validation
-    /// - Parameter licenseKey: License key to validate periodically
-    func startAutoValidation(licenseKey: String) {
+    /// Whether a periodic auto-validation loop is currently scheduled.
+    ///
+    /// This reflects the SDK-owned task, not an in-flight request: it becomes
+    /// `true` on ``startAutoValidation(licenseKey:)`` and `false` after
+    /// ``stopAutoValidation()``, ``reset()``, deactivation, or an authoritative
+    /// invalidation.
+    public var isAutoValidating: Bool {
+        validationTask != nil
+    }
+
+    /// Start automatic license validation.
+    ///
+    /// The SDK calls this after a successful activation and when a cached
+    /// license is loaded at launch. Call it directly only when the host owns
+    /// the validation lifecycle. Any previously scheduled loop is cancelled
+    /// first, and nothing is scheduled when `autoValidateInterval` is zero,
+    /// negative, non-finite, or larger than the scheduler bound.
+    /// - Parameter licenseKey: License key to validate periodically.
+    public func startAutoValidation(licenseKey: String) {
         // Cancel any existing timer/task
         stopAutoValidation()
 
@@ -25,12 +41,17 @@ extension LicenseSeat {
             return
         }
 
+        // Publish the first cycle before the task starts so `nextAutoValidationAt`
+        // and the emitted event always describe the same deadline.
+        let firstRunAt = Date().addingTimeInterval(interval)
+        nextAutoValidationAt = firstRunAt
+
         // A Task is run-loop independent and inherits this type's MainActor.
         validationTask = Task { @MainActor [weak self] in
             guard let self else { return }
             // Emit first cycle information immediately so the UI can show when the next run will be.
             self.eventBus.emit("autovalidation:cycle", [
-                "nextRunAt": Date().addingTimeInterval(interval)
+                "nextRunAt": firstRunAt
             ])
 
             // Continuous loop until cancelled.
@@ -50,21 +71,30 @@ extension LicenseSeat {
         }
     }
 
-    /// Stop automatic validation
-    func stopAutoValidation() {
+    /// Stop automatic validation.
+    ///
+    /// Clears ``nextAutoValidationAt`` and emits `autovalidation:stopped`.
+    /// Cached license state, heartbeat, and offline-token refresh are
+    /// unaffected.
+    public func stopAutoValidation() {
         // Invalidate legacy timer (if any)
         validationTimer?.invalidate()
         validationTimer = nil
         // Cancel concurrency task
         validationTask?.cancel()
         validationTask = nil
+        nextAutoValidationAt = nil
         eventBus.emit("autovalidation:stopped", [:])
     }
 
     // MARK: - Standalone Heartbeat
 
     /// Start a standalone heartbeat timer, independent from auto-validation.
-    func startHeartbeat() {
+    ///
+    /// Any previously scheduled heartbeat is cancelled first, and nothing is
+    /// scheduled when `heartbeatInterval` is zero, negative, non-finite, or
+    /// larger than the scheduler bound.
+    public func startHeartbeat() {
         stopHeartbeat()
 
         let interval = config.heartbeatInterval
@@ -95,8 +125,10 @@ extension LicenseSeat {
         }
     }
 
-    /// Stop the standalone heartbeat timer
-    func stopHeartbeat() {
+    /// Stop the standalone heartbeat timer.
+    ///
+    /// Automatic validation and offline-token refresh keep running.
+    public func stopHeartbeat() {
         heartbeatTask?.cancel()
         heartbeatTask = nil
     }
@@ -115,9 +147,9 @@ extension LicenseSeat {
 
         // Announce next scheduled run
         if validationTask != nil {
-            eventBus.emit("autovalidation:cycle", [
-                "nextRunAt": Date().addingTimeInterval(config.autoValidateInterval)
-            ])
+            let nextRunAt = Date().addingTimeInterval(config.autoValidateInterval)
+            nextAutoValidationAt = nextRunAt
+            eventBus.emit("autovalidation:cycle", ["nextRunAt": nextRunAt])
         }
     }
 }

@@ -151,6 +151,12 @@ public final class LicenseSeat {
     /// Current auto-validation license key
     internal var currentAutoLicenseKey: String?
 
+    /// Timestamp of the next scheduled automatic validation cycle, or `nil`
+    /// when automatic validation is not running. Mirrors the value carried by
+    /// the `autovalidation:cycle` event, so hosts that do not observe events
+    /// can still show a countdown.
+    public internal(set) var nextAutoValidationAt: Date?
+
     /// Online/offline status
     public internal(set) var isOnline = true
 

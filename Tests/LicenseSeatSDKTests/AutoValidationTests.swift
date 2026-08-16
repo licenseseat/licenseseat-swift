@@ -207,4 +207,61 @@ final class AutoValidationTests: LicenseSeatTestCase {
         _ = try? await Task.sleep(nanoseconds: 200_000_000)
         XCTAssertEqual(requestCount.value, 0)
     }
+
+    @MainActor
+    func testPublicBackgroundTaskControlStartsAndStopsSDKWork() async throws {
+        let config = LicenseSeatConfig(
+            apiBaseUrl: "https://example.com",
+            apiKey: "test-api-key",
+            productSlug: Self.testProductSlug,
+            storagePrefix: "public_control_test_\(UUID().uuidString)_",
+            deviceIdentifier: "test-device",
+            autoValidateInterval: 600,
+            heartbeatInterval: 600
+        )
+        sdk = LicenseSeat(config: config, urlSession: URLSession(configuration: .ephemeral))
+        await sdk.waitForInitialization()
+
+        XCTAssertFalse(sdk.isAutoValidating)
+        XCTAssertNil(sdk.nextAutoValidationAt)
+
+        let startedAt = Date()
+        sdk.startAutoValidation(licenseKey: "PUBLIC-CONTROL-LICENSE")
+        sdk.startHeartbeat()
+
+        XCTAssertTrue(sdk.isAutoValidating)
+        XCTAssertNotNil(sdk.heartbeatTask)
+        let nextRun = try XCTUnwrap(sdk.nextAutoValidationAt)
+        XCTAssertGreaterThanOrEqual(nextRun, startedAt.addingTimeInterval(600))
+        XCTAssertLessThanOrEqual(nextRun, Date().addingTimeInterval(600))
+
+        sdk.stopAutoValidation()
+        sdk.stopHeartbeat()
+
+        XCTAssertFalse(sdk.isAutoValidating)
+        XCTAssertNil(sdk.nextAutoValidationAt)
+        XCTAssertNil(sdk.heartbeatTask)
+    }
+
+    @MainActor
+    func testDisabledIntervalLeavesNextAutoValidationUnset() async throws {
+        let config = LicenseSeatConfig(
+            apiBaseUrl: "https://example.com",
+            apiKey: "test-api-key",
+            productSlug: Self.testProductSlug,
+            storagePrefix: "public_control_disabled_\(UUID().uuidString)_",
+            deviceIdentifier: "test-device",
+            autoValidateInterval: 0,
+            heartbeatInterval: 0
+        )
+        sdk = LicenseSeat(config: config, urlSession: URLSession(configuration: .ephemeral))
+        await sdk.waitForInitialization()
+
+        sdk.startAutoValidation(licenseKey: "PUBLIC-CONTROL-LICENSE")
+        sdk.startHeartbeat()
+
+        XCTAssertFalse(sdk.isAutoValidating)
+        XCTAssertNil(sdk.nextAutoValidationAt)
+        XCTAssertNil(sdk.heartbeatTask)
+    }
 }
