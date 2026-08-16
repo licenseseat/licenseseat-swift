@@ -87,7 +87,8 @@ final class MachineFileTests: LicenseSeatTestCase {
     private static func makeConfig(
         productSlug: String? = fixture.productSlug,
         maxOfflineDays: Int = 36_600,
-        deviceIdentifier: String? = fixture.fingerprint
+        deviceIdentifier: String? = fixture.fingerprint,
+        offlineFallbackEnabled: Bool = true
     ) -> LicenseSeatConfig {
         LicenseSeatConfig(
             apiBaseUrl: "https://api.test.com",
@@ -98,6 +99,7 @@ final class MachineFileTests: LicenseSeatTestCase {
             autoValidateInterval: 0,
             heartbeatInterval: 0,
             maxRetries: 0,
+            offlineFallbackEnabled: offlineFallbackEnabled,
             maxOfflineDays: maxOfflineDays
         )
     }
@@ -375,8 +377,10 @@ final class MachineFileTests: LicenseSeatTestCase {
     }
 
     func testOfflineAuthorityDisabledFailsClosed() throws {
+        // Since 0.5.0, disabling offline authority is an explicit flag;
+        // maxOfflineDays == 0 means "no additional host age cap".
         let disabled = LicenseSeat(
-            config: Self.makeConfig(maxOfflineDays: 0),
+            config: Self.makeConfig(offlineFallbackEnabled: false),
             urlSession: Self.makeMockedSession()
         )
         defer { disabled.reset() }
