@@ -173,6 +173,7 @@ private extension LicenseSeat {
             throw LicenseSeatError.cacheError
         }
         cache.clearOfflineToken()
+        cache.clearMachineFile()
         lastOfflineValidation = nil
 
         startAutoValidation(licenseKey: license.licenseKey)

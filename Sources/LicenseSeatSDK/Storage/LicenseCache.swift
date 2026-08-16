@@ -24,6 +24,7 @@ final class LicenseCache {
     enum Key {
         static let license = "license"
         static let offlineToken = "offline_token"
+        static let machineFile = "machine_file"
         static let publicKeys = "public_keys"
         static let lastSeenTimestamp = "last_seen_ts"
 
@@ -38,7 +39,7 @@ final class LicenseCache {
         /// backward) only by an authoritative online operation — see
         /// `anchorLastSeenTimestamp(_:)`. This contract is shared with the
         /// other LicenseSeat SDKs.
-        static let clearedOnReset = [license, offlineToken, publicKeys]
+        static let clearedOnReset = [license, offlineToken, machineFile, publicKeys]
     }
 
     /// New storage is always addressed by a fixed-length digest. The
@@ -185,7 +186,7 @@ final class LicenseCache {
         deleteProtectedData(forKey: Key.offlineToken)
         removeLegacyData(forKey: Key.offlineToken)
     }
-    
+
     // MARK: - Private Helpers
     
     var licenseFileURL: URL? {

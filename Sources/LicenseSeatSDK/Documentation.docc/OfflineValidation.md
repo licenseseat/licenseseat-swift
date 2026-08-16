@@ -4,7 +4,10 @@ Use a previously activated, device-bound license during a temporary network or s
 
 ## Overview
 
-The current Swift SDK uses the LicenseSeat legacy signed-token endpoint for offline compatibility. The backend's newer encrypted machine-file flow is not yet exposed by this SDK.
+Two offline artifacts are available. Machine files are the modern, device-bound
+format and are described under <doc:OfflineValidation#Machine-Files> below;
+signed offline tokens remain for compatibility with the legacy endpoint and
+still drive automatic fallback.
 
 After online activation, the SDK:
 
@@ -65,6 +68,62 @@ guard result.valid else {
 `verifyCachedOffline()` may fetch a missing public key while online. Launch-time quick verification uses the same claim-validation implementation but never performs a network request.
 
 During automatic fallback, a successful result updates the cached validation and exposes `LicenseStatus.offlineValid`. A later successful online validation clears the offline state.
+
+## Machine Files
+
+A machine file is an AES-256-GCM encrypted, Ed25519 signed artifact bound to one
+license and one device fingerprint. The symmetric key is derived on both sides as
+`SHA256(license_key || fingerprint)`, so the artifact cannot be opened — let alone
+used — on any other device, even if the file is copied.
+
+The device must already be activated: `POST …/licenses/machine-file` issues an
+artifact against an existing activation and never consumes a seat itself.
+
+```swift
+let machineFile = try await LicenseSeat.shared.checkoutMachineFile(
+    licenseKey: "LS-…",
+    ttlDays: 30
+)
+
+let result = try LicenseSeat.shared.verifyMachineFile(machineFile)
+guard result.valid, let payload = result.payload else {
+    print(result.code ?? "verification_failed")
+    return
+}
+print(payload.effectiveExpiry, payload.hasEntitlement("pro"))
+```
+
+``LicenseSeat/currentMachineFile`` returns the cached artifact, and
+``LicenseSeat/inspectMachineFile(_:publicKeyB64:licenseKey:fingerprint:)``
+performs the identical verification without emitting lifecycle events.
+
+Checkout verifies the artifact locally — signature, decryption, device binding,
+product, lifetime, and the activation it was issued for — before it may replace
+the cached copy, and fetches the certificate's signing key when that key id has
+not been seen before.
+
+Verification enforces, in order and failing closed at every step:
+
+- The declared algorithm is `aes-256-gcm+ed25519` and the certificate is bounded.
+- The artifact's own license and fingerprint relationships match the caller's.
+- The armor, Base64 alphabet, JSON grammar, and exact envelope member set are well formed.
+- The Ed25519 signature over `"machine/" + enc` is valid — checked *before* decryption.
+- The AES-256-GCM tag authenticates under the key derived from this license and device.
+- The inner `kid` matches the outer envelope `kid`, and the inner license key matches.
+- `schema_version` is 2, and identifiers, metadata, and fingerprint components are within bounds.
+- `iat <= nbf < exp`, `exp - iat == ttl`, and the ISO issue/expiry strings agree with the Unix claims.
+- The signed product slug equals the configured product.
+- `iat` and `nbf` are not in the future beyond `maxClockSkewMs`.
+- The signed `grace_period` (0…30 days) extends `exp`, and that extended deadline has not passed.
+- The underlying license expiry has not passed.
+- The embedded fingerprint equals this device's fingerprint.
+- The host `maxOfflineDays` cap measured from signed `iat` has not passed.
+- The local clock has not moved backward beyond `maxClockSkewMs`.
+- An included license object is active, on the right product, and inside its own window.
+- The artifact describes the activation this installation currently holds.
+
+The signed grace period extends an already valid artifact; it never relaxes any
+other claim and can never turn a zero-width signed window into a grant.
 
 ## Security Invariants
 
@@ -129,6 +188,8 @@ Relevant events include:
 
 - `offlineToken:fetching`, `offlineToken:fetched`, `offlineToken:fetchError`
 - `offlineToken:verified`, `offlineToken:verificationFailed`, `offlineToken:ready`
+- `machineFile:fetching`, `machineFile:fetched`, `machineFile:fetchError`
+- `machineFile:verified`, `machineFile:verificationFailed`, `machineFile:ready`
 - `validation:offline-success`, `validation:offline-failed`
 - `license:revoked`
 

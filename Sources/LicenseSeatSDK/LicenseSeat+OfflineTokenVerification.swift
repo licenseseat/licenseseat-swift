@@ -38,7 +38,7 @@ extension LicenseSeat {
         _ offlineToken: OfflineTokenResponse
     ) throws {
         guard offlineToken.signature.algorithm == "Ed25519",
-              validOfflineKeyId(offlineToken.token.kid),
+              Self.validOfflineKeyId(offlineToken.token.kid),
               constantTimeEqual(
                   offlineToken.signature.keyId,
                   offlineToken.token.kid
@@ -59,15 +59,15 @@ extension LicenseSeat {
         }
         let (lifetime, lifetimeOverflowed) = token.exp
             .subtractingReportingOverflow(token.iat)
-        guard safeOfflineText(token.licenseKey, maximumBytes: 512),
+        guard Self.safeOfflineText(token.licenseKey, maximumBytes: 512),
               token.productSlug.utf8.count <= 100,
               token.productSlug.range(
                   of: "^[a-z0-9]+(?:-[a-z0-9]+)*$",
                   options: .regularExpression
               ) != nil,
-              safeOfflineText(token.planKey, maximumBytes: 255),
+              Self.safeOfflineText(token.planKey, maximumBytes: 255),
               ["hardware_locked", "floating", "named_user"].contains(token.mode),
-              safeOfflineText(token.fingerprint, maximumBytes: 255),
+              Self.safeOfflineText(token.fingerprint, maximumBytes: 255),
               !lifetimeOverflowed,
               lifetime >= 0,
               lifetime <= Self.maxOfflineTokenLifetime,
@@ -237,6 +237,16 @@ extension LicenseSeat {
     }
 
     func constantTimeEqual(_ first: String, _ second: String) -> Bool {
+        Self.constantTimeEqual(first, second)
+    }
+
+    // MARK: - Shared Offline Predicates
+    //
+    // These three primitives are shared by the offline-token and machine-file
+    // verifiers, and are `nonisolated` so response decoding can use them off
+    // the main actor. One definition means one place to harden.
+
+    nonisolated static func constantTimeEqual(_ first: String, _ second: String) -> Bool {
         let left = Array(first.utf8)
         let right = Array(second.utf8)
         var result = left.count ^ right.count
@@ -248,7 +258,7 @@ extension LicenseSeat {
         return result == 0
     }
 
-    private func validOfflineKeyId(_ value: String) -> Bool {
+    nonisolated static func validOfflineKeyId(_ value: String) -> Bool {
         value.utf8.count <= 255 &&
             value.range(
                 of: "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
@@ -256,8 +266,12 @@ extension LicenseSeat {
             ) != nil
     }
 
-    private func safeOfflineText(_ value: String, maximumBytes: Int) -> Bool {
-        !value.isEmpty &&
+    nonisolated static func safeOfflineText(
+        _ value: String,
+        minimumBytes: Int = 1,
+        maximumBytes: Int
+    ) -> Bool {
+        value.utf8.count >= minimumBytes &&
             value.utf8.count <= maximumBytes &&
             value.unicodeScalars.allSatisfy {
                 $0.value > 31 && $0.value != 127

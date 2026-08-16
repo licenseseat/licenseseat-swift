@@ -164,6 +164,7 @@ private extension LicenseSeat {
             // a revoked, suspended, or expired activation offline.
             if !result.valid {
                 cache.clearOfflineToken()
+                cache.clearMachineFile()
             }
             guard cache.updateValidation(result) else {
                 throw LicenseSeatError.cacheError
