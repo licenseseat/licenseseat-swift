@@ -16,12 +16,27 @@ extension LicenseSeat {
         productSlug: String,
         licenseKey: String
     ) throws {
+        try validateProductSlug(productSlug)
+        try validateLicenseKey(licenseKey)
+    }
+
+    /// The product slug is a route component on every product-scoped endpoint,
+    /// so it is bounded and shape-checked even when no license key is involved.
+    internal func validateProductSlug(_ productSlug: String) throws {
         guard productSlug.utf8.count <= 100,
               productSlug.range(
                   of: "^[a-z0-9]+(?:-[a-z0-9]+)*$",
                   options: .regularExpression
-              ) != nil,
-              !licenseKey.isEmpty,
+              ) != nil else {
+            throw APIError.localFailure(
+                code: "invalid_identity",
+                message: "Invalid product or license identity"
+            )
+        }
+    }
+
+    internal func validateLicenseKey(_ licenseKey: String) throws {
+        guard !licenseKey.isEmpty,
               licenseKey.utf8.count <= 512,
               licenseKey == licenseKey.trimmingCharacters(
                   in: .whitespacesAndNewlines
