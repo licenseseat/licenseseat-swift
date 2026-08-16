@@ -710,14 +710,14 @@ final class APIClientTests: LicenseSeatTestCase {
     }
 
     func testConfiguredRequestTimeoutReachesOwnedSessionConfiguration() {
-        let defaultConfiguration = APIClient.ownedSessionConfiguration(
+        let defaultConfiguration = APIClient.makeOwnedSessionConfiguration(
             for: LicenseSeatConfig.default
         )
         XCTAssertEqual(LicenseSeatConfig.default.requestTimeout, 30)
         XCTAssertEqual(defaultConfiguration.timeoutIntervalForRequest, 30)
         XCTAssertEqual(defaultConfiguration.timeoutIntervalForResource, 60)
 
-        let customConfiguration = APIClient.ownedSessionConfiguration(
+        let customConfiguration = APIClient.makeOwnedSessionConfiguration(
             for: LicenseSeatConfig(requestTimeout: 12)
         )
         XCTAssertEqual(customConfiguration.timeoutIntervalForRequest, 12)
@@ -744,7 +744,7 @@ final class APIClientTests: LicenseSeatTestCase {
                 30,
                 "requestTimeout \(timeout) must fall back to the default"
             )
-            let configuration = APIClient.ownedSessionConfiguration(for: config)
+            let configuration = APIClient.makeOwnedSessionConfiguration(for: config)
             XCTAssertEqual(configuration.timeoutIntervalForRequest, 30)
             XCTAssertEqual(configuration.timeoutIntervalForResource, 60)
         }

@@ -61,7 +61,7 @@ final class APIClient {
             self.boundedSessionDelegate = nil
             self.ownsSession = false
         } else {
-            let configuration = Self.ownedSessionConfiguration(
+            let configuration = Self.makeOwnedSessionConfiguration(
                 for: config,
                 basedOn: ownedSessionConfiguration
             )
@@ -87,9 +87,9 @@ final class APIClient {
     }
 
     /// Build the transport policy for an SDK-owned session. The resource
-    /// timeout stays at twice the request timeout so a retried request cannot
-    /// outlive the transfer budget the host configured.
-    static func ownedSessionConfiguration(
+    /// timeout stays at twice the request timeout, preserving the previous
+    /// 30/60 relationship for every configured value.
+    static func makeOwnedSessionConfiguration(
         for config: LicenseSeatConfig,
         basedOn source: URLSessionConfiguration? = nil
     ) -> URLSessionConfiguration {
