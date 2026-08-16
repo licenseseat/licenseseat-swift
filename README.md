@@ -317,7 +317,7 @@ let config = LicenseSeatConfig(
     maxRetries: 3,
     retryDelay: 1,
     offlineFallbackMode: .networkOnly,             // Offline fallback strategy
-    maxOfflineDays: 7,                             // 7-day grace period
+    maxOfflineDays: 7,                             // Cap grants at 7 days
     maxClockSkewMs: 300000,                        // 5-minute clock tolerance
     debug: true
 )
@@ -478,7 +478,7 @@ LicenseSeatStore.shared.configure(
     productSlug: "your-product"
 ) { config in
     config.offlineFallbackMode = .networkOnly     // Network-first fallback mode
-    config.maxOfflineDays = 7                     // 7-day grace period
+    config.maxOfflineDays = 7                     // Cap grants at 7 days
     config.offlineTokenRefreshInterval = 259200   // Refresh every 72 hours
 }
 ```
@@ -1061,7 +1061,8 @@ config.offlineFallbackEnabled = true
 config.offlineLicenseRefreshInterval = 259200
 
 // Current
-config.offlineFallbackMode = .networkOnly  // or .always
+config.offlineFallbackEnabled = true       // Whether cached grants may authorize (default true)
+config.offlineFallbackMode = .networkOnly  // When fallback applies: .networkOnly or .always
 config.offlineTokenRefreshInterval = 259200
 ```
 
