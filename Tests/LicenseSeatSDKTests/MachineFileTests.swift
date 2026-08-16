@@ -115,13 +115,13 @@ final class MachineFileTests: LicenseSeatTestCase {
         cacheFixtureIdentity(on: sdk)
     }
 
+    // Sync teardown limited to nonisolated statics (the APIClientTests
+    // pattern) — assumeIsolated over isolated state trips Swift 6 strict
+    // concurrency on the Linux lane. The UUID storage prefix isolates tests,
+    // so skipping sdk.reset() leaks nothing across tests.
     override func tearDown() {
-        MainActor.assumeIsolated {
-            sdk?.reset()
-            sdk = nil
-            MockURLProtocol.reset()
-            URLProtocol.unregisterClass(MockURLProtocol.self)
-        }
+        MockURLProtocol.reset()
+        URLProtocol.unregisterClass(MockURLProtocol.self)
         super.tearDown()
     }
 

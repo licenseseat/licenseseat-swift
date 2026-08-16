@@ -67,16 +67,16 @@ final class ReleasesTests: LicenseSeatTestCase {
         sdk = makeSDK()
     }
 
-    // Async so the @MainActor class annotation isolates it — the
-    // assumeIsolated form trips Swift 6 strict concurrency ("sending 'self'")
-    // on the Linux lane against this base class.
-    override func tearDown() async throws {
-        sdk?.reset()
-        sdk = nil
-        recorder = nil
+    // Sync teardown limited to nonisolated statics (the APIClientTests
+    // pattern): a @MainActor suite cannot touch isolated state here without
+    // tripping Swift 6 strict concurrency on the Linux lane, and the base
+    // class finals both async overrides by design. Per-test isolation comes
+    // from the UUID storage prefix, so skipping sdk.reset() leaks nothing
+    // across tests.
+    override func tearDown() {
         MockURLProtocol.reset()
         URLProtocol.unregisterClass(MockURLProtocol.self)
-        try await super.tearDown()
+        super.tearDown()
     }
 
     // MARK: - Harness
