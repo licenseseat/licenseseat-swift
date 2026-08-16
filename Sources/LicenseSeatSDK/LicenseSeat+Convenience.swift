@@ -46,15 +46,25 @@ public struct ValidationOptions: Sendable {
 
 public extension LicenseSeat {
     /// Creates (or recreates) the shared instance with a custom configuration.
+    /// - Returns: `true` when the configuration was applied. A second call
+    ///   without `force` logs a warning, leaves the shared instance intact,
+    ///   and returns `false`.
     @MainActor
+    @discardableResult
     static func configure(
         apiKey: String,
         productSlug: String,
         apiBaseURL: URL? = nil,
         force: Bool = false,
         options customize: (inout LicenseSeatConfig) -> Void = { _ in }
-    ) {
-        if _shared.config.apiKey != nil && !force { return }
+    ) -> Bool {
+        guard _shared.config.apiKey == nil || force else {
+            _shared.log(
+                "[Warning] The shared LicenseSeat instance is already configured.",
+                "Ignoring this configure call; pass force: true to replace it."
+            )
+            return false
+        }
         var cfg = LicenseSeatConfig.default
         cfg.apiKey = apiKey
         cfg.productSlug = productSlug
@@ -65,6 +75,7 @@ public extension LicenseSeat {
         let instance = LicenseSeat(config: cfg)
         installShared(instance)
         LicenseSeatStore.shared.adoptSharedSeat(instance)
+        return true
     }
 
     /// Activate a license through the shared instance.

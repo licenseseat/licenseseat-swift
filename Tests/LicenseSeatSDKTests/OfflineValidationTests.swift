@@ -198,6 +198,32 @@ final class OfflineValidationTests: LicenseSeatTestCase {
         XCTAssertNil(result.code)
     }
 
+    func testLastSeenTimestampExposesTheProtectedWatermark() async throws {
+        let privateKey = Curve25519.Signing.PrivateKey()
+        let offlineToken = try makeOfflineToken(privateKey: privateKey)
+        sdk.cache.setOfflineToken(offlineToken)
+        XCTAssertTrue(
+            sdk.cache.setPublicKey(
+                "test-key-id",
+                Base64URL.encode(privateKey.publicKey.rawRepresentation)
+            )
+        )
+        cacheTestLicense()
+        XCTAssertNil(sdk.lastSeenTimestamp())
+
+        let before = Date()
+        let result = await sdk.verifyCachedOffline()
+        XCTAssertTrue(result.valid)
+
+        let watermark = try XCTUnwrap(sdk.lastSeenTimestamp())
+        XCTAssertEqual(
+            watermark.timeIntervalSince1970,
+            try XCTUnwrap(sdk.cache.getLastSeenTimestamp())
+        )
+        XCTAssertGreaterThanOrEqual(watermark, before.addingTimeInterval(-1))
+        XCTAssertLessThanOrEqual(watermark, Date())
+    }
+
     func testRubyGemSignedFixtureVerifiesInSwift() async throws {
         // This deterministic Ruby fixture deliberately includes Unicode,
         // escapes, slashes, nested arrays, Int64.max, negative zero, and
