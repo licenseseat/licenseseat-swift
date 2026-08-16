@@ -20,6 +20,41 @@ extension LicenseCache {
         return decoder
     }
 
+    // MARK: - Machine File Storage
+    //
+    // Machine files are the modern offline artifact and live beside the legacy
+    // offline token in the same protected slot family, so a reset,
+    // deactivation, or authoritative invalidation retires both together.
+
+    func getMachineFile() -> MachineFile? {
+        guard let data = protectedData(forKey: Key.machineFile) else {
+            return nil
+        }
+        guard data.count <= Self.maxCacheBytes,
+              (try? StrictJSON.validate(data, limits: .cache)) != nil else {
+            return nil
+        }
+        return try? licenseDecoder.decode(MachineFile.self, from: data)
+    }
+
+    @discardableResult
+    func setMachineFile(_ machineFile: MachineFile) -> Bool {
+        guard let data = try? licenseEncoder.encode(machineFile),
+              data.count <= Self.maxCacheBytes else {
+            return false
+        }
+        guard storeProtectedData(data, forKey: Key.machineFile) else { return false }
+        removeLegacyData(forKey: Key.machineFile)
+        return true
+    }
+
+    func clearMachineFile() {
+        deleteProtectedData(forKey: Key.machineFile)
+        removeLegacyData(forKey: Key.machineFile)
+    }
+
+    // MARK: - Signing Keys
+
     func getPublicKey(_ keyId: String) -> String? {
         guard validKeyId(keyId) else { return nil }
         return getPublicKeys()[keyId]

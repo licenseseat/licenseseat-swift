@@ -43,6 +43,7 @@ Handlers are delivered on the main queue.
 | Deactivation | `deactivation:start`, `deactivation:success`, `deactivation:error` |
 | Connectivity | `network:online`, `network:offline` |
 | Offline assets | `offlineToken:fetching`, `offlineToken:fetched`, `offlineToken:fetchError`, `offlineToken:ready`, `offlineToken:verified`, `offlineToken:verificationFailed` |
+| Machine files | `machineFile:fetching`, `machineFile:fetched`, `machineFile:fetchError`, `machineFile:ready`, `machineFile:verified`, `machineFile:verificationFailed` |
 | Heartbeat | `heartbeat:success`, `heartbeat:error` |
 | General errors | `sdk:error` |
 

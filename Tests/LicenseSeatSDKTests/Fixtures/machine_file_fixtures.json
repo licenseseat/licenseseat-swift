@@ -1,0 +1,182 @@
+{
+  "generated_by": "Tests/LicenseSeatSDKTests/Fixtures/generate_machine_file_fixtures.rb",
+  "gem": "license_seat-0.9.2",
+  "algorithm": "aes-256-gcm+ed25519",
+  "schema_version": 2,
+  "public_key": "0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc=",
+  "wrong_public_key": "oJql9HpnWYAv+VX43C0qFKXJnSO+l/hkEn/5ODRVpPA=",
+  "key_id": "machine-file-fixture-2026",
+  "license_key": "MF-FIXTURE-1234-5678-ABCD",
+  "fingerprint": "fixture-machine-fingerprint-0001",
+  "product_slug": "hustl",
+  "activation_id": "44444444-4444-4444-4444-444444444444",
+  "issued_at_unix": 1786881600,
+  "expires_at_unix": 2102241600,
+  "grace_period_seconds": 259200,
+  "cases": {
+    "valid": {
+      "description": "Server-generated machine file, 10 year TTL, license data included.",
+      "response": {
+        "data": {
+          "type": "machine-files",
+          "attributes": {
+            "certificate": "-----BEGIN MACHINE FILE-----\neyJlbmMiOiJRdzdoTXlVSkUtdWFxcFNmWmtvclBfYmRoclU2b1pjeFQ2Z3RrMWs3\naVY4QVFqaGNESjdjWGZmWXdtcUdpVEh0SGE2VUZpRDFpM2NYdDdzZDR3cHRIOTdr\ncmNzbi1odnFUYTNGd3NGM04zVmxXRUdhNWlQQ19rYWRjMW1ESW10V0Rpa3ctdUpH\nMVYwb2MyLUFlOGN2Mmo1VUNVMjZOeFBFMDN0S3IzWUFtaWE4TUhEaHY1emJ4QnFB\nZEJIZGhXRFFSRWN3anpSTkxXWTFWY0VHTjZzdWlxX1dqT01qQnZqdXhzdzRqdmIz\nS3dLLWRxRmdPbWl6V0NSU2cwbWJzV2lpM0J4Q0Rvc2NCN3FOVFZnMEVsdWs0Wjk1\nQ0pvVkotUW1kYU43UFRCSEFVS1F0U2hLa3F5ZkFCbVdNb29MSXBoT2tPX1VzbFMz\ndTlmdFp6aGNpUTV5OGFIYlB5anhmNVNBQXd6eE1xZ0Fqb1dVbjB0cjlYOXhPakU5\nbm53NFp4OEVjalk3U25sQjdQc2pIYlRsYlBTXy1uTmYxb0o3SElKb3BKMlVWRlhf\namNGZW1BdTItYjB6M0o1UXhzYVRlRHk5U1RSSjhRZ1hiaWE4WnZ6MTNKdWlqMGs2\nVWJ6U2lfWXBGQ3lvZ2drQUIwTDE1cU9uZ202VGpPOFNoQ3A2VC1rdWRObGpUWE0y\nTEtWU0twOFdXMEVLZ3BSYzNGSnFFbGh6SnVESnhSRGxZUnJfVFlGcEpVNld6ajhK\nd0pzem81S0V1VDFkazZqckQ4enFNVjRWcUFJcUZWLWpEZFNMdWYtVV92bGozUEFG\nM2M5MnhWQ01YMkVDWDRIWjlWejlGMk4weXgtM190Ym9JclpFRXpCTGViRDNrdHBT\ndEtZZy1wYVNkc0F5R2Q2TlZLOWgxX1lZTEg5SFpDYzMwYjVjUWJ4MEpoSkhqT2Mt\nYi0yUlFZMGlPTE53XzkzbFZ0VFpyWWI0NkM2aklRSU9mc2pBaXVMc3ZKSkthZS0x\nbGN4SzVTenFqUUo5c25fY3B0TFpEbElQVktWRnJ5VHhtQWtHU1FwWmd0NzcydV9a\neGpkcEktOTVYZXdGMy1TbDJWTEVJQm50d3pVaWozUlBUZlZWc3pDM3ZUcXRGMHli\nZHV0RFFNR0thelZZcUdRbV83bE1CeHFTSC14VUlfSnR2TFVuNnc4Z3NwWWNzMHVf\nbzhiN1NHX2FqSGVFclhxMWNuWmhwNTFDNjh2UkUyX1ozODlfQzQ1RjZpNFo0NUp6\nUGdnRUxnUzRGY2Q1eWhycVgwM0N6Tl9rVlZTVlV2M1ZLZkpMT0hkT0xkemtVUU9k\nUkppTzV2N1dDUTN0YUc3YTREaFhMb1ZpVkh5Mmd0cTdzWUR0ZUduVWlXUndTc3hq\nOFJnRG9YbGx4d293ZkFNalAtaWVfTm5oX0l5RzlBaVJtSmFLMUZGS3JXOENYNnk2\nRGhSOWJqSGNOeUNPNjBueU9Eem9rd1JESV9BX0NySldxeXl2eWJodFM4dm1QMXpx\nT3dWVVdZVTF2ekVCa096Rl91MzBZR0JqdEplZHp6Ykhud1lYVWtzNDNnYl9ITVQ3\ncGtlZmNCQnlteWV4cGl2RzZEZV91d2dqOWhQdUI5MlN6SDlRS01tbUlGNUVYTDlE\naWFZbmZFeFFXU1JrUGVwX0NaMGliQ2paVTk5bHVwb3BYUUdmNkxKOFdHbmlBa0tI\nMFZ2czBCWDZ4LUtRX2xYdTE1OVE5dkNDS29oZ0h6d2kwQjVIVjhWMHAwVzRFcWda\nSU5TZWQzVHFpaHg4Q0h6OERDZXQtcDF5bGdyNUVlT0ZZT0p2U09UOFlDWFpHb2Mz\nZ0tTcnl2V0I3ZnR1ejlnOHdfMjd5Tlc3bTFJQjhEckg0LXhTUlllb3o0Y0xhY3Vl\nRC13eDVKZGFETUY3SGtqR180ZUlNejZTOEZZNUdsNmJFdlJVaUswd3N3Y3NyUlJR\nNWw1aFB3bDFETndlZS0zNnNrQU5FcEZVWXB2TjhqbmFGdU8ycmdpM3ZmWGp1MkEx\na1FtdjV0TmNZY1FqeGpQZ1k1cmRJWXZxWUpsLXdvV0h1MzB4VEFFM0czZjB2QWdK\nYnoyWV9rZGpYdGQwNWUyd0pNQmtFY1BEMFpvaWV3X2U1MjMxVW8xRllDMW5HZ0c0\nQmZKUzJGOXExZ3JJUFk3bC0ydEk3Z2wtM2ZqQ2RSN0EyV21kLmg4SkhUM1NQd2d3\nQ1l3TGMuU0E2YWZ2b1psaG53TEl2NktsVFZMUSIsInNpZyI6IjNKNDlkNVVxbFJ1\naDRrSUcyUjNoVFlLNlZUV0pMQUl5S05JeWxqVDJ1Mll4NTItRThaN3hMWlU3dDBm\nVUtvQjlURndBdU1hcG8wbmtsUXA5Mml4RENnIiwiYWxnIjoiYWVzLTI1Ni1nY20r\nZWQyNTUxOSIsImtpZCI6Im1hY2hpbmUtZmlsZS1maXh0dXJlLTIwMjYifQ==\n-----END MACHINE FILE-----",
+            "algorithm": "aes-256-gcm+ed25519",
+            "ttl": 315360000,
+            "issued": "2026-08-16T12:00:00Z",
+            "expiry": "2036-08-13T12:00:00Z"
+          },
+          "relationships": {
+            "license": {
+              "data": {
+                "type": "licenses",
+                "id": "MF-FIXTURE-1234-5678-ABCD"
+              }
+            },
+            "machine": {
+              "data": {
+                "type": "machines",
+                "id": "fixture-machine-fingerprint-0001"
+              }
+            }
+          }
+        }
+      },
+      "expected": {
+        "valid": true
+      }
+    },
+    "expired": {
+      "description": "Issued 400 days ago with a 30 day TTL and no grace period.",
+      "response": {
+        "data": {
+          "type": "machine-files",
+          "attributes": {
+            "certificate": "-----BEGIN MACHINE FILE-----\neyJlbmMiOiJMOEZ0Nkh1VXFBaUI3U0VseTBwbVpKNnVWZmNNMENTUlIyckE0dDhf\neTNzcXotMlNHcmxTRWlmMlRmVUdmbFRIcVFTby03eE5wMjB0NWkycTVqSGNtbkRl\nOVd0UVZ1UlRraHIyNGZ6OTNER3BpRWVUNlc2VnNSTm9VOFNEQ3B5ZFF2VUZZYUpU\nZ1FrZjlnb3Z4dXdRRG4zaVhoRUd1QTJvcFRaczZLaTY4TEVRTDV1dmRlWG5pNXk5\nRnc2Mk9WTl9OUkdjQ0lrVzdVWkkxTTFTUzZnbXBPcE5xdDh6SVNqNGNlOElJbGJK\nSDVvYWdkSWdpcXJQZV82bno5UzA0TXluU0o0YWh1LXBCX3R1cFJlRjJLeFVvX1Zf\nTlI4R2tvd005REFYbzZ0UVJPUlp5YWRPUElIMUp1WXlnYWFXcWhRRmJOOG95N1Rq\nRnJDRWgzN1YxTVM3aC00X0VQQXNJOFBHdGNxejAwNEpITi1rTHloQXp6YnlGS0Nq\nd2xreFRBNnFHRmN0NlRRbmhMNFFkcWF3WGx1OHdkbmVxa05FN3dNWGN2Y09JZUVF\neE5nUl9sdXZiWUc2RmotM3VzQTFLOEV3OGxLSGhuSXlIaTRqc2ZNMklNNk1EaXNm\nRXZRS3c4SG12d1VFLVZ0Yms5MGd0bTAwcUxIR0hRRGpDcG0teVRia09kLTdlWTlm\nUkNzTlMwODZKXzJYT1ZCV1FHMlRtSFQ0ckYtYnY5UkVCcGxrdGIzVjRKZ0xOYnd5\nUU8wSkc0bFMteHY4TjhfdVc3bm45Y1VfQWxQSE1Ec3hvaTVoQkFlV283YWxHLUdG\nd2VxaXJXaU1fNGltS0phbnlXcjhlYjZNaTJjcENGRGExRFhUV3BkSWN3WWY4RkxQ\nTG15T1dtN1haVXFkcnV3b2dPcTJKOU1RNXpRYU1PZDY5VGh1WV9ndVNVYmlVOTh1\nX21RVVp1QmFnd1RrZXM3eTdWVzYxWGFSUnoweHJ0dFJrU244R2lCWk93djRmaENP\nVU1GYTZ0aXB5MklKdGR1M29YWWZNQW44ZHhGZVloMEpOUnZZek4wdXdyWGJQR1pz\nUHpVNWtBejVzdFQ0Qi1fUUhlVktiZ3hHc09aNzJjbzRGTlVGSm9WZHloTXdScGNK\nNjIwa1daaWIydF9kMmY3cERJZDNMSmNxSUxOY0VtWi1hUlctSl96cGZaSEtudzcw\ndlh3bV9RUUlvQlZoZU5yOWt1dmgyTVgwWktOYjZzbnVfd0JZTlZ5MEFYUFc0RUx6\nUzNDOGQzbUtrRTFhakZjUGo3NXZER0JHOFpWaGhDeGtEQjVGSXBCZGpyUTlDQXlq\nUGVocjl1YmRWaml4QzRUOVVvU2ZLcmZZUERzSDR3cFJDc3VnNTNCdEpFOTAtX2VH\nNzd3U2RBTEdQREtOdlcxaHN6UTlsaGxvWUlkU1lCbWZ3d0tJWloyclVGNWdMMnJi\nS1Z2ZHd2RGgzVFk2MXpUdENoT0NQcU1GSGNDcjB6cE9nbFkxaW5NRU5LMFpJLWhG\ncnpLZUlPVkZXMUtYZDFyQmpMdmxMcXo1Nm9QcExiNzhxNVFSOThNUThsY1lXNkRh\ndkh1RDNWa1pOWDRCUm9qYUdmYWVFekxiempXNHdZY1h5cmhiRDdfekI3MVVqT1R0\nOXlNQUdwYXFkTXFJSVJnYzFuSkVOMFhNUjFIdFFvVzIwb1d6ZW5rblRadGlmRWRx\nQnI3QmNKeE85VVZDTzB4NnVlNzFQVU1CbHJaNFdtdmpBUDhEZE12dXdBS2dOckJZ\nQ21nOEh0WEtkMlNNQzdnc2pxUkw5ZE0xcGl1SnM5ZldQQ2lhenZBa25CVEZ1eFhv\ndm9rbDdsY1FKZGxqRE0zSW1Va2ppSnkwMWVPTzRTcUhSUW9WaHdtQmUwdlNlZDdB\neTF5czJCREJ1WU94SlF2QkYxSkJacndfcDQzYXpSaWo3Z2szUXpPdlJGZzhoWjJE\nWERMUTNvRjYtcklmcF8xY0Q4MHhKMmlnRzBKTFVaYXZwSzBWSXlGem0xUHlrcHJB\nNFM0VFdvSXZIN2d4cktWc09TWXc1cmswWlNBclA1Ynh4LUhFUWpSNTd2Ql9fYm40\nTjNUZG1zcnNaTjdRN25kd2NtNFZrdnZuU0VkZXBReWJwN3BGSmUycHl2Q1JuRlZC\nelIxMHlWU1V6LXhqZlFXdUJ6d3JuX2VrLWFZLkRRWEdpVHJKcm5vdThMV0QubXFj\nZXJCWThLTl9qMVV3b2w3RHdGdyIsInNpZyI6IjI2djJIYWhSTm5VU0xwM21ZUGRt\nN2pYM2pIb2NJYVlZcVZOTmpwbEFCM3Q0bnZnSEF0dW9nUjVtUDlucW9UazJ0R3c5\nR1R0QXctUlphcTV1Uk9mZkJBIiwiYWxnIjoiYWVzLTI1Ni1nY20rZWQyNTUxOSIs\nImtpZCI6Im1hY2hpbmUtZmlsZS1maXh0dXJlLTIwMjYifQ==\n-----END MACHINE FILE-----",
+            "algorithm": "aes-256-gcm+ed25519",
+            "ttl": 2592000,
+            "issued": "2025-07-12T12:00:00Z",
+            "expiry": "2025-08-11T12:00:00Z"
+          },
+          "relationships": {
+            "license": {
+              "data": {
+                "type": "licenses",
+                "id": "MF-FIXTURE-1234-5678-ABCD"
+              }
+            },
+            "machine": {
+              "data": {
+                "type": "machines",
+                "id": "fixture-machine-fingerprint-0001"
+              }
+            }
+          }
+        }
+      },
+      "expected": {
+        "valid": false,
+        "code": "token_expired"
+      }
+    },
+    "tampered_signature": {
+      "description": "Valid file with one ciphertext byte flipped; signature no longer covers `enc`.",
+      "response": {
+        "data": {
+          "type": "machine-files",
+          "attributes": {
+            "certificate": "-----BEGIN MACHINE FILE-----\neyJlbmMiOiJRdzdoTUFVSkUtdWFxcFNmWmtvclBfYmRoclU2b1pjeFQ2Z3RrMWs3\naVY4QVFqaGNESjdjWGZmWXdtcUdpVEh0SGE2VUZpRDFpM2NYdDdzZDR3cHRIOTdr\ncmNzbi1odnFUYTNGd3NGM04zVmxXRUdhNWlQQ19rYWRjMW1ESW10V0Rpa3ctdUpH\nMVYwb2MyLUFlOGN2Mmo1VUNVMjZOeFBFMDN0S3IzWUFtaWE4TUhEaHY1emJ4QnFB\nZEJIZGhXRFFSRWN3anpSTkxXWTFWY0VHTjZzdWlxX1dqT01qQnZqdXhzdzRqdmIz\nS3dLLWRxRmdPbWl6V0NSU2cwbWJzV2lpM0J4Q0Rvc2NCN3FOVFZnMEVsdWs0Wjk1\nQ0pvVkotUW1kYU43UFRCSEFVS1F0U2hLa3F5ZkFCbVdNb29MSXBoT2tPX1VzbFMz\ndTlmdFp6aGNpUTV5OGFIYlB5anhmNVNBQXd6eE1xZ0Fqb1dVbjB0cjlYOXhPakU5\nbm53NFp4OEVjalk3U25sQjdQc2pIYlRsYlBTXy1uTmYxb0o3SElKb3BKMlVWRlhf\namNGZW1BdTItYjB6M0o1UXhzYVRlRHk5U1RSSjhRZ1hiaWE4WnZ6MTNKdWlqMGs2\nVWJ6U2lfWXBGQ3lvZ2drQUIwTDE1cU9uZ202VGpPOFNoQ3A2VC1rdWRObGpUWE0y\nTEtWU0twOFdXMEVLZ3BSYzNGSnFFbGh6SnVESnhSRGxZUnJfVFlGcEpVNld6ajhK\nd0pzem81S0V1VDFkazZqckQ4enFNVjRWcUFJcUZWLWpEZFNMdWYtVV92bGozUEFG\nM2M5MnhWQ01YMkVDWDRIWjlWejlGMk4weXgtM190Ym9JclpFRXpCTGViRDNrdHBT\ndEtZZy1wYVNkc0F5R2Q2TlZLOWgxX1lZTEg5SFpDYzMwYjVjUWJ4MEpoSkhqT2Mt\nYi0yUlFZMGlPTE53XzkzbFZ0VFpyWWI0NkM2aklRSU9mc2pBaXVMc3ZKSkthZS0x\nbGN4SzVTenFqUUo5c25fY3B0TFpEbElQVktWRnJ5VHhtQWtHU1FwWmd0NzcydV9a\neGpkcEktOTVYZXdGMy1TbDJWTEVJQm50d3pVaWozUlBUZlZWc3pDM3ZUcXRGMHli\nZHV0RFFNR0thelZZcUdRbV83bE1CeHFTSC14VUlfSnR2TFVuNnc4Z3NwWWNzMHVf\nbzhiN1NHX2FqSGVFclhxMWNuWmhwNTFDNjh2UkUyX1ozODlfQzQ1RjZpNFo0NUp6\nUGdnRUxnUzRGY2Q1eWhycVgwM0N6Tl9rVlZTVlV2M1ZLZkpMT0hkT0xkemtVUU9k\nUkppTzV2N1dDUTN0YUc3YTREaFhMb1ZpVkh5Mmd0cTdzWUR0ZUduVWlXUndTc3hq\nOFJnRG9YbGx4d293ZkFNalAtaWVfTm5oX0l5RzlBaVJtSmFLMUZGS3JXOENYNnk2\nRGhSOWJqSGNOeUNPNjBueU9Eem9rd1JESV9BX0NySldxeXl2eWJodFM4dm1QMXpx\nT3dWVVdZVTF2ekVCa096Rl91MzBZR0JqdEplZHp6Ykhud1lYVWtzNDNnYl9ITVQ3\ncGtlZmNCQnlteWV4cGl2RzZEZV91d2dqOWhQdUI5MlN6SDlRS01tbUlGNUVYTDlE\naWFZbmZFeFFXU1JrUGVwX0NaMGliQ2paVTk5bHVwb3BYUUdmNkxKOFdHbmlBa0tI\nMFZ2czBCWDZ4LUtRX2xYdTE1OVE5dkNDS29oZ0h6d2kwQjVIVjhWMHAwVzRFcWda\nSU5TZWQzVHFpaHg4Q0h6OERDZXQtcDF5bGdyNUVlT0ZZT0p2U09UOFlDWFpHb2Mz\nZ0tTcnl2V0I3ZnR1ejlnOHdfMjd5Tlc3bTFJQjhEckg0LXhTUlllb3o0Y0xhY3Vl\nRC13eDVKZGFETUY3SGtqR180ZUlNejZTOEZZNUdsNmJFdlJVaUswd3N3Y3NyUlJR\nNWw1aFB3bDFETndlZS0zNnNrQU5FcEZVWXB2TjhqbmFGdU8ycmdpM3ZmWGp1MkEx\na1FtdjV0TmNZY1FqeGpQZ1k1cmRJWXZxWUpsLXdvV0h1MzB4VEFFM0czZjB2QWdK\nYnoyWV9rZGpYdGQwNWUyd0pNQmtFY1BEMFpvaWV3X2U1MjMxVW8xRllDMW5HZ0c0\nQmZKUzJGOXExZ3JJUFk3bC0ydEk3Z2wtM2ZqQ2RSN0EyV21kLmg4SkhUM1NQd2d3\nQ1l3TGMuU0E2YWZ2b1psaG53TEl2NktsVFZMUSIsInNpZyI6IjNKNDlkNVVxbFJ1\naDRrSUcyUjNoVFlLNlZUV0pMQUl5S05JeWxqVDJ1Mll4NTItRThaN3hMWlU3dDBm\nVUtvQjlURndBdU1hcG8wbmtsUXA5Mml4RENnIiwiYWxnIjoiYWVzLTI1Ni1nY20r\nZWQyNTUxOSIsImtpZCI6Im1hY2hpbmUtZmlsZS1maXh0dXJlLTIwMjYifQ==\n-----END MACHINE FILE-----",
+            "algorithm": "aes-256-gcm+ed25519",
+            "ttl": 315360000,
+            "issued": "2026-08-16T12:00:00Z",
+            "expiry": "2036-08-13T12:00:00Z"
+          },
+          "relationships": {
+            "license": {
+              "data": {
+                "type": "licenses",
+                "id": "MF-FIXTURE-1234-5678-ABCD"
+              }
+            },
+            "machine": {
+              "data": {
+                "type": "machines",
+                "id": "fixture-machine-fingerprint-0001"
+              }
+            }
+          }
+        }
+      },
+      "expected": {
+        "valid": false,
+        "code": "signature_invalid"
+      }
+    },
+    "tampered_ciphertext_resigned": {
+      "description": "Ciphertext modified then re-signed with the legitimate key; GCM tag must fail.",
+      "response": {
+        "data": {
+          "type": "machine-files",
+          "attributes": {
+            "certificate": "-----BEGIN MACHINE FILE-----\neyJlbmMiOiJRdzdoTUFVSkUtdWFxcFNmWmtvclBfYmRoclU2b1pjeFQ2Z3RrMWs3\naVY4QVFqaGNESjdjWGZmWXdtcUdpVEh0SGE2VUZpRDFpM2NYdDdzZDR3cHRIOTdr\ncmNzbi1odnFUYTNGd3NGM04zVmxXRUdhNWlQQ19rYWRjMW1ESW10V0Rpa3ctdUpH\nMVYwb2MyLUFlOGN2Mmo1VUNVMjZOeFBFMDN0S3IzWUFtaWE4TUhEaHY1emJ4QnFB\nZEJIZGhXRFFSRWN3anpSTkxXWTFWY0VHTjZzdWlxX1dqT01qQnZqdXhzdzRqdmIz\nS3dLLWRxRmdPbWl6V0NSU2cwbWJzV2lpM0J4Q0Rvc2NCN3FOVFZnMEVsdWs0Wjk1\nQ0pvVkotUW1kYU43UFRCSEFVS1F0U2hLa3F5ZkFCbVdNb29MSXBoT2tPX1VzbFMz\ndTlmdFp6aGNpUTV5OGFIYlB5anhmNVNBQXd6eE1xZ0Fqb1dVbjB0cjlYOXhPakU5\nbm53NFp4OEVjalk3U25sQjdQc2pIYlRsYlBTXy1uTmYxb0o3SElKb3BKMlVWRlhf\namNGZW1BdTItYjB6M0o1UXhzYVRlRHk5U1RSSjhRZ1hiaWE4WnZ6MTNKdWlqMGs2\nVWJ6U2lfWXBGQ3lvZ2drQUIwTDE1cU9uZ202VGpPOFNoQ3A2VC1rdWRObGpUWE0y\nTEtWU0twOFdXMEVLZ3BSYzNGSnFFbGh6SnVESnhSRGxZUnJfVFlGcEpVNld6ajhK\nd0pzem81S0V1VDFkazZqckQ4enFNVjRWcUFJcUZWLWpEZFNMdWYtVV92bGozUEFG\nM2M5MnhWQ01YMkVDWDRIWjlWejlGMk4weXgtM190Ym9JclpFRXpCTGViRDNrdHBT\ndEtZZy1wYVNkc0F5R2Q2TlZLOWgxX1lZTEg5SFpDYzMwYjVjUWJ4MEpoSkhqT2Mt\nYi0yUlFZMGlPTE53XzkzbFZ0VFpyWWI0NkM2aklRSU9mc2pBaXVMc3ZKSkthZS0x\nbGN4SzVTenFqUUo5c25fY3B0TFpEbElQVktWRnJ5VHhtQWtHU1FwWmd0NzcydV9a\neGpkcEktOTVYZXdGMy1TbDJWTEVJQm50d3pVaWozUlBUZlZWc3pDM3ZUcXRGMHli\nZHV0RFFNR0thelZZcUdRbV83bE1CeHFTSC14VUlfSnR2TFVuNnc4Z3NwWWNzMHVf\nbzhiN1NHX2FqSGVFclhxMWNuWmhwNTFDNjh2UkUyX1ozODlfQzQ1RjZpNFo0NUp6\nUGdnRUxnUzRGY2Q1eWhycVgwM0N6Tl9rVlZTVlV2M1ZLZkpMT0hkT0xkemtVUU9k\nUkppTzV2N1dDUTN0YUc3YTREaFhMb1ZpVkh5Mmd0cTdzWUR0ZUduVWlXUndTc3hq\nOFJnRG9YbGx4d293ZkFNalAtaWVfTm5oX0l5RzlBaVJtSmFLMUZGS3JXOENYNnk2\nRGhSOWJqSGNOeUNPNjBueU9Eem9rd1JESV9BX0NySldxeXl2eWJodFM4dm1QMXpx\nT3dWVVdZVTF2ekVCa096Rl91MzBZR0JqdEplZHp6Ykhud1lYVWtzNDNnYl9ITVQ3\ncGtlZmNCQnlteWV4cGl2RzZEZV91d2dqOWhQdUI5MlN6SDlRS01tbUlGNUVYTDlE\naWFZbmZFeFFXU1JrUGVwX0NaMGliQ2paVTk5bHVwb3BYUUdmNkxKOFdHbmlBa0tI\nMFZ2czBCWDZ4LUtRX2xYdTE1OVE5dkNDS29oZ0h6d2kwQjVIVjhWMHAwVzRFcWda\nSU5TZWQzVHFpaHg4Q0h6OERDZXQtcDF5bGdyNUVlT0ZZT0p2U09UOFlDWFpHb2Mz\nZ0tTcnl2V0I3ZnR1ejlnOHdfMjd5Tlc3bTFJQjhEckg0LXhTUlllb3o0Y0xhY3Vl\nRC13eDVKZGFETUY3SGtqR180ZUlNejZTOEZZNUdsNmJFdlJVaUswd3N3Y3NyUlJR\nNWw1aFB3bDFETndlZS0zNnNrQU5FcEZVWXB2TjhqbmFGdU8ycmdpM3ZmWGp1MkEx\na1FtdjV0TmNZY1FqeGpQZ1k1cmRJWXZxWUpsLXdvV0h1MzB4VEFFM0czZjB2QWdK\nYnoyWV9rZGpYdGQwNWUyd0pNQmtFY1BEMFpvaWV3X2U1MjMxVW8xRllDMW5HZ0c0\nQmZKUzJGOXExZ3JJUFk3bC0ydEk3Z2wtM2ZqQ2RSN0EyV21kLmg4SkhUM1NQd2d3\nQ1l3TGMuU0E2YWZ2b1psaG53TEl2NktsVFZMUSIsInNpZyI6ImxEV1kxYklOT0Nt\naUJJLTBNSlNpb29jalBFbm16TU0xalJsUVQ1NEVXQlV0NFdfS09BRXpxUUFIZUNO\nXzlkZ0tORjBkS2ZwUnM1ZHFzcWhGZllaWENRIiwiYWxnIjoiYWVzLTI1Ni1nY20r\nZWQyNTUxOSIsImtpZCI6Im1hY2hpbmUtZmlsZS1maXh0dXJlLTIwMjYifQ==\n-----END MACHINE FILE-----",
+            "algorithm": "aes-256-gcm+ed25519",
+            "ttl": 315360000,
+            "issued": "2026-08-16T12:00:00Z",
+            "expiry": "2036-08-13T12:00:00Z"
+          },
+          "relationships": {
+            "license": {
+              "data": {
+                "type": "licenses",
+                "id": "MF-FIXTURE-1234-5678-ABCD"
+              }
+            },
+            "machine": {
+              "data": {
+                "type": "machines",
+                "id": "fixture-machine-fingerprint-0001"
+              }
+            }
+          }
+        }
+      },
+      "expected": {
+        "valid": false,
+        "code": "decryption_failed"
+      }
+    },
+    "wrong_key": {
+      "description": "Structurally perfect file signed by a different Ed25519 key under the same kid.",
+      "response": {
+        "data": {
+          "type": "machine-files",
+          "attributes": {
+            "certificate": "-----BEGIN MACHINE FILE-----\neyJlbmMiOiJDMXpwdnZwMTNaZWJOZWl1eEdjLVVDZXd4N0s2M1BxajVPVlBaOXhk\nQ21nTk1rLW5LMWVZNnVNaEhwSGJlVXdGYkl0ZTZUdmJLX09YU1c2U2N2RUp5dzhm\naUpja21qTnBwdldEOUpzSXgxNjFFc2lxZnV6N0NZYVZMQzFWUXk2anFud0NXX21i\ncWdsaE5YSlY2T19fQ1I3OThic21IR1pYd3hmSkVLZmx2ZnFyOGI1cHQxZmtLZnhO\nVzU4SEJjQTV6eWhfWkdPREFUdWxJTG5pSUgyamFQQnBlaVRIRm1QOU9wdk5KOUwz\nS3NPQzNzYXE5WmNEdzVuUDUyNVlEb0tuSGdvNlpIajR6Vk5VempJN2w5RXBBRkpY\ndVlMVHBuQzBzaEp3ZlZFV2VnblJ0UUp2WjQ5b2pKNmxnOGJxNkNzb3RkQXdEQjBr\nZHJOS3IwZVdPX2lRT0R2STMzV3pnLU5Rck43aVR6VENJUHNndWRINWx1SGdmQ0Np\nMjBVTndBemc5VWVvWXQ2XzQ2N1k3dUI2czF2RjJUazZSUWFoN0lLWEhSdnVRZ3VG\nTUdFcGF1Y2JST3ZEM3R0VExkS0g4eXcxdzJRM0RUSGhCY3M3QmpFdVBYMWxUcUct\nUFpHd3hfZ2Q3N3lVeDRkZlVqc21FZ1JBSG15ZklNdVNBNk14d01GNGEwZjJOU01K\nUjcyZUlNLTlDLWM1eFI0bVdYWmxtcklIbzRpQ3hYMzVhRi1Temo1NVJ3OU1uaGF6\nOElFVk5IUHI2Z21xVEFUZXpGMGdoNG9oMFg5OU5mM05vQnFBVTVKc2xwTVN4enl6\nREZ4UFhDYXdVREVMTU9hMktJYUR0RXoxYkFtV1VnN1BLc0NmM3ZTaG1ST3psTVFU\nSjZBMXlvU010UlZ5NGFBWUdQa1pnVDBEUTllcHkwcnRPcFp0eGlibUY4NUpBMmNj\nUy1LeVYyUVpLcG9RTjY0N0tqVjI1SnZTS3ROY0l3akF3QnRBTGJBQVZ0R0I4RGl2\ndUtza1BIeGhxZXpmNEhkbnhydUY5Q2N0ZlV1UFZRR2ZJd2lhdWFDcmVza2FkblFp\ncmZKd0lscjJ2bEpWekdTeFlJZENaLUVZWEZkRXZaOVdNSF9HNUZrOVBiTnFWTkNq\ncEI5Z0JCei00NnI4YldwRlZQVnV3TkpyYUFNR3pDZGNKR2NzMUwzYmdaY0RjYkRB\nUzltNzFscFNIS1EtYm96VWxLN2owcW5RYldqdkJuSkZicl9pM0FFdnNfcDh0UGF6\nQXh6UkUtaTNoeURaWDRvckNpdVJQOXNIOHFxcElsWjRTaTR1SEtRZzdaWk16bUM1\nZUtReXBxY0lsN1VOWDAzRGttdU9GSk4waVM0NzhTbll6dFp0LTNyMG9XekhzbTZG\nQWtkR05ZY2duQS1sRnAtOTNaZVZaRU03VEZCR3llQno1SUQ3akMxRkNURHRnOVdQ\nbXQ4LTB5TVR5RVFGR090NmlaSWtLZ3VITXNZS0JKSGVwWDRSMHl5ajMzU2FTQVh5\nSmZhY2ZDc1NSa1k0dnBvenA3Zy1UeGJjLTg4X251dEowMlhMc1pZZk5EV19Fb2lQ\nUDlWdWdLRzRjQkpyUVBWVEE4NTVCNnFkV0Rlbm9UdVgtWXNOZkpTVXRaNkEyeHJh\nTEJURS1DWEdyM1pxLUF5TlhHN241Y1hYUTh3c21XRXZtUzgtMU5wMXdDMkIxb3VL\nT2xSUXBFT1ZqSWdJS1k5dnhDR2VBNUlkOUdOWmRtYk9raDJrX3U3YUhKQ2p4OUlk\nU0MwbGZkbldNX3dldzhnRk1zdW8zS3MzX2RWRkpERUQwdXNYUXRwRmhrRkNVbndy\nVVJrUWRzVlFjcHl6NjdhZDFCWTR5Z0Rza0lKT0xBd1E4UG5UaUQ3a0l0TFFfWk82\nNHgyTW1HT1U4U0xBdW5mdHByZGpWRmtrQVUxRmttdUs5alkyTFh3bnJST2tBT3dC\nMVI2akJmTUhkRl84WURUbG5yc0N0bkhVY3ZELVdXcFo3dVgyaUtRQXkzc01PRmhy\nU05IekVzV1dEU2RRQURTcnVzbmtWcmFmSGw0QVFmU05RTWxJSWFPVk5xOFNNQUw3\nR0QzXzFqVFZOMHE1N3JGQmxtMm1hY0ZpUnlXcEQ1TEE3amRJQ0w4ZEd1aWJNMXVY\nS3VmVW42eWlkS2c5M3BSUkVSLVJiWm5QRGVqam52YTdtell1LmttekFVS2g2eTMy\nNTJpcTkuVGhmaTNLQzRaQlBpRzZSQjd4NnFfZyIsInNpZyI6Ik9yMVRIZ1puOVpD\ndU14b0xJZmpCTkN1QmRoR0tJZzFjOGZFNHlUcnRuYXY3bk83dHZtZTZndWNOeTFT\nNzN0SnBZUG03czh4a0pPTjBsekJhWVVvc0RBIiwiYWxnIjoiYWVzLTI1Ni1nY20r\nZWQyNTUxOSIsImtpZCI6Im1hY2hpbmUtZmlsZS1maXh0dXJlLTIwMjYifQ==\n-----END MACHINE FILE-----",
+            "algorithm": "aes-256-gcm+ed25519",
+            "ttl": 315360000,
+            "issued": "2026-08-16T12:00:00Z",
+            "expiry": "2036-08-13T12:00:00Z"
+          },
+          "relationships": {
+            "license": {
+              "data": {
+                "type": "licenses",
+                "id": "MF-FIXTURE-1234-5678-ABCD"
+              }
+            },
+            "machine": {
+              "data": {
+                "type": "machines",
+                "id": "fixture-machine-fingerprint-0001"
+              }
+            }
+          }
+        }
+      },
+      "expected": {
+        "valid": false,
+        "code": "signature_invalid"
+      }
+    }
+  }
+}

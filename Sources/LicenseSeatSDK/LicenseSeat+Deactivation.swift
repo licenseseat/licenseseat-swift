@@ -166,6 +166,7 @@ private extension LicenseSeat {
         cancelBackgroundLicenseOperations()
         cache.clearLicense()
         cache.clearOfflineToken()
+        cache.clearMachineFile()
         stopAutoValidation()
         stopHeartbeat()
         stopOfflineRefresh()
