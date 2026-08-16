@@ -33,7 +33,7 @@ extension LicenseSeat {
     /// Use this to validate the license when the device is offline.
     /// The offline token must have been previously downloaded via `syncOfflineAssets()`.
     public func verifyCachedOffline() async -> ValidationResponse {
-        guard config.maxOfflineDays != 0 else {
+        guard config.offlineFallbackEnabled else {
             return makeOfflineValidationResponse(
                 valid: false,
                 code: "offline_disabled"

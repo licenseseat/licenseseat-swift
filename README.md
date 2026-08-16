@@ -121,6 +121,11 @@ LicenseSeatStore.shared.configure(
 )
 ```
 
+Offline authority is enabled by default: after the SDK downloads a signed grant, that grant keeps
+the app licensed while the backend is unreachable, until the grant's own signed expiry. Set
+`maxOfflineDays` for a shorter host-side cap, or `offlineFallbackEnabled = false` to require an
+online decision for every validation.
+
 ### 2. Activate a License
 
 When a user enters their license key:
@@ -377,7 +382,8 @@ if result.valid {
 | `retryDelay`                | `TimeInterval`        | `1`                                | Base retry delay (exponential backoff)   |
 | `offlineFallbackMode`       | `OfflineFallbackMode` | `.networkOnly`                     | Offline fallback strategy                |
 | `offlineTokenRefreshInterval` | `TimeInterval`      | `259200` (72 hours)                | Offline token refresh interval           |
-| `maxOfflineDays`            | `Int`                 | `0`                                | Maximum signed-grant age; `0` disables all offline authority, enabled values are `1...36,600` |
+| `offlineFallbackEnabled`    | `Bool`                | `true`                             | Whether a cached signed grant may authorize the app while offline |
+| `maxOfflineDays`            | `Int`                 | `0`                                | Additional host-side signed-grant age cap; `0` adds no cap (the grant's own expiry governs), enabled values are `1...36,600` |
 | `maxClockSkewMs`            | `TimeInterval`        | `300000` (5 min)                   | Clock tamper tolerance                   |
 | `telemetryEnabled`          | `Bool`                | `true`                             | Send device telemetry with supported licensing POST requests |
 | `appVersion`                | `String?`             | `nil`                              | Telemetry app version; `nil` reads `CFBundleShortVersionString` |
@@ -476,11 +482,17 @@ LicenseSeatStore.shared.configure(
 }
 ```
 
-Offline authority is disabled by default. Set `maxOfflineDays` to an explicit
-value in `1...36,600` only after choosing the maximum outage window your product
-will accept. Zero, negative values, and values above that range fail closed:
-cached grants cannot authorize features, launch-time offline verification is
-skipped, and background offline-token refresh is disabled.
+Offline authority is enabled by default, matching the Rust SDK. `maxOfflineDays`
+is an *additional* host-side age cap measured from the signed `iat` claim: the
+default `0` applies no extra cap, so the grant's own `exp`, the license expiry
+claim, and the clock-rollback watermark govern how long a cached grant lasts.
+Set it to an explicit value in `1...36,600` to expire grants sooner than the
+server does.
+
+Negative values and values above 36,600 fail closed, as does
+`offlineFallbackEnabled = false`: cached grants cannot authorize features,
+launch-time offline verification is skipped, and background offline-token
+refresh is disabled.
 
 ### Offline Fallback Modes
 

@@ -5,6 +5,25 @@ All notable changes to LicenseSeat will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **Behavior change:** Offline authority is now enabled by default, matching the Rust SDK. `maxOfflineDays == 0` no longer disables offline validation; it means "no additional host-side age cap", leaving the signed grant's own `exp`, the underlying license expiry, and the clock-rollback watermark as the governing deadlines. Applications that relied on the 0.4.2 default to require an online decision must now set `offlineFallbackEnabled = false`
+- Report `architecture` telemetry with Rust's `env::consts::ARCH` vocabulary (`aarch64`/`x86_64` instead of `arm64`/`x64`) so dashboard buckets do not split between SDKs
+
+### Added
+
+- `offlineFallbackEnabled` configuration flag to disable offline authority outright; negative `maxOfflineDays` and values above 36,600 continue to fail closed
+- Settable `appVersion` and `appBuild` telemetry configuration for hosts without an `Info.plist`, falling back to `CFBundleShortVersionString`/`CFBundleVersion` when unset
+- `requestTimeout` configuration for SDK-owned sessions (default 30 seconds, resource timeout 2x); non-finite, non-positive, and above-300-second values fall back to the default
+- Public `startAutoValidation(licenseKey:)`, `stopAutoValidation()`, `startHeartbeat()`, `stopHeartbeat()`, `isAutoValidating`, and `nextAutoValidationAt` on `LicenseSeat` for hosts that own their background cadence
+- Public `lastSeenTimestamp` accessor for the protected clock watermark
+
+### Fixed
+
+- Return `@discardableResult Bool` from `LicenseSeatStore.configure` and `LicenseSeat.configure` and log a warning instead of silently ignoring a second configuration call without `force`
+
 ## [0.4.2] - 2026-07-13
 
 ### Security

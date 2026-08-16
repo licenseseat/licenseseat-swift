@@ -79,10 +79,14 @@ struct TelemetryPayload: Encodable, Sendable {
             deviceModel: currentDeviceModel(),
             locale: Locale.current.identifier,
             timezone: TimeZone.current.identifier,
-            appVersion: safeAppText(appVersion)
-                ?? safeAppText(bundleInfo?["CFBundleShortVersionString"] as? String),
-            appBuild: safeAppText(appBuild)
-                ?? safeAppText(bundleInfo?["CFBundleVersion"] as? String),
+            appVersion: resolvedAppText(
+                override: appVersion,
+                bundleValue: bundleInfo?["CFBundleShortVersionString"] as? String
+            ),
+            appBuild: resolvedAppText(
+                override: appBuild,
+                bundleValue: bundleInfo?["CFBundleVersion"] as? String
+            ),
             deviceType: currentDeviceType(),
             architecture: currentArchitecture(),
             cpuCores: currentCPUCores(),
@@ -117,6 +121,17 @@ struct TelemetryPayload: Encodable, Sendable {
     }
 
     // MARK: - Existing helpers
+
+    /// Resolve one application attribute. An explicit host value wins outright,
+    /// so a malformed override is dropped rather than silently replaced by an
+    /// unrelated bundle string.
+    private static func resolvedAppText(
+        override: String?,
+        bundleValue: String?
+    ) -> String? {
+        guard override == nil else { return safeAppText(override) }
+        return safeAppText(bundleValue)
+    }
 
     /// Bound an application-supplied telemetry string the same way the Rust SDK
     /// bounds its configuration text, so a malformed value is dropped rather

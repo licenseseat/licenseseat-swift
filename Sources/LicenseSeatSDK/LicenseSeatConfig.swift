@@ -20,7 +20,7 @@ import Foundation
 ///     apiKey: "your-api-key",
 ///     productSlug: "my-app",
 ///     autoValidateInterval: 3600,     // Validate every hour
-///     maxOfflineDays: 7               // 7-day grace period
+///     maxOfflineDays: 7               // Cap offline grants at 7 days
 /// )
 /// ```
 public struct LicenseSeatConfig {
@@ -98,8 +98,9 @@ public struct LicenseSeatConfig {
 
     /// Application version reported in telemetry. When `nil` the SDK reads
     /// `CFBundleShortVersionString` from the main bundle, which is unavailable
-    /// for command-line tools and SPM-embedded hosts. Values that are empty,
-    /// longer than 255 bytes, or contain control characters are ignored.
+    /// for command-line tools and SPM-embedded hosts. An explicit value that is
+    /// empty, longer than 255 bytes, or contains control characters is omitted
+    /// from telemetry rather than replaced by the bundle value.
     public var appVersion: String?
 
     /// Application build reported in telemetry. When `nil` the SDK reads
@@ -126,18 +127,28 @@ public struct LicenseSeatConfig {
     /// Strategy for offline fallback during validation.
     public var offlineFallbackMode: OfflineFallbackMode
 
-    /// Maximum age of a signed offline token in days. A value of zero disables
-    /// offline authority entirely. Enabled values are limited to 1...36,600
-    /// (100 leap years); the signed token and license expiry claims are always
-    /// enforced as additional upper bounds.
+    /// Whether a cached signed grant may authorize the application while the
+    /// backend is unreachable. Enabled by default, matching the Rust SDK.
+    ///
+    /// Set to `false` to require an authoritative online decision: cached
+    /// grants cannot authorize features, launch-time offline verification is
+    /// skipped, and background offline-token refresh never runs.
+    public var offlineFallbackEnabled: Bool
+
+    /// Maximum *additional* host-side age of a signed offline token in days.
+    ///
+    /// Zero — the default — applies no host-side age cap; the signed token's
+    /// own `exp`, the license expiry claim, and the clock-rollback watermark
+    /// remain the governing deadlines. Values are limited to 0...36,600
+    /// (100 leap years); negative or larger values fail closed.
     public var maxOfflineDays: Int
 
     /// Whether this configuration permits a cached signed token to grant
     /// authority. One predicate is shared by startup, fallback, refresh, and
-    /// explicit verification so zero cannot mean disabled in one path and
-    /// unbounded in another.
+    /// explicit verification so an out-of-range policy cannot fail closed in
+    /// one path and run unbounded in another.
     internal var offlineAuthorityEnabled: Bool {
-        (1...36_600).contains(maxOfflineDays)
+        offlineFallbackEnabled && (0...36_600).contains(maxOfflineDays)
     }
 
     /// Maximum allowed clock skew (in milliseconds)
@@ -166,6 +177,7 @@ public struct LicenseSeatConfig {
         appBuild: String? = nil,
         offlineTokenRefreshInterval: TimeInterval = 259200,
         offlineFallbackMode: OfflineFallbackMode = .networkOnly,
+        offlineFallbackEnabled: Bool = true,
         maxOfflineDays: Int = 0,
         maxClockSkewMs: TimeInterval = 300000
     ) {
@@ -185,6 +197,7 @@ public struct LicenseSeatConfig {
         self.appBuild = appBuild
         self.offlineTokenRefreshInterval = offlineTokenRefreshInterval
         self.offlineFallbackMode = offlineFallbackMode
+        self.offlineFallbackEnabled = offlineFallbackEnabled
         self.maxOfflineDays = maxOfflineDays
         self.maxClockSkewMs = maxClockSkewMs
     }
