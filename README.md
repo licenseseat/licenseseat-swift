@@ -378,6 +378,7 @@ if result.valid {
 | `autoValidateInterval`      | `TimeInterval`        | `3600` (1 hour)                    | Launch and periodic online validation interval (`≤ 0` disables both; local signed-cache verification remains enabled) |
 | `heartbeatInterval`         | `TimeInterval`        | `300` (5 min)                      | Standalone heartbeat ping interval       |
 | `networkRecheckInterval`    | `TimeInterval`        | `30`                               | Offline connectivity check interval      |
+| `requestTimeout`            | `TimeInterval`        | `30`                               | Per-request timeout for SDK-owned sessions (resource timeout is 2x; injected sessions keep their own policy) |
 | `maxRetries`                | `Int`                 | `3`                                | API retry attempts                       |
 | `retryDelay`                | `TimeInterval`        | `1`                                | Base retry delay (exponential backoff)   |
 | `offlineFallbackMode`       | `OfflineFallbackMode` | `.networkOnly`                     | Offline fallback strategy                |

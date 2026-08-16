@@ -30,6 +30,13 @@ public struct LicenseSeatConfig {
     /// be owned explicitly by the host application.
     internal static let maximumScheduledInterval: TimeInterval = 366 * 86_400
 
+    /// Request timeout applied when the host does not configure one.
+    internal static let defaultRequestTimeout: TimeInterval = 30
+
+    /// Upper bound for a single request timeout, matching the Rust SDK's
+    /// configuration limit so both SDKs reject the same values.
+    internal static let maximumRequestTimeout: TimeInterval = 300
+
     /// The current SDK version. Single source of truth for version information.
     public static let sdkVersion = "0.4.2"
 
@@ -74,6 +81,24 @@ public struct LicenseSeatConfig {
 
     /// Interval for network recheck when offline (in seconds)
     public var networkRecheckInterval: TimeInterval
+
+    /// Timeout for a single API request (in seconds), applied to SDK-owned
+    /// sessions. The resource timeout is twice this value. Defaults to 30.
+    /// Sessions injected through `urlSession:` keep their own transport policy.
+    public var requestTimeout: TimeInterval
+
+    /// The timeout actually applied to an SDK-owned session. Non-finite,
+    /// zero, negative, and above-``maximumRequestTimeout`` values fall back to
+    /// the default so a misconfigured host cannot create a session that never
+    /// times out or fails instantly.
+    internal var resolvedRequestTimeout: TimeInterval {
+        guard requestTimeout.isFinite,
+              requestTimeout > 0,
+              requestTimeout <= Self.maximumRequestTimeout else {
+            return Self.defaultRequestTimeout
+        }
+        return requestTimeout
+    }
 
     /// Maximum number of retry attempts for API calls
     public var maxRetries: Int
@@ -169,6 +194,7 @@ public struct LicenseSeatConfig {
         autoValidateInterval: TimeInterval = 3600,
         heartbeatInterval: TimeInterval = 300,
         networkRecheckInterval: TimeInterval = 30,
+        requestTimeout: TimeInterval = 30,
         maxRetries: Int = 3,
         retryDelay: TimeInterval = 1,
         debug: Bool = false,
@@ -189,6 +215,7 @@ public struct LicenseSeatConfig {
         self.autoValidateInterval = autoValidateInterval
         self.heartbeatInterval = heartbeatInterval
         self.networkRecheckInterval = networkRecheckInterval
+        self.requestTimeout = requestTimeout
         self.maxRetries = maxRetries
         self.retryDelay = retryDelay
         self.debug = debug

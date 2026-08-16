@@ -61,15 +61,10 @@ final class APIClient {
             self.boundedSessionDelegate = nil
             self.ownsSession = false
         } else {
-            let sourceConfiguration = ownedSessionConfiguration
-                ?? URLSessionConfiguration.default
-            let configuration = sourceConfiguration.copy() as! URLSessionConfiguration
-            configuration.timeoutIntervalForRequest = 30
-            configuration.timeoutIntervalForResource = 60
-            configuration.httpShouldSetCookies = false
-            configuration.httpCookieAcceptPolicy = .never
-            configuration.urlCache = nil
-            configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+            let configuration = Self.ownedSessionConfiguration(
+                for: config,
+                basedOn: ownedSessionConfiguration
+            )
             let delegate = BoundedSessionDelegate()
             self.boundedSessionDelegate = delegate
             self.ownsSession = true
@@ -89,6 +84,25 @@ final class APIClient {
         if ownsSession {
             session.invalidateAndCancel()
         }
+    }
+
+    /// Build the transport policy for an SDK-owned session. The resource
+    /// timeout stays at twice the request timeout so a retried request cannot
+    /// outlive the transfer budget the host configured.
+    static func ownedSessionConfiguration(
+        for config: LicenseSeatConfig,
+        basedOn source: URLSessionConfiguration? = nil
+    ) -> URLSessionConfiguration {
+        let sourceConfiguration = source ?? URLSessionConfiguration.default
+        let configuration = sourceConfiguration.copy() as! URLSessionConfiguration
+        let timeout = config.resolvedRequestTimeout
+        configuration.timeoutIntervalForRequest = timeout
+        configuration.timeoutIntervalForResource = timeout * 2
+        configuration.httpShouldSetCookies = false
+        configuration.httpCookieAcceptPolicy = .never
+        configuration.urlCache = nil
+        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+        return configuration
     }
     
     // MARK: - Public Methods
