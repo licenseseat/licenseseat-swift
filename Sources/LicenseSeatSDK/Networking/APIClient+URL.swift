@@ -41,7 +41,16 @@ extension APIClient {
     /// Construct a URL without ever interpreting a dynamic value as multiple
     /// route components. `URL.appendingPathComponent` preserves embedded `/`
     /// characters, so it cannot safely represent an opaque signing-key ID.
-    func endpointURL(baseURL: URL, pathComponents: [String]) -> URL? {
+    ///
+    /// `queryItems` follows the same rule for the query string: a value is
+    /// encoded as exactly one parameter value and can never introduce another
+    /// pair. `validatedBaseURL()` rejects a base URL that already carries a
+    /// query, so the result is always only what the SDK asked for.
+    func endpointURL(
+        baseURL: URL,
+        pathComponents: [String],
+        queryItems: [URLQueryItem] = []
+    ) -> URL? {
         guard !pathComponents.isEmpty,
               pathComponents.count <= 32,
               pathComponents.allSatisfy({
@@ -73,6 +82,45 @@ extension APIClient {
         }
         components.percentEncodedPath = "\(basePath)/\(encodedComponents.joined(separator: "/"))"
         guard components.percentEncodedPath.utf8.count <= Self.maxPathBytes else { return nil }
+
+        if !queryItems.isEmpty {
+            guard let query = encodedQuery(queryItems) else { return nil }
+            components.percentEncodedQuery = query
+        }
         return components.url
+    }
+
+    /// Encode SDK-issued query parameters into a single percent-encoded query
+    /// string, or return `nil` when any item falls outside what the SDK is
+    /// allowed to send. Rejecting is deliberate: silently dropping an unknown
+    /// or malformed filter would issue a broader request than the caller asked
+    /// for, and the caller could not tell from the response.
+    func encodedQuery(_ queryItems: [URLQueryItem]) -> String? {
+        guard queryItems.count <= Self.allowedQueryKeys.count else { return nil }
+
+        var allowed = CharacterSet.urlQueryAllowed
+        allowed.remove(charactersIn: "&=+?#/%")
+        var usedKeys = Set<String>()
+        var encodedPairs: [String] = []
+
+        for item in queryItems {
+            guard Self.allowedQueryKeys.contains(item.name),
+                  usedKeys.insert(item.name).inserted,
+                  let value = item.value,
+                  !value.isEmpty,
+                  value.utf8.count <= Self.maxQueryValueBytes,
+                  value == value.trimmingCharacters(in: .whitespacesAndNewlines),
+                  value.unicodeScalars.allSatisfy({ $0.value > 31 && $0.value != 127 }),
+                  let encodedValue = value.addingPercentEncoding(
+                      withAllowedCharacters: allowed
+                  ) else {
+                return nil
+            }
+            encodedPairs.append("\(item.name)=\(encodedValue)")
+        }
+
+        let query = encodedPairs.joined(separator: "&")
+        guard query.utf8.count <= Self.maxQueryBytes else { return nil }
+        return query
     }
 }
