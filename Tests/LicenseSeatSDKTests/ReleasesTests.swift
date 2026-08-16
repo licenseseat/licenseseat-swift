@@ -67,15 +67,16 @@ final class ReleasesTests: LicenseSeatTestCase {
         sdk = makeSDK()
     }
 
-    override func tearDown() {
-        MainActor.assumeIsolated {
-            sdk?.reset()
-            sdk = nil
-            recorder = nil
-            MockURLProtocol.reset()
-            URLProtocol.unregisterClass(MockURLProtocol.self)
-        }
-        super.tearDown()
+    // Async so the @MainActor class annotation isolates it — the
+    // assumeIsolated form trips Swift 6 strict concurrency ("sending 'self'")
+    // on the Linux lane against this base class.
+    override func tearDown() async throws {
+        sdk?.reset()
+        sdk = nil
+        recorder = nil
+        MockURLProtocol.reset()
+        URLProtocol.unregisterClass(MockURLProtocol.self)
+        try await super.tearDown()
     }
 
     // MARK: - Harness
