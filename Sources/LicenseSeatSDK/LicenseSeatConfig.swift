@@ -38,7 +38,7 @@ public struct LicenseSeatConfig {
     internal static let maximumRequestTimeout: TimeInterval = 300
 
     /// The current SDK version. Single source of truth for version information.
-    public static let sdkVersion = "0.5.0"
+    public static let sdkVersion = "0.5.1"
 
     /// The production API base URL (v1). Single source of truth for the default endpoint.
     public static let productionAPIBaseURL = "https://licenseseat.com/api/v1"

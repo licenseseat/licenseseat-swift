@@ -187,4 +187,58 @@ final class EntitlementTests: LicenseSeatTestCase {
         XCTAssertNil(status.reason)
         XCTAssertNil(status.expiresAt)
     }
+
+    // MARK: - Version ceilings (server API 2026-08-19)
+
+    /// The server's `below_version` ceiling must decode, and its absence
+    /// (every response from an older server) must decode as nil — the field
+    /// is additive in both directions.
+    func testBelowVersionDecodesAndOlderPayloadsStayNil() throws {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+
+        let bounded = """
+        {"key": "updates", "expires_at": null, "below_version": "3.0.0", "metadata": {}}
+        """.data(using: .utf8)!
+        let entitlement = try decoder.decode(Entitlement.self, from: bounded)
+        XCTAssertEqual(entitlement.belowVersion, "3.0.0")
+
+        let legacy = """
+        {"key": "updates", "expires_at": null, "metadata": {}}
+        """.data(using: .utf8)!
+        XCTAssertNil(try decoder.decode(Entitlement.self, from: legacy).belowVersion)
+    }
+
+    /// A version-gated validation refusal is a normal `valid: false` envelope
+    /// with the `version_not_entitled` code — it must decode like any other
+    /// invalid result, code and message intact, entitlements included.
+    func testVersionNotEntitledValidationResponseDecodes() throws {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+
+        let json = """
+        {
+          "object": "validation_result",
+          "valid": false,
+          "code": "version_not_entitled",
+          "message": "This license does not cover version 3.0.1 — it is valid for versions below 3.0.0.",
+          "license": {
+            "object": "license", "key": "TEST-KEY", "status": "active",
+            "starts_at": null, "expires_at": null, "mode": "hardware_locked",
+            "plan_key": "personal-lifetime", "seat_limit": 1, "active_seats": 1,
+            "active_entitlements": [
+              {"key": "updates", "expires_at": null, "below_version": "3.0.0", "metadata": {}}
+            ],
+            "metadata": {},
+            "product": {"object": "product", "slug": "hustl", "name": "Hustl"}
+          }
+        }
+        """.data(using: .utf8)!
+
+        let response = try decoder.decode(ValidationResponse.self, from: json)
+        XCTAssertFalse(response.valid)
+        XCTAssertEqual(response.code, "version_not_entitled")
+        XCTAssertEqual(response.license.activeEntitlements.first?.belowVersion, "3.0.0")
+        XCTAssertTrue(response.message?.contains("below 3.0.0") == true)
+    }
 }
