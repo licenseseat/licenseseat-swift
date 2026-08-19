@@ -1,0 +1,47 @@
+{
+  "object" : {
+    "artifacts" : [
+
+    ],
+    "dependencies" : [
+      {
+        "basedOn" : null,
+        "packageRef" : {
+          "identity" : "licenseseat-swift",
+          "kind" : "remoteSourceControl",
+          "location" : "https://github.com/licenseseat/licenseseat-swift.git",
+          "name" : "LicenseSeat"
+        },
+        "state" : {
+          "checkoutState" : {
+            "revision" : "6149935016228b70631d805cb512e11c4cf335ad",
+            "version" : "0.4.1"
+          },
+          "name" : "sourceControlCheckout"
+        },
+        "subpath" : "licenseseat-swift"
+      },
+      {
+        "basedOn" : null,
+        "packageRef" : {
+          "identity" : "swift-crypto",
+          "kind" : "remoteSourceControl",
+          "location" : "https://github.com/apple/swift-crypto.git",
+          "name" : "swift-crypto"
+        },
+        "state" : {
+          "checkoutState" : {
+            "revision" : "60f13f60c4d093691934dc6cfdf5f508ada1f894",
+            "version" : "2.6.0"
+          },
+          "name" : "sourceControlCheckout"
+        },
+        "subpath" : "swift-crypto"
+      }
+    ],
+    "prebuilts" : [
+
+    ]
+  },
+  "version" : 7
+}

@@ -1,0 +1,125 @@
+{
+  "": {
+    "swift-dependencies": "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/arm64-apple-macosx/debug/LicenseSeat.build/master.swiftdeps"
+  },
+  "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/checkouts/licenseseat-swift/Sources/LicenseSeatSDK/LicenseSeat+AutoValidation.swift": {
+    "dependencies": "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/arm64-apple-macosx/debug/LicenseSeat.build/LicenseSeat+AutoValidation.d",
+    "object": "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/arm64-apple-macosx/debug/LicenseSeat.build/LicenseSeat+AutoValidation.swift.o",
+    "swiftmodule": "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/arm64-apple-macosx/debug/LicenseSeat.build/LicenseSeat+AutoValidation~partial.swiftmodule",
+    "swift-dependencies": "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/arm64-apple-macosx/debug/LicenseSeat.build/LicenseSeat+AutoValidation.swiftdeps"
+  },
+  "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/checkouts/licenseseat-swift/Sources/LicenseSeatSDK/LicenseSeat+Combine.swift": {
+    "dependencies": "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/arm64-apple-macosx/debug/LicenseSeat.build/LicenseSeat+Combine.d",
+    "object": "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/arm64-apple-macosx/debug/LicenseSeat.build/LicenseSeat+Combine.swift.o",
+    "swiftmodule": "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/arm64-apple-macosx/debug/LicenseSeat.build/LicenseSeat+Combine~partial.swiftmodule",
+    "swift-dependencies": "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/arm64-apple-macosx/debug/LicenseSeat.build/LicenseSeat+Combine.swiftdeps"
+  },
+  "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/checkouts/licenseseat-swift/Sources/LicenseSeatSDK/LicenseSeat+OfflineValidation.swift": {
+    "dependencies": "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/arm64-apple-macosx/debug/LicenseSeat.build/LicenseSeat+OfflineValidation.d",
+    "object": "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/arm64-apple-macosx/debug/LicenseSeat.build/LicenseSeat+OfflineValidation.swift.o",
+    "swiftmodule": "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/arm64-apple-macosx/debug/LicenseSeat.build/LicenseSeat+OfflineValidation~partial.swiftmodule",
+    "swift-dependencies": "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/arm64-apple-macosx/debug/LicenseSeat.build/LicenseSeat+OfflineValidation.swiftdeps"
+  },
+  "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/checkouts/licenseseat-swift/Sources/LicenseSeatSDK/LicenseSeat.swift": {
+    "dependencies": "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/arm64-apple-macosx/debug/LicenseSeat.build/LicenseSeat.d",
+    "object": "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/arm64-apple-macosx/debug/LicenseSeat.build/LicenseSeat.swift.o",
+    "swiftmodule": "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/arm64-apple-macosx/debug/LicenseSeat.build/LicenseSeat~partial.swiftmodule",
+    "swift-dependencies": "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/arm64-apple-macosx/debug/LicenseSeat.build/LicenseSeat.swiftdeps"
+  },
+  "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/checkouts/licenseseat-swift/Sources/LicenseSeatSDK/LicenseSeatConfig.swift": {
+    "dependencies": "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/arm64-apple-macosx/debug/LicenseSeat.build/LicenseSeatConfig.d",
+    "object": "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/arm64-apple-macosx/debug/LicenseSeat.build/LicenseSeatConfig.swift.o",
+    "swiftmodule": "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/arm64-apple-macosx/debug/LicenseSeat.build/LicenseSeatConfig~partial.swiftmodule",
+    "swift-dependencies": "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/arm64-apple-macosx/debug/LicenseSeat.build/LicenseSeatConfig.swiftdeps"
+  },
+  "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/checkouts/licenseseat-swift/Sources/LicenseSeatSDK/LicenseSeatError.swift": {
+    "dependencies": "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/arm64-apple-macosx/debug/LicenseSeat.build/LicenseSeatError.d",
+    "object": "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/arm64-apple-macosx/debug/LicenseSeat.build/LicenseSeatError.swift.o",
+    "swiftmodule": "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/arm64-apple-macosx/debug/LicenseSeat.build/LicenseSeatError~partial.swiftmodule",
+    "swift-dependencies": "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/arm64-apple-macosx/debug/LicenseSeat.build/LicenseSeatError.swiftdeps"
+  },
+  "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/checkouts/licenseseat-swift/Sources/LicenseSeatSDK/LicenseSeatStore.swift": {
+    "dependencies": "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/arm64-apple-macosx/debug/LicenseSeat.build/LicenseSeatStore.d",
+    "object": "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/arm64-apple-macosx/debug/LicenseSeat.build/LicenseSeatStore.swift.o",
+    "swiftmodule": "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/arm64-apple-macosx/debug/LicenseSeat.build/LicenseSeatStore~partial.swiftmodule",
+    "swift-dependencies": "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/arm64-apple-macosx/debug/LicenseSeat.build/LicenseSeatStore.swiftdeps"
+  },
+  "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/checkouts/licenseseat-swift/Sources/LicenseSeatSDK/Models/HeartbeatResponse.swift": {
+    "dependencies": "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/arm64-apple-macosx/debug/LicenseSeat.build/HeartbeatResponse.d",
+    "object": "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/arm64-apple-macosx/debug/LicenseSeat.build/HeartbeatResponse.swift.o",
+    "swiftmodule": "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/arm64-apple-macosx/debug/LicenseSeat.build/HeartbeatResponse~partial.swiftmodule",
+    "swift-dependencies": "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/arm64-apple-macosx/debug/LicenseSeat.build/HeartbeatResponse.swiftdeps"
+  },
+  "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/checkouts/licenseseat-swift/Sources/LicenseSeatSDK/Models/License.swift": {
+    "dependencies": "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/arm64-apple-macosx/debug/LicenseSeat.build/License.d",
+    "object": "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/arm64-apple-macosx/debug/LicenseSeat.build/License.swift.o",
+    "swiftmodule": "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/arm64-apple-macosx/debug/LicenseSeat.build/License~partial.swiftmodule",
+    "swift-dependencies": "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/arm64-apple-macosx/debug/LicenseSeat.build/License.swiftdeps"
+  },
+  "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/checkouts/licenseseat-swift/Sources/LicenseSeatSDK/Models/LicenseStatus.swift": {
+    "dependencies": "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/arm64-apple-macosx/debug/LicenseSeat.build/LicenseStatus.d",
+    "object": "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/arm64-apple-macosx/debug/LicenseSeat.build/LicenseStatus.swift.o",
+    "swiftmodule": "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/arm64-apple-macosx/debug/LicenseSeat.build/LicenseStatus~partial.swiftmodule",
+    "swift-dependencies": "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/arm64-apple-macosx/debug/LicenseSeat.build/LicenseStatus.swiftdeps"
+  },
+  "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/checkouts/licenseseat-swift/Sources/LicenseSeatSDK/Models/TelemetryPayload.swift": {
+    "dependencies": "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/arm64-apple-macosx/debug/LicenseSeat.build/TelemetryPayload.d",
+    "object": "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/arm64-apple-macosx/debug/LicenseSeat.build/TelemetryPayload.swift.o",
+    "swiftmodule": "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/arm64-apple-macosx/debug/LicenseSeat.build/TelemetryPayload~partial.swiftmodule",
+    "swift-dependencies": "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/arm64-apple-macosx/debug/LicenseSeat.build/TelemetryPayload.swiftdeps"
+  },
+  "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/checkouts/licenseseat-swift/Sources/LicenseSeatSDK/Networking/APIClient.swift": {
+    "dependencies": "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/arm64-apple-macosx/debug/LicenseSeat.build/APIClient.d",
+    "object": "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/arm64-apple-macosx/debug/LicenseSeat.build/APIClient.swift.o",
+    "swiftmodule": "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/arm64-apple-macosx/debug/LicenseSeat.build/APIClient~partial.swiftmodule",
+    "swift-dependencies": "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/arm64-apple-macosx/debug/LicenseSeat.build/APIClient.swiftdeps"
+  },
+  "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/checkouts/licenseseat-swift/Sources/LicenseSeatSDK/Networking/APIError.swift": {
+    "dependencies": "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/arm64-apple-macosx/debug/LicenseSeat.build/APIError.d",
+    "object": "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/arm64-apple-macosx/debug/LicenseSeat.build/APIError.swift.o",
+    "swiftmodule": "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/arm64-apple-macosx/debug/LicenseSeat.build/APIError~partial.swiftmodule",
+    "swift-dependencies": "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/arm64-apple-macosx/debug/LicenseSeat.build/APIError.swiftdeps"
+  },
+  "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/checkouts/licenseseat-swift/Sources/LicenseSeatSDK/Storage/LicenseCache.swift": {
+    "dependencies": "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/arm64-apple-macosx/debug/LicenseSeat.build/LicenseCache.d",
+    "object": "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/arm64-apple-macosx/debug/LicenseSeat.build/LicenseCache.swift.o",
+    "swiftmodule": "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/arm64-apple-macosx/debug/LicenseSeat.build/LicenseCache~partial.swiftmodule",
+    "swift-dependencies": "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/arm64-apple-macosx/debug/LicenseSeat.build/LicenseCache.swiftdeps"
+  },
+  "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/checkouts/licenseseat-swift/Sources/LicenseSeatSDK/Utilities/AnyCodable.swift": {
+    "dependencies": "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/arm64-apple-macosx/debug/LicenseSeat.build/AnyCodable.d",
+    "object": "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/arm64-apple-macosx/debug/LicenseSeat.build/AnyCodable.swift.o",
+    "swiftmodule": "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/arm64-apple-macosx/debug/LicenseSeat.build/AnyCodable~partial.swiftmodule",
+    "swift-dependencies": "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/arm64-apple-macosx/debug/LicenseSeat.build/AnyCodable.swiftdeps"
+  },
+  "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/checkouts/licenseseat-swift/Sources/LicenseSeatSDK/Utilities/Base64URL.swift": {
+    "dependencies": "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/arm64-apple-macosx/debug/LicenseSeat.build/Base64URL.d",
+    "object": "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/arm64-apple-macosx/debug/LicenseSeat.build/Base64URL.swift.o",
+    "swiftmodule": "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/arm64-apple-macosx/debug/LicenseSeat.build/Base64URL~partial.swiftmodule",
+    "swift-dependencies": "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/arm64-apple-macosx/debug/LicenseSeat.build/Base64URL.swiftdeps"
+  },
+  "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/checkouts/licenseseat-swift/Sources/LicenseSeatSDK/Utilities/CSRFToken.swift": {
+    "dependencies": "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/arm64-apple-macosx/debug/LicenseSeat.build/CSRFToken.d",
+    "object": "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/arm64-apple-macosx/debug/LicenseSeat.build/CSRFToken.swift.o",
+    "swiftmodule": "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/arm64-apple-macosx/debug/LicenseSeat.build/CSRFToken~partial.swiftmodule",
+    "swift-dependencies": "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/arm64-apple-macosx/debug/LicenseSeat.build/CSRFToken.swiftdeps"
+  },
+  "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/checkouts/licenseseat-swift/Sources/LicenseSeatSDK/Utilities/CanonicalJSON.swift": {
+    "dependencies": "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/arm64-apple-macosx/debug/LicenseSeat.build/CanonicalJSON.d",
+    "object": "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/arm64-apple-macosx/debug/LicenseSeat.build/CanonicalJSON.swift.o",
+    "swiftmodule": "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/arm64-apple-macosx/debug/LicenseSeat.build/CanonicalJSON~partial.swiftmodule",
+    "swift-dependencies": "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/arm64-apple-macosx/debug/LicenseSeat.build/CanonicalJSON.swiftdeps"
+  },
+  "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/checkouts/licenseseat-swift/Sources/LicenseSeatSDK/Utilities/DeviceIdentifier.swift": {
+    "dependencies": "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/arm64-apple-macosx/debug/LicenseSeat.build/DeviceIdentifier.d",
+    "object": "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/arm64-apple-macosx/debug/LicenseSeat.build/DeviceIdentifier.swift.o",
+    "swiftmodule": "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/arm64-apple-macosx/debug/LicenseSeat.build/DeviceIdentifier~partial.swiftmodule",
+    "swift-dependencies": "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/arm64-apple-macosx/debug/LicenseSeat.build/DeviceIdentifier.swiftdeps"
+  },
+  "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/checkouts/licenseseat-swift/Sources/LicenseSeatSDK/Utilities/EventBus.swift": {
+    "dependencies": "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/arm64-apple-macosx/debug/LicenseSeat.build/EventBus.d",
+    "object": "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/arm64-apple-macosx/debug/LicenseSeat.build/EventBus.swift.o",
+    "swiftmodule": "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/arm64-apple-macosx/debug/LicenseSeat.build/EventBus~partial.swiftmodule",
+    "swift-dependencies": "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/arm64-apple-macosx/debug/LicenseSeat.build/EventBus.swiftdeps"
+  }
+}

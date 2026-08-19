@@ -51,6 +51,42 @@ public struct Entitlement: Codable, Equatable, Sendable {
         self.belowVersion = belowVersion
         self.metadata = metadata
     }
+
+    /// Whether this entitlement's version ceiling covers the given app
+    /// version — the client-side half of the server's version gate, for
+    /// apps that want to enforce locally as well (belt-and-suspenders when
+    /// the server was never told the app's version).
+    ///
+    /// No ceiling covers everything. The comparison matches the server's
+    /// rule exactly: **exclusive**, on **core** versions (`"3.0"` counts as
+    /// `3.0.0`; a prerelease OF the ceiling is not below it), failing
+    /// **open** on unparseable strings — local gating is a second line of
+    /// defense and must never brick an app; the server stays authoritative.
+    public func covers(version: String) -> Bool {
+        Self.versionCovered(version, byCeiling: belowVersion)
+    }
+
+    /// The pure comparison behind ``covers(version:)``, for callers that
+    /// hold the ceiling as a bare string.
+    public static func versionCovered(_ version: String, byCeiling ceiling: String?) -> Bool {
+        guard let ceiling else { return true }
+        guard let lhs = coreComponents(version), let rhs = coreComponents(ceiling) else {
+            return true
+        }
+        for (l, r) in zip(lhs, rhs) where l != r { return l < r }
+        return false
+    }
+
+    private static func coreComponents(_ version: String) -> [Int]? {
+        let trimmed = version.trimmingCharacters(in: .whitespaces)
+        guard let core = trimmed.split(separator: "-", maxSplits: 1).first?
+            .split(separator: "+", maxSplits: 1).first else { return nil }
+        let parts = core.split(separator: ".").map { Int($0) }
+        guard (1...3).contains(parts.count), parts.allSatisfy({ $0 != nil }) else { return nil }
+        var numbers = parts.compactMap { $0 }
+        while numbers.count < 3 { numbers.append(0) }
+        return numbers
+    }
 }
 
 // MARK: - License (API Response)

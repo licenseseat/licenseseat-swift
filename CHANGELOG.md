@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-08-19
+
+### Added
+
+- `Entitlement.covers(version:)` and `Entitlement.versionCovered(_:byCeiling:)`:
+  the client-side half of the server's version gate, so apps enforcing the
+  ceiling locally (belt-and-suspenders for requests that never declared a
+  version) share one tested comparison instead of hand-rolling it. Matches
+  the server's rule exactly — exclusive, core versions, lenient parsing
+  (`"3.0"` counts as `3.0.0`), fail-open on unparseable strings.
+
 ## [0.5.1] - 2026-08-19
 
 ### Added
