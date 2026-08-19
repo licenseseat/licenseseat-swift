@@ -1,0 +1,17 @@
+{
+  "": {
+    "swift-dependencies": "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/arm64-apple-macosx/debug/CryptoBoringWrapper.build/master.swiftdeps"
+  },
+  "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/checkouts/swift-crypto/Sources/CryptoBoringWrapper/AEAD/BoringSSLAEAD.swift": {
+    "dependencies": "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/arm64-apple-macosx/debug/CryptoBoringWrapper.build/BoringSSLAEAD.d",
+    "object": "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/arm64-apple-macosx/debug/CryptoBoringWrapper.build/BoringSSLAEAD.swift.o",
+    "swiftmodule": "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/arm64-apple-macosx/debug/CryptoBoringWrapper.build/BoringSSLAEAD~partial.swiftmodule",
+    "swift-dependencies": "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/arm64-apple-macosx/debug/CryptoBoringWrapper.build/BoringSSLAEAD.swiftdeps"
+  },
+  "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/checkouts/swift-crypto/Sources/CryptoBoringWrapper/CryptoKitErrors_boring.swift": {
+    "dependencies": "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/arm64-apple-macosx/debug/CryptoBoringWrapper.build/CryptoKitErrors_boring.d",
+    "object": "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/arm64-apple-macosx/debug/CryptoBoringWrapper.build/CryptoKitErrors_boring.swift.o",
+    "swiftmodule": "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/arm64-apple-macosx/debug/CryptoBoringWrapper.build/CryptoKitErrors_boring~partial.swiftmodule",
+    "swift-dependencies": "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/arm64-apple-macosx/debug/CryptoBoringWrapper.build/CryptoKitErrors_boring.swiftdeps"
+  }
+}

@@ -241,4 +241,22 @@ final class EntitlementTests: LicenseSeatTestCase {
         XCTAssertEqual(response.license.activeEntitlements.first?.belowVersion, "3.0.0")
         XCTAssertTrue(response.message?.contains("below 3.0.0") == true)
     }
+
+    /// `covers(version:)` is the client-side half of the server's gate and
+    /// must match its rule exactly: exclusive, core versions, lenient
+    /// parsing, fail-open on the unreadable.
+    func testCoversVersionMatchesTheServerRule() {
+        let bounded = Entitlement(key: "updates", belowVersion: "3.0.0")
+        XCTAssertTrue(bounded.covers(version: "2.3"), "lenient: 2.3 counts as 2.3.0")
+        XCTAssertTrue(bounded.covers(version: "2.9.9-beta.1"), "a prerelease below the ceiling is covered")
+        XCTAssertFalse(bounded.covers(version: "3.0"), "the ceiling is exclusive: 3.0 is not below 3.0.0")
+        XCTAssertFalse(bounded.covers(version: "3.0.0-beta.1"),
+                       "a prerelease OF the ceiling is not below it — same rule as the server")
+        XCTAssertFalse(bounded.covers(version: "4.1.0"))
+        XCTAssertTrue(bounded.covers(version: "nightly-build"), "unparseable fails open — never brick the app")
+
+        XCTAssertTrue(Entitlement(key: "updates").covers(version: "99.0.0"), "no ceiling covers everything")
+        XCTAssertTrue(Entitlement.versionCovered("3.0.1", byCeiling: "4.0.0"),
+                      "the static form serves callers holding a bare ceiling string")
+    }
 }

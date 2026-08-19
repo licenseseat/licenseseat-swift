@@ -1,0 +1,4 @@
+module LicenseSeat {
+    header "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/arm64-apple-macosx/debug/LicenseSeat.build/LicenseSeat-Swift.h"
+    requires objc
+}

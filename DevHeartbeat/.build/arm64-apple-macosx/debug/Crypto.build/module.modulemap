@@ -1,0 +1,4 @@
+module Crypto {
+    header "/Users/javi/GitHub/licenseseat-swift/DevHeartbeat/.build/arm64-apple-macosx/debug/Crypto.build/Crypto-Swift.h"
+    requires objc
+}
