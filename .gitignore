@@ -19,3 +19,5 @@ TODO
 
 # Claude Code local settings
 .claude/
+# Local dev scratch projects
+DevHeartbeat/
