@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-08-19
+
+### Added
+
+- `Entitlement.belowVersion`: the server's exclusive core-semver version
+  ceiling on the `updates` entitlement (LicenseSeat API 2026-08-19). `nil`
+  from older servers; offline artifacts do not carry it yet by design.
+- Version-gating compatibility tests: `below_version` decodes (and legacy
+  payloads stay `nil`), and a `version_not_entitled` validation refusal
+  decodes like any other invalid result — code, message, and bounded
+  entitlement intact. The server's gate reads `telemetry.app_version`,
+  which this SDK already sends on every licensing POST when telemetry is
+  enabled (existing behavior, already covered by `TelemetryTests`).
+
 ## [0.5.0] - 2026-08-16
 
 The distribution + offline parity release: the Swift SDK now covers the

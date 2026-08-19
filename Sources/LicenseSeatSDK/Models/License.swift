@@ -29,18 +29,26 @@ public struct Entitlement: Codable, Equatable, Sendable {
     /// Expiration date (if applicable)
     public let expiresAt: Date?
 
+    /// Exclusive core-semver version ceiling (server-enforced on the
+    /// `updates` entitlement since LicenseSeat API 2026-08-19): the license
+    /// covers app versions strictly below this. `nil` means unbounded, and
+    /// servers older than the field simply never send it.
+    public let belowVersion: String?
+
     /// Additional metadata
     public let metadata: [String: AnyCodable]?
 
     enum CodingKeys: String, CodingKey {
         case key
         case expiresAt = "expires_at"
+        case belowVersion = "below_version"
         case metadata
     }
 
-    public init(key: String, expiresAt: Date? = nil, metadata: [String: AnyCodable]? = nil) {
+    public init(key: String, expiresAt: Date? = nil, belowVersion: String? = nil, metadata: [String: AnyCodable]? = nil) {
         self.key = key
         self.expiresAt = expiresAt
+        self.belowVersion = belowVersion
         self.metadata = metadata
     }
 }
