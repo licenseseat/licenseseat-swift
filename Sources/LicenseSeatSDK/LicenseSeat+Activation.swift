@@ -175,6 +175,7 @@ private extension LicenseSeat {
         cache.clearOfflineToken()
         cache.clearMachineFile()
         lastOfflineValidation = nil
+        recordRuntimeTrust(.onlineResponse)
 
         startAutoValidation(licenseKey: license.licenseKey)
         startHeartbeat()

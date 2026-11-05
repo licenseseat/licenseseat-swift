@@ -171,6 +171,26 @@ public final class LicenseSeat {
     /// Last offline validation result to avoid duplicate events
     internal var lastOfflineValidation: ValidationResponse?
 
+    /// The decision this process has (re-)established, bound to the exact
+    /// activation it was made for. Anything persisted by a previous process
+    /// is untrusted until an online response or verified offline artifact
+    /// re-establishes it. See ``isLicenseStateTrusted``.
+    internal var runtimeTrust: (identity: CachedLicenseIdentity, source: TrustedLicenseSource)?
+
+    /// Most recent successful heartbeat acknowledgement in this process.
+    public internal(set) var lastHeartbeatResponse: HeartbeatResponse?
+
+    /// Most recent heartbeat failure in this process; cleared by the next
+    /// successful heartbeat.
+    public internal(set) var lastHeartbeatError: (any Error)?
+
+    /// Most recent successful ``healthCheck()`` response in this process.
+    public internal(set) var lastHealthResponse: HealthResponse?
+
+    /// Most recent ``healthCheck()`` failure in this process; cleared by the
+    /// next successful health check.
+    public internal(set) var lastHealthError: (any Error)?
+
     /// Identifies the newest activation request. Main-actor isolation prevents
     /// data races, but actor reentrancy still allows an older network response
     /// to arrive after a newer activation or reset unless it is correlated.
@@ -225,6 +245,7 @@ public final class LicenseSeat {
             if let offlineResult = await quickVerifyCachedOfflineLocal() {
                 guard !Task.isCancelled else { return }
                 if cache.updateValidation(offlineResult, markValidatedOnline: false) {
+                    recordOfflineRuntimeTrust(offlineResult)
                     if offlineResult.valid {
                         eventBus.emit("validation:offline-success", offlineResult)
                     } else {
@@ -315,6 +336,7 @@ public final class LicenseSeat {
         stopOfflineRefresh()
         currentAutoLicenseKey = nil
         lastOfflineValidation = nil
+        runtimeTrust = nil
 
         eventBus.emit("license:revoked", [
             "code": error.code ?? "unknown",

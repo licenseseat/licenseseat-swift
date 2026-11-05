@@ -368,6 +368,31 @@ if result.valid {
 }
 ```
 
+### Restoring and Inspecting State
+
+```swift
+// Re-establish the cached activation at launch (online, with the configured
+// offline fallback). Never throws; failures land in `result.error`.
+let restore = await licenseSeat.restoreLicense()
+if restore.restored { unlockApp() }
+
+// One consistent, typed view of everything the SDK knows right now.
+let snapshot = licenseSeat.stateSnapshot()
+snapshot.status              // same as getStatus()
+snapshot.trustedSource       // .onlineResponse / .signedOfflineArtifact / .failClosedDenial / nil
+snapshot.activeEntitlements  // unexpired, and only when the status grants access
+
+// Persisted state from a previous launch is reported by getStatus() but is
+// not *trusted* until this process re-establishes it.
+licenseSeat.isLicenseStateTrusted
+licenseSeat.currentTrustedLicense        // LicenseResponse established by this process
+licenseSeat.currentTrustedLicenseSource
+
+// The last heartbeat and health-check outcomes in this process.
+licenseSeat.lastHeartbeatResponse; licenseSeat.lastHeartbeatError
+licenseSeat.lastHealthResponse; licenseSeat.lastHealthError
+```
+
 ---
 
 ## Configuration Options

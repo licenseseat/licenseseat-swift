@@ -8,10 +8,14 @@
 
 import Foundation
 
-struct HeartbeatResponse: Codable, Equatable, Sendable {
-    let object: String
-    let receivedAt: Date
-    let license: LicenseResponse?
+/// The server's acknowledgement of a heartbeat.
+public struct HeartbeatResponse: Codable, Equatable, Sendable {
+    /// Always `"heartbeat"`.
+    public let object: String
+    /// When the server recorded the heartbeat.
+    public let receivedAt: Date
+    /// The license as the server sees it, when included.
+    public let license: LicenseResponse?
 
     enum CodingKeys: String, CodingKey {
         case object

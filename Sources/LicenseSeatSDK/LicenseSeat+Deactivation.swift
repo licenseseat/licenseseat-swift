@@ -137,11 +137,14 @@ public extension LicenseSeat {
             guard anchorAuthoritativeTime(Date()) else {
                 throw LicenseSeatError.cacheError
             }
+            lastHeartbeatResponse = response
+            lastHeartbeatError = nil
 
             eventBus.emit("heartbeat:success", [:])
             log("Heartbeat sent successfully")
         } catch {
             guard currentHeartbeatRequestID == requestID else { throw error }
+            lastHeartbeatError = error
             if let apiError = error as? APIError,
                apiError.invalidatesCachedLicense {
                 handleAuthoritativeInvalidation(
@@ -172,6 +175,7 @@ private extension LicenseSeat {
         stopOfflineRefresh()
         currentAutoLicenseKey = nil
         lastOfflineValidation = nil
+        runtimeTrust = nil
         return true
     }
 
