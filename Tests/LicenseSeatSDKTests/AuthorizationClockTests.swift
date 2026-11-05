@@ -43,11 +43,12 @@ final class ManualClockSource {
     }
 }
 
+// Linux discovery: every test method of a @MainActor suite must be async.
 @MainActor
 final class AuthorizationClockTests: LicenseSeatTestCase {
     private let base: TimeInterval = 1_800_000_000
 
-    func testMatchesTheWallClockWhileTheWallClockIsHonest() {
+    func testMatchesTheWallClockWhileTheWallClockIsHonest() async {
         let source = ManualClockSource(wall: base)
         let clock = source.makeClock()
 
@@ -57,7 +58,7 @@ final class AuthorizationClockTests: LicenseSeatTestCase {
         XCTAssertEqual(clock.wallClockLag(), 0)
     }
 
-    func testWallClockRolledBackInProcessIsRaisedToTheMonotonicFloor() {
+    func testWallClockRolledBackInProcessIsRaisedToTheMonotonicFloor() async {
         let source = ManualClockSource(wall: base)
         let clock = source.makeClock()
 
@@ -68,7 +69,7 @@ final class AuthorizationClockTests: LicenseSeatTestCase {
         XCTAssertEqual(clock.wallClockLag(), 5_400)
     }
 
-    func testSleepNeverLagsTheWallClock() {
+    func testSleepNeverLagsTheWallClock() async {
         // The system source counts through sleep, so the floor tracks the
         // wall clock; even a source that did not would only fall behind it.
         let source = ManualClockSource(wall: base)
@@ -82,7 +83,7 @@ final class AuthorizationClockTests: LicenseSeatTestCase {
         XCTAssertEqual(clock.wallClockLag(), 0)
     }
 
-    func testForwardClockErrorCorrectedByNTPDoesNotStickInTheFuture() {
+    func testForwardClockErrorCorrectedByNTPDoesNotStickInTheFuture() async {
         // A transiently wrong future clock must not leave the process living
         // in the future after NTP corrects it; that would be a lockout.
         let source = ManualClockSource(wall: base)
@@ -97,7 +98,7 @@ final class AuthorizationClockTests: LicenseSeatTestCase {
         XCTAssertEqual(clock.now().timeIntervalSince1970, base + 20)
     }
 
-    func testAnchorReBaselinesAndMayLowerTheFloor() {
+    func testAnchorReBaselinesAndMayLowerTheFloor() async {
         // Started with a clock that was an hour fast, then NTP corrected it.
         let source = ManualClockSource(wall: base + 3_600)
         let clock = source.makeClock()
@@ -111,7 +112,7 @@ final class AuthorizationClockTests: LicenseSeatTestCase {
         XCTAssertEqual(clock.wallClockLag(), 0)
     }
 
-    func testToleranceAbsorbsAFastAnchorCorrectedByNTP() {
+    func testToleranceAbsorbsAFastAnchorCorrectedByNTP() async {
         // Anchored while two minutes fast, then corrected. Without slack the
         // floor would sit two minutes in the future and expire grants early.
         let source = ManualClockSource(wall: base + 120)
@@ -128,7 +129,7 @@ final class AuthorizationClockTests: LicenseSeatTestCase {
         XCTAssertEqual(clock.now(tolerance: 300).timeIntervalSince1970, base + 3_780 - 300)
     }
 
-    func testTrustedServerTimeAnchorReplacesAWrongLocalAnchor() {
+    func testTrustedServerTimeAnchorReplacesAWrongLocalAnchor() async {
         let source = ManualClockSource(wall: base + 3_600) // an hour fast
         let clock = source.makeClock()
         source.wall = base
@@ -148,13 +149,13 @@ final class AuthorizationClockTests: LicenseSeatTestCase {
         XCTAssertEqual(clock.now().timeIntervalSince1970, base - 7_190)
     }
 
-    func testClocksAreSharedPerStorageScope() {
+    func testClocksAreSharedPerStorageScope() async {
         let scope = "clock_scope_\(UUID().uuidString)"
         XCTAssertTrue(AuthorizationClock.shared(scope: scope) === AuthorizationClock.shared(scope: scope))
         XCTAssertFalse(AuthorizationClock.shared(scope: scope) === AuthorizationClock.shared(scope: scope + "x"))
     }
 
-    func testHTTPDateParsing() {
+    func testHTTPDateParsing() async {
         XCTAssertEqual(
             APIClient.parseHTTPDate("Sun, 06 Nov 2022 08:49:37 GMT")?.timeIntervalSince1970,
             1_667_724_577
@@ -164,7 +165,7 @@ final class AuthorizationClockTests: LicenseSeatTestCase {
         XCTAssertNil(APIClient.parseHTTPDate("garbage"))
     }
 
-    func testUnavailableOrRegressingMonotonicSourceFallsBackToTheWallClock() {
+    func testUnavailableOrRegressingMonotonicSourceFallsBackToTheWallClock() async {
         let missing = ManualClockSource(wall: base, monotonic: nil)
         let missingClock = missing.makeClock()
         missing.wall = base - 3_600
@@ -177,7 +178,7 @@ final class AuthorizationClockTests: LicenseSeatTestCase {
         XCTAssertEqual(regressingClock.now().timeIntervalSince1970, base - 3_600)
     }
 
-    func testSystemMonotonicSourceIsAvailableAndNonDecreasing() throws {
+    func testSystemMonotonicSourceIsAvailableAndNonDecreasing() async throws {
         let first = try XCTUnwrap(AuthorizationClock.systemMonotonicNanoseconds())
         let second = try XCTUnwrap(AuthorizationClock.systemMonotonicNanoseconds())
         XCTAssertGreaterThanOrEqual(second, first)
@@ -192,7 +193,7 @@ final class AuthorizationClockTests: LicenseSeatTestCase {
 
     // MARK: - SDK wiring
 
-    func testOnlineAnchorAndResetSemantics() throws {
+    func testOnlineAnchorAndResetSemantics() async throws {
         let sdk = LicenseSeat(
             config: LicenseSeatConfig(
                 productSlug: "clock-app",

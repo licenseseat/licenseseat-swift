@@ -71,7 +71,7 @@ final class EntitlementTests: LicenseSeatTestCase {
         )
     }
 
-    func testEntitlementExpiryIsEvaluatedAtTheMonotonicFloor() throws {
+    func testEntitlementExpiryIsEvaluatedAtTheMonotonicFloor() async throws {
         // #12: winding the wall clock back in-process cannot revive an
         // entitlement whose expiry has really passed.
         let sdk = try XCTUnwrap(sdk)
