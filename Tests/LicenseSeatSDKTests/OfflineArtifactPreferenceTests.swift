@@ -247,6 +247,9 @@ final class OfflineArtifactPreferenceTests: LicenseSeatTestCase {
     // MARK: - Refresh preference
 
     func testSyncPrefersTheMachineFileAndNeverAsksForALegacyToken() async throws {
+        // A token cached by 0.5.x is superseded (and discarded) by the newer
+        // signed machine file, so it can never override its verdict later.
+        XCTAssertTrue(sdk.cache.setOfflineToken(try signedToken()))
         let machineFileData = try Self.responseData("valid")
         let paths = try installServer { request in
             (
@@ -316,6 +319,35 @@ final class OfflineArtifactPreferenceTests: LicenseSeatTestCase {
         XCTAssertNotNil(sdk.currentLicense())
     }
 
+    func testSyncFallsBackToTheLegacyTokenOnATransientServerFailure() async throws {
+        _ = try installServer { request in
+            try Self.response(request, status: 503, json: [
+                "error": ["code": "unavailable", "message": "Down"]
+            ])
+        }
+
+        await sdk.syncOfflineAssets()
+
+        XCTAssertNil(sdk.currentMachineFile)
+        XCTAssertEqual(sdk.cache.getOfflineToken()?.token.kid, Self.tokenKeyId)
+    }
+
+    func testAGenericMachineFileRefusalIsNotTreatedAsARevocation() async throws {
+        // license_seat#34: the endpoint reports every validator refusal and
+        // unexpected server errors as a generic 422.
+        _ = try installServer { request in
+            try Self.response(request, status: 422, json: [
+                "error": ["code": "license_invalid_general",
+                          "message": "Offline machine files are not supported for hardware_locked licenses."]
+            ])
+        }
+
+        await sdk.syncOfflineAssets()
+
+        XCTAssertNotNil(sdk.currentLicense())
+        XCTAssertEqual(sdk.cache.getOfflineToken()?.token.kid, Self.tokenKeyId)
+    }
+
     func testSyncDoesNotFallBackWhenLegacyTokensAreDisabled() async throws {
         reconfigure(legacyOfflineTokensEnabled: false)
         let paths = try installServer { request in
@@ -331,6 +363,8 @@ final class OfflineArtifactPreferenceTests: LicenseSeatTestCase {
         XCTAssertNil(sdk.cache.getOfflineToken())
         XCTAssertFalse(paths.paths.contains { $0.hasSuffix("/offline-token") })
         XCTAssertEqual(events.names, ["offlineAssets:fetchError"])
+        let payload = events.events.first?.1 as? [String: Any]
+        XCTAssertEqual((payload?["machineFileError"] as? APIError)?.status, 404)
     }
 
     func testAuthoritativeMachineFileRefusalRevokesWithoutFallingBack() async throws {
@@ -383,8 +417,24 @@ final class OfflineArtifactPreferenceTests: LicenseSeatTestCase {
         XCTAssertEqual(result.code, "license_mismatch")
     }
 
-    func testAnInvalidMachineFileFallsBackToAValidLegacyToken() async throws {
+    func testADefinitiveMachineFileVerdictIsNotOverriddenByAnOlderToken() async throws {
+        // E.g. the license end date was moved earlier: the newer machine file
+        // says expired; an older token must not resurrect the grant.
         XCTAssertTrue(sdk.cache.setMachineFile(try Self.machineFile("expired")))
+        XCTAssertTrue(sdk.cache.setOfflineToken(try signedToken()))
+        XCTAssertTrue(sdk.cache.setPublicKey(Self.tokenKeyId, tokenPublicKey))
+
+        let result = await sdk.verifyCachedOffline()
+
+        XCTAssertFalse(result.valid)
+        XCTAssertEqual(result.code, "token_expired")
+    }
+
+    func testAMachineFileThatCannotVouchFallsBackToTheLegacyToken() async throws {
+        // Signed by a key this installation does not trust (and the key
+        // endpoint is unreachable): no verdict either way, so the legacy
+        // token is consulted.
+        XCTAssertTrue(sdk.cache.setMachineFile(try Self.machineFile("wrong_key")))
         XCTAssertTrue(sdk.cache.setOfflineToken(try signedToken()))
         XCTAssertTrue(sdk.cache.setPublicKey(Self.tokenKeyId, tokenPublicKey))
 
@@ -430,6 +480,17 @@ final class OfflineArtifactPreferenceTests: LicenseSeatTestCase {
         XCTAssertEqual(Set(details.entitlements.map(\.key)), ["pro", "beta-features"])
         XCTAssertTrue(sdk.checkEntitlement("pro").active)
         XCTAssertTrue(paths.paths.isEmpty, "launch verification hit the network: \(paths.paths)")
+    }
+
+    func testLaunchTreatsAMachineFileThatCannotVouchAsAbsent() async throws {
+        XCTAssertTrue(sdk.cache.setMachineFile(try Self.machineFile("wrong_key")))
+
+        reconfigure(legacyOfflineTokensEnabled: true)
+        await sdk.waitForInitialization()
+
+        guard case .pending = sdk.getStatus() else {
+            return XCTFail("no offline denial before online validation, got \(sdk.getStatus())")
+        }
     }
 
     func testLaunchStillVerifiesALegacyTokenCachedByAnOlderRelease() async throws {

@@ -18,7 +18,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   papered over by the fallback. `verifyCachedOffline()` and launch-time
   verification try the cached machine file (bound to the cached activation's
   license key, fingerprint, and activation id) before the legacy token.
-  Caches written by 0.5.x (token only) keep verifying unchanged.
+  Caches written by 0.5.x (token only) keep verifying unchanged. A committed
+  machine file discards the older legacy token, and a definitive machine-file
+  verdict (expired, license expired, clock tamper, …) is never overridden by
+  a token; the token is consulted only when the machine file cannot vouch
+  either way (unknown or rotated key, malformed or foreign artifact). A
+  generic `license_invalid`/`license_invalid_general` from the machine-file
+  endpoint is not treated as a revocation (license_seat#34).
 
 ### Added
 

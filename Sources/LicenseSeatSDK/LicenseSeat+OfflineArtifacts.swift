@@ -9,6 +9,16 @@ import Foundation
 
 extension LicenseSeat {
 
+    /// Machine-file verdicts that are final about *time or license state*:
+    /// the artifact was examined and says no. An older legacy token must not
+    /// override them. Every other failure (missing or rotated key, malformed
+    /// or foreign artifact, configuration) means the artifact could not
+    /// vouch either way, so the legacy token may still be consulted.
+    static let definitiveMachineFileVerdicts: Set<String> = [
+        "token_expired", "license_expired", "grace_period_expired",
+        "clock_tamper", "token_not_yet_valid", "included_license_mismatch"
+    ]
+
     /// Verify the cached machine file against this installation's activation
     /// and convert it into an offline validation result.
     ///

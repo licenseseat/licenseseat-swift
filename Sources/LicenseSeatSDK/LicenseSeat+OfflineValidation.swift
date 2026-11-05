@@ -57,6 +57,9 @@ extension LicenseSeat {
                 allowNetwork: true
             )
             if let result, result.valid { return result }
+            if let code = result?.code, Self.definitiveMachineFileVerdicts.contains(code) {
+                return result ?? makeOfflineValidationResponse(valid: false, code: code)
+            }
             machineFileFailure = result
         }
         guard config.legacyOfflineTokensEnabled,
@@ -84,25 +87,29 @@ extension LicenseSeat {
     }
 
     /// Quick local offline verification (no network calls). Machine file
-    /// first, then the legacy token when enabled; `nil` when neither artifact
-    /// can be examined without the network.
+    /// first, then the legacy token when enabled; `nil` when no artifact gave
+    /// a verdict that can be reached without the network. A machine file that
+    /// could not vouch either way (for example a rotated signing key) is
+    /// treated like an absent one at launch, so it never flashes an offline
+    /// denial before online validation runs.
     func quickVerifyCachedOfflineLocal() async -> ValidationResponse? {
         guard config.offlineAuthorityEnabled else { return nil }
 
-        var machineFileFailure: ValidationResponse?
         if let machineFile = cache.getMachineFile(),
            let result = await verifyCachedMachineFileForAuthorization(
                machineFile,
                allowNetwork: false
            ) {
             if result.valid { return result }
-            machineFileFailure = result
+            if let code = result.code, Self.definitiveMachineFileVerdicts.contains(code) {
+                return result
+            }
         }
 
         guard config.legacyOfflineTokensEnabled,
               let offlineToken = cache.getOfflineToken(),
               let publicKey = cache.getPublicKey(offlineToken.token.kid) else {
-            return machineFileFailure
+            return nil
         }
 
         return await verifyOfflineTokenAndClaims(offlineToken, publicKeyB64: publicKey)

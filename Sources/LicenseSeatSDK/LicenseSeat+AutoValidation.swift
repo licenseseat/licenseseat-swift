@@ -262,6 +262,7 @@ extension LicenseSeat {
         }
         let requestedIdentity = CachedLicenseIdentity(requestedLicense)
 
+        var machineFileError: Error?
         switch await syncMachineFile(
             for: requestedLicense,
             identity: requestedIdentity,
@@ -269,11 +270,13 @@ extension LicenseSeat {
         ) {
         case .refreshed, .stop:
             return
-        case .failed(let machineFileError):
+        case .failed(let failure):
+            machineFileError = failure
             guard config.legacyOfflineTokensEnabled else {
                 eventBus.emit("offlineAssets:fetchError", [
                     "licenseKey": requestedLicense.licenseKey,
-                    "error": machineFileError
+                    "error": failure,
+                    "machineFileError": failure
                 ])
                 return
             }
@@ -309,12 +312,25 @@ extension LicenseSeat {
                 "licenseKey": requestedLicense.licenseKey,
                 "error": error
             ])
-            eventBus.emit("offlineAssets:fetchError", [
+            var payload: [String: Any] = [
                 "licenseKey": requestedLicense.licenseKey,
                 "error": error
-            ])
+            ]
+            if let machineFileError {
+                payload["machineFileError"] = machineFileError
+            }
+            eventBus.emit("offlineAssets:fetchError", payload)
         }
     }
+
+    /// The machine-file endpoint reports every validator refusal, and
+    /// unexpected server errors, as a generic invalid-license code
+    /// (license_seat#34). Those are not specific enough to revoke a cached
+    /// license from a background refresh; the legacy token endpoint and
+    /// online validation decide instead.
+    private static let genericMachineFileRefusalCodes: Set<String> = [
+        "license_invalid", "license_invalid_general"
+    ]
 
     private enum MachineFileSyncOutcome {
         /// A verified machine file is now cached for the requested activation.
@@ -366,12 +382,15 @@ extension LicenseSeat {
                 "error": error
             ])
             if let apiError = error as? APIError,
-               apiError.invalidatesCachedLicense {
-                handleAuthoritativeInvalidation(apiError, expectedIdentity: identity)
-                eventBus.emit("offlineAssets:fetchError", [
-                    "licenseKey": license.licenseKey,
-                    "error": error
-                ])
+               apiError.invalidatesCachedLicense,
+               !Self.genericMachineFileRefusalCodes.contains(apiError.code?.lowercased() ?? "") {
+                if cachedLicenseMatches(identity) {
+                    handleAuthoritativeInvalidation(apiError, expectedIdentity: identity)
+                    eventBus.emit("offlineAssets:fetchError", [
+                        "licenseKey": license.licenseKey,
+                        "error": error
+                    ])
+                }
                 return .stop
             }
             return .failed(error)
