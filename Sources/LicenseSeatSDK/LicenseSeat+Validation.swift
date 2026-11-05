@@ -38,7 +38,7 @@ public extension LicenseSeat {
             licenseKey: licenseKey,
             options: options
         )
-        eventBus.emit("validation:start", ["licenseKey": licenseKey])
+        eventBus.emit(.validationStart, ["licenseKey": licenseKey])
 
         do {
             return try await performOnlineValidation(
@@ -185,11 +185,11 @@ private extension LicenseSeat {
             guard anchorAuthoritativeTime(Date()) else {
                 throw LicenseSeatError.cacheError
             }
-            eventBus.emit("validation:success", result)
+            eventBus.emit(.validationSuccess, result)
             return
         }
 
-        eventBus.emit("validation:failed", result)
+        eventBus.emit(.validationFailed, result)
         guard validatesCachedLicense else { return }
         cancelBackgroundLicenseOperations()
         stopAutoValidation()
@@ -207,7 +207,7 @@ private extension LicenseSeat {
             context.id,
             reason: "A newer validation request superseded this failure."
         )
-        eventBus.emit("validation:error", ["licenseKey": licenseKey, "error": error])
+        eventBus.emit(.validationError, ["licenseKey": licenseKey, "error": error])
 
         if let apiError = error as? APIError,
            apiError.invalidatesCachedLicense,
@@ -239,7 +239,7 @@ private extension LicenseSeat {
             runtimeTrust = nil
             if !offlineResult.valid {
                 lastOfflineValidation = offlineResult
-                eventBus.emit("validation:offline-failed", offlineResult)
+                eventBus.emit(.validationOfflineFailed, offlineResult)
             }
             throw LicenseSeatError.cacheError
         }
@@ -247,14 +247,14 @@ private extension LicenseSeat {
         recordOfflineRuntimeTrust(offlineResult)
         if offlineResult.valid {
             if lastOfflineValidation?.valid != true {
-                eventBus.emit("validation:offline-success", offlineResult)
+                eventBus.emit(.validationOfflineSuccess, offlineResult)
             }
             lastOfflineValidation = offlineResult
             return offlineResult
         }
 
         lastOfflineValidation = offlineResult
-        eventBus.emit("validation:offline-failed", offlineResult)
+        eventBus.emit(.validationOfflineFailed, offlineResult)
         throw error
     }
 

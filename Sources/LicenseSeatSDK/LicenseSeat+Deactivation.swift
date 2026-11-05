@@ -31,7 +31,7 @@ public extension LicenseSeat {
         currentActivationRequestID = nil
         let requestedIdentity = CachedLicenseIdentity(license)
 
-        eventBus.emit("deactivation:start", license)
+        eventBus.emit(.deactivationStart, license)
 
         do {
             let response: DeactivationResponse = try await apiClient.post(
@@ -51,7 +51,7 @@ public extension LicenseSeat {
             let clearedCurrentState = completeLocalDeactivation(
                 matching: requestedIdentity
             )
-            eventBus.emit("deactivation:success", [
+            eventBus.emit(.deactivationSuccess, [
                 "licenseKey": license.licenseKey,
                 "localStateCleared": clearedCurrentState
             ])
@@ -60,13 +60,13 @@ public extension LicenseSeat {
                 let clearedCurrentState = completeLocalDeactivation(
                     matching: requestedIdentity
                 )
-                eventBus.emit("deactivation:success", [
+                eventBus.emit(.deactivationSuccess, [
                     "licenseKey": license.licenseKey,
                     "localStateCleared": clearedCurrentState
                 ])
                 return
             }
-            eventBus.emit("deactivation:error", ["error": error, "license": license])
+            eventBus.emit(.deactivationError, ["error": error, "license": license])
             throw error
         }
     }
@@ -140,7 +140,7 @@ public extension LicenseSeat {
             lastHeartbeatResponse = response
             lastHeartbeatError = nil
 
-            eventBus.emit("heartbeat:success", [:])
+            eventBus.emit(.heartbeatSuccess, [:])
             log("Heartbeat sent successfully")
         } catch {
             guard currentHeartbeatRequestID == requestID else { throw error }
@@ -152,7 +152,7 @@ public extension LicenseSeat {
                     expectedIdentity: CachedLicenseIdentity(license)
                 )
             }
-            eventBus.emit("heartbeat:error", ["error": error])
+            eventBus.emit(.heartbeatError, ["error": error])
             throw error
         }
     }

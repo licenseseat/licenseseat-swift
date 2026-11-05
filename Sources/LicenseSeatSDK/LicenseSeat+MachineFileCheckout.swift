@@ -51,7 +51,7 @@ extension LicenseSeat {
                 return CachedLicenseIdentity(license)
             }
 
-        eventBus.emit("machineFile:fetching", ["licenseKey": licenseKey])
+        eventBus.emit(.machineFileFetching, ["licenseKey": licenseKey])
 
         let response: MachineFileResponse = try await apiClient.post(
             pathComponents: ["products", productSlug, "licenses", "machine-file"],

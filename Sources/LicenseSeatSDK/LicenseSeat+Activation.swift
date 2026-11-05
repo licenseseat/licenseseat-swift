@@ -44,11 +44,11 @@ public extension LicenseSeat {
             // Propagating the typed error lets the host app ask the user to
             // unlock and retry, instead of silently rotating the installation
             // fingerprint and consuming another licensed seat.
-            eventBus.emit("activation:error", ["licenseKey": licenseKey, "error": error])
+            eventBus.emit(.activationError, ["licenseKey": licenseKey, "error": error])
             throw error
         }
         try validateFingerprint(deviceId, allowLegacyShortValue: false)
-        eventBus.emit("activation:start", ["licenseKey": licenseKey, "deviceId": deviceId])
+        eventBus.emit(.activationStart, ["licenseKey": licenseKey, "deviceId": deviceId])
 
         do {
             let activation: ActivationResponse = try await apiClient.post(
@@ -71,10 +71,10 @@ public extension LicenseSeat {
                 validatedAt: now
             )
             try commitActivatedLicense(license, onlineTimestamp: now)
-            eventBus.emit("activation:success", license)
+            eventBus.emit(.activationSuccess, license)
             return license
         } catch {
-            eventBus.emit("activation:error", ["licenseKey": licenseKey, "error": error])
+            eventBus.emit(.activationError, ["licenseKey": licenseKey, "error": error])
             throw error
         }
     }

@@ -99,6 +99,7 @@ extension AutoValidationTests: @unchecked Sendable {}
 extension CombineDemandTests: @unchecked Sendable {}
 #endif
 extension EntitlementTests: @unchecked Sendable {}
+extension EventKindTests: @unchecked Sendable {}
 extension HeartbeatTimerTests: @unchecked Sendable {}
 extension LicenseSeatSDKTests: @unchecked Sendable {}
 extension LicenseSeatStoreTests: @unchecked Sendable {}

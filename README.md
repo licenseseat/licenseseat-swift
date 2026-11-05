@@ -834,22 +834,25 @@ licenseSeat.eventPublisher
 
 ### Available Events
 
-| Event                                       | Description                        |
-| ------------------------------------------- | ---------------------------------- |
-| `activation:start/success/error`            | License activation lifecycle       |
-| `validation:start/success/failed/error`     | Online validation                  |
-| `validation:offline-success/offline-failed` | Offline validation                 |
-| `deactivation:start/success/error`          | License deactivation               |
-| `heartbeat:success`                         | Heartbeat ping acknowledged        |
-| `license:loaded`                            | Cached license loaded at startup   |
-| `license:revoked`                           | License revoked by server          |
-| `offlineAssets:ready/fetchError`            | Offline artifact refresh outcome (`artifact`: `machine_file` or `offline_token`) |
-| `machineFile:fetching/fetched/fetchError/ready` | Machine-file checkout lifecycle |
-| `offlineToken:verified`                     | Offline token signature verified   |
-| `offlineToken:verificationFailed`           | Offline token verification failed  |
-| `autovalidation:cycle`                      | Auto-validation cycle triggered    |
-| `network:online/offline`                    | Connectivity changes               |
-| `sdk:reset`                                 | SDK state cleared                  |
+Every event has a typed `EventKind` case (`seat.on(.licenseRevoked) { … }`,
+`seat.eventPublisher(for: .heartbeatError)`); the raw value is the wire name
+the string API accepts. The full list with payloads is in the DocC
+*Event Reference*.
+
+| Area | Events |
+| ---- | ------ |
+| Cached state | `license:loaded`, `sdk:reset`, `sdk:error` |
+| Activation | `activation:start`, `activation:success`, `activation:error` |
+| Validation | `validation:start`, `validation:success`, `validation:failed`, `validation:error` |
+| Offline validation | `validation:offline-success`, `validation:offline-failed` |
+| Background work | `validation:auto-failed`, `validation:auth-failed`, `autovalidation:cycle`, `autovalidation:stopped` |
+| Invalidation | `license:revoked` |
+| Deactivation | `deactivation:start`, `deactivation:success`, `deactivation:error` |
+| Connectivity | `network:online`, `network:offline` |
+| Offline refresh | `offlineAssets:ready`, `offlineAssets:fetchError` |
+| Legacy offline tokens | `offlineToken:fetching`, `offlineToken:fetched`, `offlineToken:fetchError`, `offlineToken:ready`, `offlineToken:verified`, `offlineToken:verificationFailed` |
+| Machine files | `machineFile:fetching`, `machineFile:fetched`, `machineFile:fetchError`, `machineFile:ready`, `machineFile:verified`, `machineFile:verificationFailed` |
+| Heartbeat | `heartbeat:success`, `heartbeat:error` |
 
 ---
 
