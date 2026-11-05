@@ -95,7 +95,7 @@ final class EventKindTests: LicenseSeatTestCase {
             throw XCTSkip("SDK sources are not available next to the tests")
         }
         var code = ""
-        for case let url as URL in enumerator where url.pathExtension == "swift" {
+        for case let url as URL in enumerator.allObjects where url.pathExtension == "swift" {
             code += try String(contentsOf: url, encoding: .utf8)
         }
         XCTAssertFalse(code.isEmpty)
