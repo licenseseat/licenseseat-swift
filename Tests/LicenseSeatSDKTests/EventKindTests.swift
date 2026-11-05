@@ -24,7 +24,7 @@ final class EventKindTests: LicenseSeatTestCase {
         }
     }
 
-    func testWireNamesAreUniqueAndWellFormed() {
+    func testWireNamesAreUniqueAndWellFormed() async {
         let names = EventKind.allCases.map(\.rawValue)
         XCTAssertEqual(Set(names).count, names.count)
         for name in names {
@@ -82,7 +82,7 @@ final class EventKindTests: LicenseSeatTestCase {
 
     /// Every SDK emit site uses a typed kind, and every kind is emitted
     /// somewhere, so the enum, the docs, and the code cannot drift apart.
-    func testSDKEmitsOnlyTypedKindsAndEveryKindIsEmitted() throws {
+    func testSDKEmitsOnlyTypedKindsAndEveryKindIsEmitted() async throws {
         let sources = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
