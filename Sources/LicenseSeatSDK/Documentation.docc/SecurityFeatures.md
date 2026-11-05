@@ -122,6 +122,32 @@ let config = LicenseSeatConfig(
 )
 ```
 
+### Clock rollback
+
+Two mechanisms cooperate so that winding the system clock back cannot revive an
+expired grant, without ever locking out a customer whose clock behaves normally:
+
+- **Persisted watermark.** Every accepted offline verification ratchets a
+  protected watermark forward (`max`); a later verification whose clock is more
+  than `maxClockSkewMs` behind it fails with `clock_tamper`. Authoritative online
+  success (activation, validation, heartbeat) *anchors* it to the current time,
+  which may lower it, so a transiently wrong future clock heals on the next
+  online contact. `reset()` and `clear()` preserve it, like the installation ID.
+- **In-process monotonic floor.** Offline artifacts and entitlement expiry are
+  evaluated at `max(wall clock, anchor + monotonic elapsed)`, where the anchor
+  is taken at SDK start and re-taken on authoritative online success. The
+  monotonic clock cannot be set and counts through sleep, so rolling the clock
+  back while the app runs cannot make time appear to go backwards, even by less
+  than the time since the last recorded verification. The floor never runs
+  behind the wall clock, so it can only make the watermark check more lenient
+  (an NTP correction of a fast clock no longer reports `clock_tamper` mid-session);
+  and it does not remember forward wall-clock excursions, so a briefly wrong
+  future clock settles back to real time. It is process-local: a relaunch or
+  reboot starts a fresh anchor.
+
+Time zones and daylight saving time never enter either check: both operate on
+UTC seconds since 1970.
+
 `maxOfflineDays == 0`, the default, applies no additional host-side age cap:
 token and underlying license expiry govern. Values in `1...36,600` expire a
 grant at most that many days after its signed `iat`. Negative and larger values

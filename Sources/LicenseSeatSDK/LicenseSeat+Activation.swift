@@ -168,7 +168,7 @@ private extension LicenseSeat {
         // commit time rather than max()-advanced. See
         // `LicenseCache.anchorLastSeenTimestamp(_:)`.
         guard cache.setLicense(license),
-              cache.anchorLastSeenTimestamp(onlineTimestamp.timeIntervalSince1970) else {
+              anchorAuthoritativeTime(onlineTimestamp) else {
             cache.clear()
             throw LicenseSeatError.cacheError
         }

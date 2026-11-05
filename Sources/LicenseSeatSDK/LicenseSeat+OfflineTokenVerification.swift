@@ -179,6 +179,15 @@ extension LicenseSeat {
         }
     }
 
+    /// Record an authoritative online acceptance: re-anchor both the persisted
+    /// rollback watermark (which may lower it, per the cross-SDK contract) and
+    /// the in-process monotonic floor. Returns `false` if the watermark could
+    /// not be stored.
+    func anchorAuthoritativeTime(_ timestamp: Date) -> Bool {
+        authorizationClock.anchor()
+        return cache.anchorLastSeenTimestamp(timestamp.timeIntervalSince1970)
+    }
+
     func persistOfflineClockState(now: Date, clockSkewSeconds: Int) throws {
         if let lastSeen = cache.getLastSeenTimestamp(),
            now.timeIntervalSince1970 + Double(clockSkewSeconds) < lastSeen {

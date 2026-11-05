@@ -469,6 +469,105 @@ final class OfflineValidationTests: LicenseSeatTestCase {
         XCTAssertEqual(result.code, "clock_tamper")
     }
 
+    // MARK: - Monotonic floor (#12)
+
+    private func cacheSignedToken(iat: Int, exp: Int) throws {
+        let privateKey = Curve25519.Signing.PrivateKey()
+        let offlineToken = try makeOfflineToken(
+            iat: iat,
+            exp: exp,
+            nbf: iat,
+            privateKey: privateKey
+        )
+        sdk.cache.setOfflineToken(offlineToken)
+        sdk.cache.setPublicKey(
+            "test-key-id",
+            Base64URL.encode(privateKey.publicKey.rawRepresentation)
+        )
+        cacheTestLicense()
+    }
+
+    func testInProcessRollbackAboveTheWatermarkCannotReviveAnExpiredToken() async throws {
+        // Verified at T (watermark T); the token expires at T+1h. Two real
+        // hours later the clock is wound back to T+30m: above the persisted
+        // watermark, below the expiry. Only the monotonic floor knows.
+        let source = ManualClockSource()
+        sdk.authorizationClock = source.makeClock()
+        let start = Int(source.wall)
+        try cacheSignedToken(iat: start - 60, exp: start + 3_600)
+
+        let first = await sdk.verifyCachedOffline()
+        XCTAssertTrue(first.valid, first.code ?? "")
+
+        source.elapse(7_200)
+        source.wall = Double(start + 1_800)
+
+        let second = await sdk.verifyCachedOffline()
+        XCTAssertFalse(second.valid)
+        XCTAssertEqual(second.code, "token_expired")
+    }
+
+    func testInProcessBackwardClockCorrectionDoesNotLockOut() async throws {
+        // The clock was an hour fast when the app launched and verified;
+        // NTP then corrected it while the app kept running. Comparing the
+        // corrected wall clock with the watermark would report clock_tamper
+        // and lock a legitimate customer out until real time caught up.
+        let source = ManualClockSource()
+        sdk.authorizationClock = source.makeClock()
+        let start = Int(source.wall)
+        try cacheSignedToken(iat: start - 7_200, exp: start + 30 * 86_400)
+
+        let first = await sdk.verifyCachedOffline()
+        XCTAssertTrue(first.valid, first.code ?? "")
+
+        source.elapse(60)
+        source.wall -= 3_600
+
+        let second = await sdk.verifyCachedOffline()
+        XCTAssertTrue(second.valid, second.code ?? "")
+        // The watermark ratchets with the time that was actually accepted.
+        XCTAssertEqual(
+            try XCTUnwrap(sdk.lastSeenTimestamp()).timeIntervalSince1970,
+            Double(start + 60),
+            accuracy: 1
+        )
+    }
+
+    func testForwardThenBackwardTamperingIsStillCaughtByTheWatermark() async throws {
+        let source = ManualClockSource()
+        sdk.authorizationClock = source.makeClock()
+        let start = Int(source.wall)
+        try cacheSignedToken(iat: start - 60, exp: start + 30 * 86_400)
+
+        source.elapse(30)
+        source.wall += 2 * 86_400 // jumped forward and verified there
+        let forward = await sdk.verifyCachedOffline()
+        XCTAssertTrue(forward.valid, forward.code ?? "")
+
+        source.elapse(30)
+        source.wall = Double(start + 60) // and back again
+
+        let back = await sdk.verifyCachedOffline()
+        XCTAssertFalse(back.valid)
+        XCTAssertEqual(back.code, "clock_tamper")
+    }
+
+    func testRelaunchWithAnHonestClockIsUnaffectedByAPreviousProcessFloor() async throws {
+        // The floor is process-local: a fresh instance (relaunch, reboot)
+        // anchors on its own wall clock and trusts it like before.
+        let source = ManualClockSource()
+        sdk.authorizationClock = source.makeClock()
+        let start = Int(source.wall)
+        try cacheSignedToken(iat: start - 60, exp: start + 30 * 86_400)
+        let first = await sdk.verifyCachedOffline()
+        XCTAssertTrue(first.valid, first.code ?? "")
+
+        let relaunched = ManualClockSource(wall: source.wall + 120, monotonic: 1)
+        sdk.authorizationClock = relaunched.makeClock()
+        let second = await sdk.verifyCachedOffline()
+        XCTAssertTrue(second.valid, second.code ?? "")
+    }
+
     func testLicenseKeyMismatch() async throws {
         // Given: Offline token with different key than cached license
         let privateKey = Curve25519.Signing.PrivateKey()

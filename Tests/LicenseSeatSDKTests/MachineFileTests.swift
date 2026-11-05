@@ -817,6 +817,30 @@ final class MachineFileTests: LicenseSeatTestCase {
         XCTAssertEqual(result.code, "clock_tamper")
     }
 
+    func testMachineFileExpiryIsEvaluatedAtTheMonotonicFloor() async throws {
+        // #12: the machine-file path shares the authorization clock.
+        let source = ManualClockSource()
+        sdk.authorizationClock = source.makeClock()
+        let now = Int(source.wall)
+        let artifact = try makeSyntheticMachineFile(iat: now - 60, exp: now + 3_600)
+
+        let fresh = try sdk.verifyMachineFile(
+            artifact.machineFile,
+            publicKeyB64: artifact.publicKeyB64
+        )
+        XCTAssertTrue(fresh.valid, fresh.message ?? "")
+
+        source.elapse(7_200)
+        source.wall = Double(now + 1_800)
+
+        let rolledBack = try sdk.verifyMachineFile(
+            artifact.machineFile,
+            publicKeyB64: artifact.publicKeyB64
+        )
+        XCTAssertFalse(rolledBack.valid)
+        XCTAssertEqual(rolledBack.code, "token_expired")
+    }
+
     func testInnerAndOuterKeyIdMustAgree() async throws {
         let now = Int(Date().timeIntervalSince1970)
         let artifact = try makeSyntheticMachineFile(

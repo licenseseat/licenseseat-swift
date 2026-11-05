@@ -229,7 +229,8 @@ public extension LicenseSeat {
                     licenseKey: resolvedLicenseKey,
                     fingerprint: resolvedFingerprint,
                     publicKeyB64: publicKey,
-                    productSlug: productSlug
+                    productSlug: productSlug,
+                    now: authorizationClock.now()
                 )
             )
             // A verified artifact must describe the activation this

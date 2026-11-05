@@ -121,6 +121,13 @@ public final class LicenseSeat {
     /// Event bus for SDK events
     internal let eventBus = EventBus()
 
+    /// Wall clock paired with a monotonic process clock. Every local
+    /// authorization decision (offline artifacts, entitlement expiry) is
+    /// evaluated at `authorizationClock.now()`, so the system clock cannot be
+    /// wound back in-process to revive an expired grant. Process-local; it is
+    /// re-anchored only by authoritative online success.
+    internal var authorizationClock = AuthorizationClock()
+
     /// Network connectivity monitor
     #if canImport(Network)
     internal var networkMonitor: NWPathMonitor?
