@@ -28,6 +28,10 @@ final class LicenseSeatFailureTests: LicenseSeatTestCase {
             (api(422, "license_expired"), .licenseNotUsable),
             (api(422, "suspended"), .licenseNotUsable),
             (api(422, "DEVICE_NOT_ACTIVATED"), .licenseNotUsable),
+            (api(403, "version_not_entitled"), .notEntitled),
+            (api(403, "not_entitled"), .notEntitled),
+            (api(422, "product_mismatch"), .notEntitled),
+            (api(501, "floating_not_implemented"), .notEntitled),
             (api(410), .licenseNotUsable),
             (api(401, "unauthorized"), .unauthorized),
             (api(403, "forbidden"), .unauthorized),
@@ -107,7 +111,7 @@ final class LicenseSeatFailureTests: LicenseSeatTestCase {
 
         let all: [LicenseSeatFailure] = [
             api(0), api(503), api(429), api(404, "license_not_found"), api(422, "seat_limit_exceeded"),
-            api(422, "revoked"), .sdk(.noActiveLicense), api(401), api(400), api(0, "invalid_base_url"),
+            api(422, "revoked"), api(403, "version_not_entitled"), .sdk(.noActiveLicense), api(401), api(400), api(0, "invalid_base_url"),
             .sdk(.deviceIdentifierError), .sdk(.cacheError), api(0, "invalid_response"), .cancelled,
             .other("x")
         ]

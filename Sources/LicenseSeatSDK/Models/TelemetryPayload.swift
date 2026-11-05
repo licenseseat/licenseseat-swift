@@ -125,6 +125,15 @@ struct TelemetryPayload: Encodable, Sendable {
     /// Resolve one application attribute. An explicit host value wins outright,
     /// so a malformed override is dropped rather than silently replaced by an
     /// unrelated bundle string.
+    /// The application version the SDK reports to the server (the value the
+    /// server's version gate checks), or `nil` when none is available.
+    static func reportedAppVersion(override: String?) -> String? {
+        resolvedAppText(
+            override: override,
+            bundleValue: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String
+        )
+    }
+
     private static func resolvedAppText(
         override: String?,
         bundleValue: String?

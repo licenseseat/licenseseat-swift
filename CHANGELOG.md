@@ -65,6 +65,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **Authoritative entitlement denials never fall back to the offline grant**
+  (#25). `APIError.isAuthoritativeDenial` covers `version_not_entitled`,
+  `not_entitled`, `product_mismatch`, `floating_not_implemented`, and
+  `named_user_not_implemented`. Under both `OfflineFallbackMode`s such a
+  denial (thrown, or `valid: false`) is persisted as the cached decision and
+  blocks offline fallback, launch-time offline verification, and
+  `verifyCachedOffline()` until the next online decision. It does **not**
+  purge the activation or its offline grant (behaviour change for the
+  `valid: false` shape, which used to purge): a `version_not_entitled`
+  denial stops applying when the app reports a version the license's
+  `updates` ceiling covers, so rolling back keeps working offline. 401/403
+  auth errors and 429 stay eligible for `.always` fallback; revocation still
+  purges. `LicenseSeatFailure` gains the `.notEntitled` category.
+
 - Offline authorization time is now paired with a monotonic process clock
   (#12), anchored on a **trusted** time sample: the signed issuance time
   (`iat`) of an offline artifact this process has just fetched and verified

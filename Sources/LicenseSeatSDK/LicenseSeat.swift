@@ -246,7 +246,10 @@ public final class LicenseSeat {
             // Complete local verification before starting the online request.
             // Ordering these operations prevents a late local task from
             // overwriting an authoritative invalid response from the server.
-            if let offlineResult = await quickVerifyCachedOfflineLocal() {
+            // A persisted authoritative denial (for example this app version
+            // is not covered) is not overruled by a cached offline grant.
+            if !cachedAuthoritativeDenialApplies(),
+               let offlineResult = await quickVerifyCachedOfflineLocal() {
                 guard !Task.isCancelled else { return }
                 if cache.updateValidation(offlineResult, markValidatedOnline: false) {
                     recordOfflineRuntimeTrust(offlineResult)

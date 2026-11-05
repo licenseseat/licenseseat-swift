@@ -62,6 +62,9 @@ public enum LicenseSeatFailure: Error, Equatable, Sendable {
         /// The license exists but cannot be used: revoked, expired,
         /// suspended, not active, or this device's activation is gone.
         case licenseNotUsable
+        /// The license is valid but does not cover this app version, this
+        /// product, or this feature (an authoritative, non-revoking denial).
+        case notEntitled
         /// Nothing is activated on this device.
         case notActivated
         /// The API key is missing, invalid, or lacks the required scope.
@@ -162,7 +165,7 @@ public enum LicenseSeatFailure: Error, Equatable, Sendable {
     /// a freed seat, a renewed or reinstated license, a new activation).
     public var isTerminal: Bool {
         switch category {
-        case .invalidLicenseKey, .seatLimitReached, .licenseNotUsable, .notActivated:
+        case .invalidLicenseKey, .seatLimitReached, .licenseNotUsable, .notEntitled, .notActivated:
             return true
         default:
             return false
@@ -185,6 +188,8 @@ public enum LicenseSeatFailure: Error, Equatable, Sendable {
             return "This license is already in use on the maximum number of devices."
         case .licenseNotUsable:
             return licenseNotUsableMessage
+        case .notEntitled:
+            return notEntitledMessage
         case .notActivated:
             return "No license is activated on this device."
         case .unauthorized:
@@ -223,6 +228,8 @@ public enum LicenseSeatFailure: Error, Equatable, Sendable {
                 return "Enter your license key again to re-activate this device."
             }
             return "Contact support or renew your license."
+        case .notEntitled:
+            return "Upgrade your license, or use a version of the app your license covers."
         case .notActivated:
             return "Enter your license key to activate this device."
         case .unauthorized, .configuration, .invalidRequest:
@@ -260,6 +267,22 @@ public enum LicenseSeatFailure: Error, Equatable, Sendable {
         }
     }
 
+    private var notEntitledMessage: String {
+        guard case .api(let error) = self else {
+            return "This license doesn't cover this app."
+        }
+        switch error.code?.lowercased() {
+        case "version_not_entitled":
+            return "This license doesn't cover this version of the app."
+        case "product_mismatch":
+            return "This license is for a different product."
+        case "floating_not_implemented", "named_user_not_implemented":
+            return "This type of license isn't supported by this app."
+        default:
+            return "This license doesn't include this feature."
+        }
+    }
+
     private static let configurationCodes: Set<String> = [
         "invalid_base_url", "invalid_endpoint_path", "invalid_headers",
         "invalid_retry_configuration", "invalid_configuration", "crypto_unavailable"
@@ -293,6 +316,7 @@ public enum LicenseSeatFailure: Error, Equatable, Sendable {
             if invalidKeyCodes.contains(code) { return .invalidLicenseKey }
             if seatLimitCodes.contains(code) { return .seatLimitReached }
             if genericInvalidLicenseCodes.contains(code) { return .licenseNotUsable }
+            if APIError.authoritativeDenialCodes.contains(code) { return .notEntitled }
         }
         if error.isLicenseTerminalError || error.status == 410 { return .licenseNotUsable }
         switch error.status {

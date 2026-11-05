@@ -50,6 +50,12 @@ extension LicenseSeat {
                 code: "invalid_configuration"
             )
         }
+        if cachedAuthoritativeDenialApplies() {
+            return makeOfflineValidationResponse(
+                valid: false,
+                code: cache.getLicense()?.validation?.code ?? "not_entitled"
+            )
+        }
         var machineFileFailure: ValidationResponse?
         if let machineFile = cache.getMachineFile() {
             let result = await verifyCachedMachineFileForAuthorization(

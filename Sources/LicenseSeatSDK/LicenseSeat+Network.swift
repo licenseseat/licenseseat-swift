@@ -76,6 +76,12 @@ extension LicenseSeat {
 
     internal func shouldFallbackToOffline(error: Error) -> Bool {
         guard config.offlineAuthorityEnabled else { return false }
+        // An explicit refusal of this version/product/feature is a decision,
+        // not an outage. A signed offline grant carries no version ceiling,
+        // so falling back would overrule it, under either mode.
+        if let apiError = error as? APIError, apiError.isAuthoritativeDenial {
+            return false
+        }
         switch config.offlineFallbackMode {
         case .always:
             return true

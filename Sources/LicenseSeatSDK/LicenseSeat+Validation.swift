@@ -162,7 +162,13 @@ private extension LicenseSeat {
             // An online invalid result is authoritative. Remove the old signed
             // grant before persisting that state so relaunch cannot resurrect
             // a revoked, suspended, or expired activation offline.
-            if !result.valid {
+            //
+            // An authoritative denial of this version/product/feature is not
+            // a revocation: the license (and its grant) may still be valid
+            // for an older version the user rolls back to. It is kept, and
+            // `cachedAuthoritativeDenialApplies()` stops it from overruling
+            // the denial offline.
+            if !result.valid, !Self.isAuthoritativeDenialCode(result.code) {
                 // Invalidate any in-flight artifact refresh first, so a late
                 // checkout cannot re-cache a grant after this decision.
                 currentOfflineSyncRequestID = nil
@@ -216,7 +222,15 @@ private extension LicenseSeat {
             throw error
         }
 
+        if let apiError = error as? APIError,
+           apiError.isAuthoritativeDenial,
+           let cachedIdentity = context.cachedIdentity {
+            recordAuthoritativeDenial(apiError, expectedIdentity: cachedIdentity)
+            throw error
+        }
+
         guard shouldFallbackToOffline(error: error),
+              !cachedAuthoritativeDenialApplies(),
               let cachedIdentity = context.cachedIdentity,
               cachedLicenseMatches(cachedIdentity) else {
             throw error
