@@ -386,7 +386,8 @@ if result.valid {
 | `maxRetries`                | `Int`                 | `3`                                | API retry attempts                       |
 | `retryDelay`                | `TimeInterval`        | `1`                                | Base retry delay (exponential backoff)   |
 | `offlineFallbackMode`       | `OfflineFallbackMode` | `.networkOnly`                     | Offline fallback strategy                |
-| `offlineTokenRefreshInterval` | `TimeInterval`      | `259200` (72 hours)                | Offline token refresh interval           |
+| `offlineTokenRefreshInterval` | `TimeInterval`      | `259200` (72 hours)                | Offline artifact refresh interval (machine file first, then legacy token) |
+| `legacyOfflineTokensEnabled` | `Bool`               | `true`                             | Keep the legacy offline token as a fallback when no machine file can be issued or verified (`false` = machine files only, the Rust default) |
 | `offlineFallbackEnabled`    | `Bool`                | `true`                             | Whether a cached signed grant may authorize the app while offline |
 | `maxOfflineDays`            | `Int`                 | `0`                                | Additional host-side signed-grant age cap; `0` adds no cap (the grant's own expiry governs), enabled values are `1...36,600` |
 | `maxClockSkewMs`            | `TimeInterval`        | `300000` (5 min)                   | Clock tamper tolerance                   |
@@ -505,6 +506,23 @@ refresh is disabled.
 | ------------- | --------------------------------------------------------------------------------------------------- |
 | `networkOnly` | Falls back only for transport failures, timeouts, and 5xx responses. Ordinary auth/scope/request 4xx errors neither use fallback nor erase a valid cache; authoritative license-state errors do invalidate it. |
 | `always`      | Attempts offline validation for nonterminal failures as an explicit compatibility policy. Authoritative revoked/expired/suspended/not-active responses still invalidate cached grants. |
+
+### Offline Artifacts: Machine Files First
+
+`syncOfflineAssets()` (run after activation, on reconnect, and every
+`offlineTokenRefreshInterval`) checks out a **machine file** first. If the
+server cannot issue one for a non-authoritative reason (an older server
+without the endpoint, an API key without the `licenses:machine_file` scope,
+a transient failure) and `legacyOfflineTokensEnabled` is `true` (the
+default), it falls back to the legacy **offline token**. An authoritative
+license decision from either endpoint (revoked, expired, suspended, device
+not activated, …) invalidates the cached license instead of falling back.
+
+`verifyCachedOffline()` and launch-time verification use the same order: the
+cached machine file, bound to the cached activation's license key,
+fingerprint, and activation id, then (when enabled) the cached legacy token.
+`offlineAssets:ready` (with `artifact: "machine_file"` or `"offline_token"`)
+and `offlineAssets:fetchError` report the outcome of a refresh.
 
 ### Offline Token Structure
 
@@ -787,6 +805,8 @@ licenseSeat.eventPublisher
 | `heartbeat:success`                         | Heartbeat ping acknowledged        |
 | `license:loaded`                            | Cached license loaded at startup   |
 | `license:revoked`                           | License revoked by server          |
+| `offlineAssets:ready/fetchError`            | Offline artifact refresh outcome (`artifact`: `machine_file` or `offline_token`) |
+| `machineFile:fetching/fetched/fetchError/ready` | Machine-file checkout lifecycle |
 | `offlineToken:verified`                     | Offline token signature verified   |
 | `offlineToken:verificationFailed`           | Offline token verification failed  |
 | `autovalidation:cycle`                      | Auto-validation cycle triggered    |

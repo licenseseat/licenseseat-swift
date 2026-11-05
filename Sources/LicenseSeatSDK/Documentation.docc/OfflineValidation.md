@@ -48,13 +48,17 @@ Intervals that are zero, negative, non-finite, or too large for the scheduler di
 
 ## Manual Synchronization and Verification
 
-Pre-fetch a fresh token before an expected outage:
+Pre-fetch a fresh offline artifact before an expected outage. The SDK checks
+out a machine file first and, when the server cannot issue one for a
+non-authoritative reason and `legacyOfflineTokensEnabled` is `true` (the
+default), falls back to the legacy offline token:
 
 ```swift
 await LicenseSeat.shared.syncOfflineAssets()
 ```
 
-Verify the currently cached token:
+Verify the currently cached artifact (machine file first, then the legacy
+token when enabled):
 
 ```swift
 let result = await LicenseSeat.shared.verifyCachedOffline()
@@ -185,6 +189,7 @@ let offline = LicenseSeat.shared.on("validation:offline-success") { _ in
 
 Relevant events include:
 
+- `offlineAssets:ready` (`artifact`: `machine_file` or `offline_token`), `offlineAssets:fetchError`
 - `offlineToken:fetching`, `offlineToken:fetched`, `offlineToken:fetchError`
 - `offlineToken:verified`, `offlineToken:verificationFailed`, `offlineToken:ready`
 - `machineFile:fetching`, `machineFile:fetched`, `machineFile:fetchError`

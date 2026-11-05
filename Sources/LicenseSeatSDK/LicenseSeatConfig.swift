@@ -179,6 +179,24 @@ public struct LicenseSeatConfig {
     /// Maximum allowed clock skew (in milliseconds)
     public var maxClockSkewMs: TimeInterval
 
+    /// Whether the legacy signed offline token remains a fallback offline
+    /// artifact. Defaults to `true`.
+    ///
+    /// Machine files are always preferred: offline refresh checks one out
+    /// first and offline verification tries the cached machine file first.
+    /// When this is `true`, a machine-file checkout that fails for any reason
+    /// other than an authoritative license decision (for example a server that
+    /// predates the endpoint, or an API key that lacks the
+    /// `licenses:machine_file` scope) falls back to the legacy
+    /// `offline-token` endpoint, and a cached legacy token is still accepted
+    /// when no valid machine file is available.
+    ///
+    /// Set it to `false` for machine-file-only behaviour, matching the Rust
+    /// SDK's default `enable_legacy_offline_tokens = false`. The Swift default
+    /// differs deliberately so that 0.5.x applications keep working offline
+    /// against servers and keys that cannot issue machine files yet.
+    public var legacyOfflineTokensEnabled: Bool = true
+
     /// Default configuration
     public static var `default`: LicenseSeatConfig {
         return LicenseSeatConfig()

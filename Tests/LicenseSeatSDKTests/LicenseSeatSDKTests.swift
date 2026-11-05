@@ -1636,6 +1636,14 @@ final class LicenseSeatSDKTests: LicenseSeatTestCase {
 
         MockURLProtocol.requestHandler = { request in
             guard let url = request.url else { throw URLError(.badURL) }
+            if url.path.hasSuffix("/machine-file") {
+                // A server without machine files: sync falls back to the
+                // legacy token, whose key-repair path is under test here.
+                return (
+                    HTTPURLResponse(url: url, statusCode: 404, httpVersion: nil, headerFields: nil)!,
+                    Data()
+                )
+            }
             if url.path.contains("/offline-token") {
                 offlineTokenRequests += 1
                 return (

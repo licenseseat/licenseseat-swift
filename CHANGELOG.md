@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Offline refresh and verification now prefer machine files** (#14).
+  `syncOfflineAssets()` checks out a machine file first and falls back to the
+  legacy offline token only when that fails for a non-authoritative reason
+  (older server, API key without the `licenses:machine_file` scope, transient
+  failure). An authoritative license decision from the machine-file endpoint
+  invalidates the cached license exactly as validation does and is never
+  papered over by the fallback. `verifyCachedOffline()` and launch-time
+  verification try the cached machine file (bound to the cached activation's
+  license key, fingerprint, and activation id) before the legacy token.
+  Caches written by 0.5.x (token only) keep verifying unchanged.
+
+### Added
+
+- `LicenseSeatConfig.legacyOfflineTokensEnabled` (default `true`). Set it to
+  `false` for machine-file-only behaviour, the Rust SDK's default.
+- `offlineAssets:ready` (`artifact`: `machine_file` | `offline_token`) and
+  `offlineAssets:fetchError` events for the refresh outcome, whichever
+  artifact produced it. The `offlineToken:*` events still describe the legacy
+  path only.
+
 ### Security
 
 - Offline authorization time is now paired with a monotonic process clock
