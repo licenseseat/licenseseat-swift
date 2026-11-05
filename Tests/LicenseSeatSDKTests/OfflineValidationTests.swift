@@ -525,11 +525,132 @@ final class OfflineValidationTests: LicenseSeatTestCase {
 
         let second = await sdk.verifyCachedOffline()
         XCTAssertTrue(second.valid, second.code ?? "")
-        // The watermark ratchets with the time that was actually accepted.
+        // Only wall-clock readings are persisted: the ratchet keeps the
+        // earlier reading and never records the process-local floor.
         XCTAssertEqual(
             try XCTUnwrap(sdk.lastSeenTimestamp()).timeIntervalSince1970,
-            Double(start + 60),
+            Double(start),
             accuracy: 1
+        )
+    }
+
+    func testFastClockCorrectedWithinToleranceNeverExpiresAGrantEarly() async throws {
+        // Launched with a clock two minutes fast; NTP corrects it; the token
+        // expires at real T+30m. At real T+29m it must still be valid.
+        let trueStart = Date().timeIntervalSince1970
+        let source = ManualClockSource(wall: trueStart + 120)
+        sdk.authorizationClock = source.makeClock()
+        try cacheSignedToken(iat: Int(trueStart) - 60, exp: Int(trueStart) + 1_800)
+
+        source.elapse(60)
+        source.wall = trueStart + 60
+        source.elapse(28 * 60)
+
+        let result = await sdk.verifyCachedOffline()
+        XCTAssertTrue(result.valid, result.code ?? "")
+    }
+
+    func testCorrectedFastClockIsNotPersistedSoRelaunchIsNotLockedOut() async throws {
+        // Launched with a clock an hour fast, corrected before the first
+        // verification. Persisting the synthetic floor would leave a watermark
+        // an hour in the future and fail the next launch with clock_tamper.
+        let trueStart = Date().timeIntervalSince1970
+        let source = ManualClockSource(wall: trueStart + 3_600)
+        sdk.authorizationClock = source.makeClock()
+        try cacheSignedToken(iat: Int(trueStart) - 60, exp: Int(trueStart) + 30 * 86_400)
+
+        source.elapse(60)
+        source.wall = trueStart + 60
+        let first = await sdk.verifyCachedOffline()
+        XCTAssertTrue(first.valid, first.code ?? "")
+        XCTAssertEqual(
+            try XCTUnwrap(sdk.lastSeenTimestamp()).timeIntervalSince1970,
+            trueStart + 60,
+            accuracy: 1
+        )
+
+        // Relaunch: a fresh process anchors on its own (correct) clock.
+        let relaunched = ManualClockSource(wall: trueStart + 120, monotonic: 1)
+        sdk.authorizationClock = relaunched.makeClock()
+        let second = await sdk.verifyCachedOffline()
+        XCTAssertTrue(second.valid, second.code ?? "")
+    }
+
+    func testReplacementInstanceSharesTheFloor() async throws {
+        // Recreating the SDK (configure(force: true), installShared) must not
+        // be a way to discard the in-process floor.
+        let config = sdk.config
+        let replacement = LicenseSeat(config: config, urlSession: Self.makeMockedSession())
+        defer { replacement.shutdown() }
+        XCTAssertTrue(replacement.authorizationClock === sdk.authorizationClock)
+
+        let other = LicenseSeat(
+            config: LicenseSeatConfig(storagePrefix: "offline_validation_other_\(UUID().uuidString)_")
+        )
+        defer { other.shutdown() }
+        XCTAssertFalse(other.authorizationClock === sdk.authorizationClock)
+    }
+
+    func testOnlineSuccessAnchorsTheFloorOnServerTime() async throws {
+        // The local clock is two hours slow (rolled back before launch); the
+        // server's Date header says otherwise. After an authoritative online
+        // success, local authorization time follows the server.
+        let source = ManualClockSource(wall: 1_800_000_000)
+        sdk.authorizationClock = source.makeClock()
+        cacheTestLicense()
+        let serverNow = Date(timeIntervalSince1970: 1_800_000_000 + 7_200)
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(identifier: "GMT")
+        formatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss 'GMT'"
+        let dateHeader = formatter.string(from: serverNow)
+        let body = try JSONSerialization.data(withJSONObject: [
+            "object": "validation_result",
+            "valid": true,
+            "code": NSNull(),
+            "message": NSNull(),
+            "warnings": NSNull(),
+            "license": [
+                "object": "license",
+                "key": Self.testLicenseKey,
+                "status": "active",
+                "starts_at": NSNull(),
+                "expires_at": NSNull(),
+                "mode": "hardware_locked",
+                "plan_key": "pro",
+                "seat_limit": 5,
+                "active_seats": 1,
+                "active_entitlements": [],
+                "metadata": NSNull(),
+                "product": ["slug": Self.testProductSlug, "name": "Test App"]
+            ],
+            "activation": NSNull()
+        ] as [String: Any])
+        MockURLProtocol.requestHandler = { request in
+            (
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json", "Date": dateHeader]
+                )!,
+                body
+            )
+        }
+
+        let result = try await sdk.validate(licenseKey: Self.testLicenseKey)
+        XCTAssertTrue(result.valid)
+
+        XCTAssertEqual(
+            sdk.authorizationTime().timeIntervalSince1970,
+            serverNow.timeIntervalSince1970 - 300,
+            accuracy: 1
+        )
+        // The persisted watermark keeps the cross-SDK contract: local wall time.
+        XCTAssertEqual(
+            try XCTUnwrap(sdk.lastSeenTimestamp()).timeIntervalSince1970,
+            Date().timeIntervalSince1970,
+            accuracy: 30
         )
     }
 

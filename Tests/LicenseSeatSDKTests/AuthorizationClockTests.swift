@@ -111,6 +111,59 @@ final class AuthorizationClockTests: LicenseSeatTestCase {
         XCTAssertEqual(clock.wallClockLag(), 0)
     }
 
+    func testToleranceAbsorbsAFastAnchorCorrectedByNTP() {
+        // Anchored while two minutes fast, then corrected. Without slack the
+        // floor would sit two minutes in the future and expire grants early.
+        let source = ManualClockSource(wall: base + 120)
+        let clock = source.makeClock()
+        source.elapse(60)
+        source.wall = base + 60
+
+        XCTAssertEqual(clock.now().timeIntervalSince1970, base + 180)
+        XCTAssertEqual(clock.now(tolerance: 300).timeIntervalSince1970, base + 60)
+
+        // A genuine rollback beyond the tolerance is still floored.
+        source.elapse(3_600)
+        source.wall = base
+        XCTAssertEqual(clock.now(tolerance: 300).timeIntervalSince1970, base + 3_780 - 300)
+    }
+
+    func testTrustedServerTimeAnchorReplacesAWrongLocalAnchor() {
+        let source = ManualClockSource(wall: base + 3_600) // an hour fast
+        let clock = source.makeClock()
+        source.wall = base
+
+        clock.anchor(trustedTime: Date(timeIntervalSince1970: base))
+        XCTAssertEqual(clock.now().timeIntervalSince1970, base)
+
+        // A slow local clock is raised to server time instead.
+        source.wall = base - 7_200
+        clock.anchor(trustedTime: Date(timeIntervalSince1970: base))
+        source.elapse(10)
+        XCTAssertEqual(clock.now().timeIntervalSince1970, base + 10)
+        XCTAssertEqual(clock.wallTime().timeIntervalSince1970, base - 7_190)
+
+        // A missing or nonsensical server time falls back to the wall clock.
+        clock.anchor(trustedTime: Date(timeIntervalSince1970: -.infinity))
+        XCTAssertEqual(clock.now().timeIntervalSince1970, base - 7_190)
+    }
+
+    func testClocksAreSharedPerStorageScope() {
+        let scope = "clock_scope_\(UUID().uuidString)"
+        XCTAssertTrue(AuthorizationClock.shared(scope: scope) === AuthorizationClock.shared(scope: scope))
+        XCTAssertFalse(AuthorizationClock.shared(scope: scope) === AuthorizationClock.shared(scope: scope + "x"))
+    }
+
+    func testHTTPDateParsing() {
+        XCTAssertEqual(
+            APIClient.parseHTTPDate("Sun, 06 Nov 2022 08:49:37 GMT")?.timeIntervalSince1970,
+            1_667_724_577
+        )
+        XCTAssertNil(APIClient.parseHTTPDate("Sunday, 06-Nov-22 08:49:37 GMT"))
+        XCTAssertNil(APIClient.parseHTTPDate("Thu, 01 Jan 1970 00:00:00 GMT"))
+        XCTAssertNil(APIClient.parseHTTPDate("garbage"))
+    }
+
     func testUnavailableOrRegressingMonotonicSourceFallsBackToTheWallClock() {
         let missing = ManualClockSource(wall: base, monotonic: nil)
         let missingClock = missing.makeClock()

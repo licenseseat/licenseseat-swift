@@ -34,7 +34,7 @@ public extension LicenseSeat {
         }
 
         if let expiresAt = entitlement.expiresAt {
-            if expiresAt < authorizationClock.now() {
+            if expiresAt < authorizationTime() {
                 return EntitlementStatus(
                     active: false,
                     reason: .expired,

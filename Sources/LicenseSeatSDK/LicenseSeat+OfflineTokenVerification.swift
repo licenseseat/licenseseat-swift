@@ -183,17 +183,36 @@ extension LicenseSeat {
     /// rollback watermark (which may lower it, per the cross-SDK contract) and
     /// the in-process monotonic floor. Returns `false` if the watermark could
     /// not be stored.
+    ///
+    /// The in-process floor is anchored on the server's HTTP `Date` when the
+    /// response carried one; the persisted watermark keeps the cross-SDK
+    /// contract and records the local wall clock.
     func anchorAuthoritativeTime(_ timestamp: Date) -> Bool {
-        authorizationClock.anchor()
+        authorizationClock.anchor(trustedTime: apiClient.lastServerDate)
         return cache.anchorLastSeenTimestamp(timestamp.timeIntervalSince1970)
     }
 
+    /// The instant local authorization decisions are evaluated at: the wall
+    /// clock, raised to the monotonic floor (less the configured clock-skew
+    /// tolerance) if the wall clock has been wound behind it.
+    func authorizationTime() -> Date {
+        let skewMs = config.maxClockSkewMs
+        let tolerance = skewMs.isFinite && skewMs > 0 ? min(skewMs, 86_400_000) / 1_000 : 0
+        return authorizationClock.now(tolerance: tolerance)
+    }
+
+    /// Rollback check plus `max()` ratchet after a successful offline
+    /// verification. `now` is the authorization time the claims were checked
+    /// at; only the *wall-clock* reading is persisted, never the process-local
+    /// floor, so a later relaunch with a correct clock is never compared with
+    /// a synthetic future.
     func persistOfflineClockState(now: Date, clockSkewSeconds: Int) throws {
         if let lastSeen = cache.getLastSeenTimestamp(),
            now.timeIntervalSince1970 + Double(clockSkewSeconds) < lastSeen {
             throw OfflineVerificationFailure(code: "clock_tamper")
         }
-        guard cache.setLastSeenTimestamp(now.timeIntervalSince1970) else {
+        let wall = min(authorizationClock.wallTime(), now)
+        guard cache.setLastSeenTimestamp(wall.timeIntervalSince1970) else {
             throw OfflineVerificationFailure(code: "cache_error")
         }
     }

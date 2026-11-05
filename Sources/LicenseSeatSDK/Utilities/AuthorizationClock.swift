@@ -3,7 +3,7 @@
 //  LicenseSeatSDK
 //
 //  Wall-clock time paired with a monotonic process clock, so authorization
-//  time cannot be moved backwards while the process is running.
+//  time cannot be wound back while the process is running.
 //
 
 import Foundation
@@ -22,37 +22,44 @@ import Musl
 /// without falling below that watermark: verify a signed grant at 09:00, keep
 /// the app running until 11:00, set the clock to 09:30, and a grant that
 /// expired at 10:00 would look valid again. A monotonic clock cannot be set
-/// by the user, so pairing the wall-clock anchor with it gives a lower bound
-/// on the real current time for as long as the process lives:
+/// by the user, so an anchor plus monotonic elapsed time is a lower bound on
+/// the real current time for as long as the process lives:
 ///
-///     authorizationTime = max(wallNow, anchorWall + monotonicElapsed)
+///     floor             = anchor + monotonicElapsed
+///     authorizationTime = max(wallNow, floor − tolerance)
 ///
-/// Lockout safety is the other half of the contract, and it is why this is a
-/// floor and nothing more:
+/// where `tolerance` is the configured `maxClockSkewMs`.
 ///
-/// - The result is never *earlier* than the wall clock, so nothing that passes
-///   on wall-clock time today can start failing because of this type. The
-///   persisted watermark check (`now + skew < watermark`) only gets more
-///   lenient, never stricter.
+/// **Anchor.** The process starts anchored on its own wall clock. Every
+/// authoritative online success re-anchors it — on the server's HTTP `Date`
+/// when the response carried one (a trusted lower bound on real time), else on
+/// the wall clock — mirroring the persisted watermark's anchor-on-online-
+/// success contract. The anchor is shared by every `LicenseSeat` instance with
+/// the same storage prefix in this process, so replacing the instance (for
+/// example `configure(force: true)`) cannot be used to discard it.
+///
+/// **Lockout safety** is the other half of the contract:
+///
+/// - The result is never earlier than the wall clock, so a check that passes
+///   on wall-clock time cannot start failing because of a *slow* wall clock,
+///   and the watermark comparison (`authorizationTime + skew < watermark`)
+///   can only become more lenient.
+/// - A wall clock that was fast when the anchor was taken and is then
+///   corrected by NTP moves the floor ahead of real time by the error. The
+///   `tolerance` absorbs errors up to `maxClockSkewMs`; a server-time anchor
+///   (the next online success) removes the error entirely.
+/// - Only wall-clock readings are ever persisted; the floor is process-local
+///   and never written to the watermark, so a relaunch or reboot starts fresh
+///   and a corrected clock is never compared against a synthetic future.
 /// - The monotonic source keeps counting through system sleep (Darwin
-///   `CLOCK_MONOTONIC`, Linux `CLOCK_BOOTTIME`), so sleeping never makes the
-///   floor lag; and because it is a lower bound, any lag would only weaken
-///   detection, never lock anyone out.
-/// - Time zones and daylight saving time do not exist at this layer: both the
-///   wall reading and the floor are seconds since 1970 UTC.
-/// - The floor does **not** remember the largest wall reading it has seen.
-///   A clock that is briefly wrong in the future and then corrected by NTP
-///   (forward-then-back) settles back to real time instead of staying in the
-///   future for the rest of the process. Forward-then-backward *tampering* is
-///   still caught by the persisted watermark, which offline verification
-///   ratchets with whatever time it accepted.
-/// - Authoritative online success re-anchors it (see ``anchor()``), mirroring
-///   the persisted watermark's anchor-on-online-success contract, so a wall
-///   clock that was wrong when the SDK started is corrected on the next
-///   successful validation, activation, or heartbeat.
-/// - It is process-local and never persisted: a reboot or relaunch starts a
-///   fresh anchor, and `reset()`/`clear()` leave it alone exactly as they
-///   leave the persisted watermark alone.
+///   `CLOCK_MONOTONIC`, Linux `CLOCK_BOOTTIME`). Were it ever to lag, the floor
+///   would only fall behind real time — weaker detection, never a lockout.
+/// - Time zones and daylight saving time do not exist at this layer: every
+///   value is seconds since 1970 UTC.
+/// - Forward wall-clock excursions are not remembered: a briefly wrong future
+///   clock settles back to real time once corrected. Forward-then-backward
+///   *tampering* during which an offline verification succeeded is still
+///   caught by the persisted watermark.
 @MainActor
 final class AuthorizationClock {
     typealias WallClock = @MainActor () -> TimeInterval
@@ -77,22 +84,36 @@ final class AuthorizationClock {
         self.anchorMonotonic = monotonicClock()
     }
 
-    /// Re-baseline on the current wall clock. Called only after authoritative
-    /// online acceptance, together with the persisted watermark anchor; it may
-    /// lower the floor (for example after NTP corrected a fast clock).
-    func anchor() {
-        anchorWall = wallClock()
-        anchorMonotonic = monotonicClock()
+    // MARK: - Process-wide scope
+
+    private static var clocksByScope: [String: AuthorizationClock] = [:]
+
+    /// The clock shared by every SDK instance using `scope` (the storage
+    /// prefix) in this process.
+    static func shared(scope: String) -> AuthorizationClock {
+        if let clock = clocksByScope[scope] { return clock }
+        let clock = AuthorizationClock()
+        clocksByScope[scope] = clock
+        return clock
+    }
+
+    // MARK: - Reading
+
+    /// The current wall-clock reading, the only time value ever persisted.
+    func wallTime() -> Date {
+        Date(timeIntervalSince1970: wallClock())
     }
 
     /// The current authorization instant: the wall clock, raised to the
-    /// monotonic floor when the wall clock has been moved behind it.
-    func now() -> Date {
+    /// monotonic floor (less `tolerance` seconds) when the wall clock has been
+    /// moved behind it.
+    func now(tolerance: TimeInterval = 0) -> Date {
         let wall = wallClock()
-        guard let floor = monotonicFloor(), floor > wall else {
+        let slack = tolerance.isFinite ? max(0, tolerance) : 0
+        guard let floor = monotonicFloor(), floor - slack > wall else {
             return Date(timeIntervalSince1970: wall)
         }
-        return Date(timeIntervalSince1970: floor)
+        return Date(timeIntervalSince1970: floor - slack)
     }
 
     /// How far the wall clock currently trails the monotonic floor, in seconds
@@ -100,6 +121,21 @@ final class AuthorizationClock {
     func wallClockLag() -> TimeInterval {
         guard let floor = monotonicFloor() else { return 0 }
         return max(0, floor - wallClock())
+    }
+
+    // MARK: - Anchoring
+
+    /// Re-baseline after authoritative online acceptance. `trustedTime` is the
+    /// server's `Date`; without one the current wall clock is used. Either may
+    /// lower the floor (for example after NTP corrected a fast clock).
+    func anchor(trustedTime: Date? = nil) {
+        let trusted = trustedTime?.timeIntervalSince1970
+        if let trusted, trusted.isFinite, trusted > 0 {
+            anchorWall = trusted
+        } else {
+            anchorWall = wallClock()
+        }
+        anchorMonotonic = monotonicClock()
     }
 
     private func monotonicFloor() -> TimeInterval? {

@@ -144,7 +144,7 @@ extension LicenseSeat {
                 throw OfflineVerificationFailure(code: "signature_invalid")
             }
             try validateOfflineIdentity(offlineToken)
-            let now = authorizationClock.now()
+            let now = authorizationTime()
             let nowUnix = Int(now.timeIntervalSince1970)
             let clockSkewSeconds = offlineClockSkewSeconds(nowUnix: nowUnix)
             try validateOfflineTimeClaims(
@@ -180,7 +180,7 @@ extension LicenseSeat {
 
         if let token = token {
             // Convert token entitlements to regular entitlements
-            let nowUnix = Int(authorizationClock.now().timeIntervalSince1970)
+            let nowUnix = Int(authorizationTime().timeIntervalSince1970)
             entitlements = token.token.entitlements.compactMap { tokenEnt in
                 guard tokenEnt.expiresAt == nil ||
                         tokenEnt.expiresAt! > nowUnix else {

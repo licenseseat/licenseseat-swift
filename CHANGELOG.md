@@ -11,15 +11,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Offline authorization time is now paired with a monotonic process clock
   (#12). Offline tokens, machine files, and entitlement expiry are evaluated at
-  `max(wall clock, anchor + monotonic elapsed)`, so winding the system clock
-  back while the app runs can no longer revive an expired grant, including by
-  less than the time since the last recorded watermark. The floor counts
-  through sleep, never runs behind the wall clock, does not remember forward
-  wall-clock excursions, and is re-anchored by authoritative online success
-  together with the persisted watermark (whose cross-SDK contract is
-  unchanged: anchor on online success, `max` ratchet offline, preserved by
-  `reset()`/`clear()`). A side effect: an in-session NTP correction of a fast
-  clock no longer reports `clock_tamper`.
+  `max(wall clock, anchor + monotonic elapsed − maxClockSkewMs)`, so winding
+  the system clock back while the app runs can no longer revive an expired
+  grant, including by less than the time since the last recorded watermark.
+  The anchor is re-taken on every authoritative online success, on the
+  server's HTTP `Date` when present, and is shared by SDK instances with the
+  same storage prefix (replacing the instance does not discard it). The floor
+  counts through sleep, never runs behind the wall clock, is never persisted
+  (the watermark still records wall-clock readings only), and does not
+  remember forward wall-clock excursions. The persisted watermark's cross-SDK
+  contract is unchanged: anchor on online success, `max` ratchet offline,
+  preserved by `reset()`/`clear()`. Side effect: an in-session NTP correction
+  of a fast clock no longer reports `clock_tamper`.
 
 ## [0.5.2] - 2026-08-19
 

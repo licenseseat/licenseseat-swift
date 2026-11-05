@@ -50,6 +50,42 @@ final class APIClient {
     /// Current online status
     private var isOnline = true
 
+    /// `Date` header of the most recent successful (2xx) response, or `nil`
+    /// when that response carried none. Read immediately after an
+    /// authoritative online success to anchor the authorization clock to
+    /// server time instead of the untrusted local wall clock. Any value is
+    /// a lower bound on the current time: the server produced it before the
+    /// response was received.
+    var lastServerDate: Date? {
+        serverDateLock.lock()
+        defer { serverDateLock.unlock() }
+        return storedServerDate
+    }
+    private let serverDateLock = NSLock()
+    private var storedServerDate: Date?
+
+    private func recordServerDate(from response: HTTPURLResponse) {
+        let date = response.value(forHTTPHeaderField: "Date").flatMap(Self.parseHTTPDate)
+        serverDateLock.lock()
+        storedServerDate = date
+        serverDateLock.unlock()
+    }
+
+    /// RFC 9110 IMF-fixdate (`Sun, 06 Nov 1994 08:49:37 GMT`), the only form
+    /// a conforming origin server generates. Anything else is ignored.
+    static func parseHTTPDate(_ value: String) -> Date? {
+        guard value.utf8.count <= 64 else { return nil }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(identifier: "GMT")
+        formatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss 'GMT'"
+        guard let date = formatter.date(from: value),
+              date.timeIntervalSince1970 > 1_577_836_800 else { // 2020-01-01
+            return nil
+        }
+        return date
+    }
+
     /// Restore the optimistic connectivity baseline after a full SDK reset so
     /// the next transport failure can emit a fresh offline transition.
     func resetNetworkStatus() {
@@ -209,6 +245,7 @@ final class APIClient {
                     throw decodeAPIError(data: data, status: httpResponse.statusCode)
                 }
 
+                recordServerDate(from: httpResponse)
                 markOnlineAfterSuccess()
                 return try decodeSuccess(data)
             } catch {
