@@ -230,11 +230,12 @@ final class MachineFileTests: LicenseSeatTestCase {
         let result = try sdk.verifyMachineFile(try Self.machineFile("valid"))
         XCTAssertTrue(result.valid)
 
-        // Drain one main-queue hop so the bus delivery lands. A synchronous
-        // wait(for:) would block the main actor this async test runs on and
-        // the queued fulfill could never execute.
-        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            DispatchQueue.main.async { continuation.resume() }
+        // Delivery hops through the bus queue and then the main queue, so a
+        // single main-queue hop can race it. Wait (bounded) without blocking
+        // the main actor.
+        let deadline = Date().addingTimeInterval(5)
+        while observed.isEmpty, Date() < deadline {
+            try await Task.sleep(nanoseconds: 10_000_000)
         }
         XCTAssertEqual(observed, ["verified"])
     }
