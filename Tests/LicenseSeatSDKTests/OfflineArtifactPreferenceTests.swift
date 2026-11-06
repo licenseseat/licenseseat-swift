@@ -618,7 +618,10 @@ final class OfflineArtifactPreferenceTests: LicenseSeatTestCase {
         }
         XCTAssertEqual(Set(details.entitlements.map(\.key)), ["pro", "beta-features"])
         XCTAssertTrue(sdk.checkEntitlement("pro").active)
-        XCTAssertTrue(paths.paths.isEmpty, "launch verification hit the network: \(paths.paths)")
+        // The connectivity monitor may probe /health; verification itself
+        // must not touch the network.
+        let verificationRequests = paths.paths.filter { !$0.hasSuffix("/health") }
+        XCTAssertTrue(verificationRequests.isEmpty, "launch verification hit the network: \(paths.paths)")
     }
 
     func testLaunchTreatsAMachineFileThatCannotVouchAsAbsent() async throws {
