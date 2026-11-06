@@ -9,7 +9,9 @@ import Foundation
 
 public extension LicenseSeat {
     /// Deactivate the current license
-    /// - Throws: ``LicenseSeatError/noActiveLicense`` if no license is active
+    /// - Throws: ``LicenseSeatError/noActiveLicense`` if no license is active,
+    ///   or ``LicenseSeatError/cacheError`` if protected storage could not be
+    ///   read (for example a locked Keychain) — not the same as "none".
     /// - Throws: ``APIError`` if server request fails
     func deactivate() async throws {
         await waitForInitialization()
@@ -17,9 +19,7 @@ public extension LicenseSeat {
             throw LicenseSeatError.productSlugRequired
         }
 
-        guard let license = cache.getLicense() else {
-            throw LicenseSeatError.noActiveLicense
-        }
+        let license = try requireCachedLicense()
         try validateRequestIdentity(
             productSlug: productSlug,
             licenseKey: license.licenseKey
@@ -92,9 +92,7 @@ public extension LicenseSeat {
             throw LicenseSeatError.productSlugRequired
         }
 
-        guard let license = cache.getLicense() else {
-            throw LicenseSeatError.noActiveLicense
-        }
+        let license = try requireCachedLicense()
         try validateRequestIdentity(
             productSlug: productSlug,
             licenseKey: license.licenseKey

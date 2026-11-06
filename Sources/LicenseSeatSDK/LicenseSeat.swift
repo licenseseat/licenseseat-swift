@@ -286,6 +286,9 @@ public final class LicenseSeat {
                     startBackgroundValidation(for: cachedLicense)
                 }
             }
+        } else if isLicenseStorageUnavailable {
+            log("Protected license storage is unavailable; not treating it as no activation")
+            eventBus.emit(.licenseStorageUnavailable, ["key": LicenseCache.Key.license])
         }
     }
 

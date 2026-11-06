@@ -56,6 +56,10 @@ public extension LicenseSeat {
     /// - Returns: Current status of the license
     func getStatus() -> LicenseStatus {
         guard let license = cache.getLicense() else {
+            if isLicenseStorageUnavailable {
+                // Unknown, not inactive: the activation may well exist.
+                return .pending(message: "License storage is temporarily unavailable")
+            }
             return .inactive(message: "No license activated")
         }
 
@@ -99,6 +103,18 @@ public extension LicenseSeat {
     /// Get the current cached license
     func currentLicense() -> License? {
         cache.getLicense()
+    }
+
+    /// Whether the last attempt to read the cached activation failed because
+    /// protected storage was unavailable (for example `errSecInteractionNotAllowed`
+    /// while the Keychain is locked, or `errSecAuthFailed`), as opposed to there
+    /// being no activation. While `true`, a `nil` ``currentLicense()`` means
+    /// "unknown": nothing is purged, ``getStatus()`` reports `.pending`, and
+    /// operations that need the activation throw ``LicenseSeatError/cacheError``
+    /// instead of ``LicenseSeatError/noActiveLicense``. It clears on the next
+    /// successful read.
+    var isLicenseStorageUnavailable: Bool {
+        cache.failedReadKeys.contains(LicenseCache.Key.license)
     }
 
     /// The protected clock watermark: the most recent moment the SDK accepted

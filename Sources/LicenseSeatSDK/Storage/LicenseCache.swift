@@ -54,6 +54,73 @@ final class LicenseCache {
     /// Keys whose protected writes fail, so tests can prove the SDK does not
     /// fail open when persistence breaks. Always empty in production.
     var simulatedWriteFailures: Set<String> = []
+
+    /// Keys whose protected reads fail, as a locked or unavailable Keychain
+    /// would. Always empty in production.
+    var simulatedReadFailures: Set<String> = []
+
+    /// Keys whose next N protected reads fail, then succeed (a Keychain that
+    /// unlocks mid-operation). Always empty in production.
+    var simulatedReadFailureCounts: [String: Int] = [:]
+
+    /// Keys whose most recent protected read failed for a reason other than
+    /// "not found" (for example `errSecInteractionNotAllowed` while the
+    /// Keychain is locked, or `errSecAuthFailed`). A `nil` read of such a key
+    /// means "unknown", never "absent".
+    private(set) var failedReadKeys: Set<String> = []
+
+    enum ProtectedReadOutcome {
+        case found(Data)
+        case notFound
+        case failed
+    }
+
+    /// Read a protected item, distinguishing absence from a read failure.
+    func readProtectedOutcome(forKey key: String) -> ProtectedReadOutcome {
+        let outcome: ProtectedReadOutcome
+        if simulatedReadFailures.contains(key) {
+            outcome = .failed
+        } else if let remaining = simulatedReadFailureCounts[key], remaining > 0 {
+            simulatedReadFailureCounts[key] = remaining - 1
+            outcome = .failed
+        } else {
+            outcome = platformReadProtectedOutcome(forKey: key)
+        }
+        if case .failed = outcome {
+            failedReadKeys.insert(key)
+        } else {
+            failedReadKeys.remove(key)
+        }
+        return outcome
+    }
+
+    /// Whether the cached activation exists but cannot be read right now
+    /// (fresh read; absence is not a failure).
+    func licenseIsUnreadable() -> Bool {
+        if case .failed = readProtectedOutcome(forKey: Key.license) { return true }
+        return false
+    }
+
+    /// Whether the rollback watermark exists but cannot be read right now
+    /// (fresh read; absence is not a failure).
+    func lastSeenTimestampIsUnreadable() -> Bool {
+        if case .failed = readProtectedOutcome(forKey: Key.lastSeenTimestamp) { return true }
+        return false
+    }
+
+    /// Whether the most recent read of the rollback watermark failed.
+    var lastSeenTimestampReadFailed: Bool {
+        failedReadKeys.contains(Key.lastSeenTimestamp)
+    }
+
+    /// Read a protected item; `nil` for absent *or* unreadable (see
+    /// `readProtectedOutcome(forKey:)` and `failedReadKeys`).
+    func readProtectedData(forKey key: String) -> Data? {
+        if case .found(let data) = readProtectedOutcome(forKey: key) {
+            return data
+        }
+        return nil
+    }
     let legacyPreferencesPrefix: String?
     let legacyFilePrefix: String?
     let userDefaults: UserDefaults
@@ -230,9 +297,15 @@ final class LicenseCache {
     /// first access. Plaintext is removed only after the protected write has
     /// succeeded, so an interrupted migration never loses an activation.
     func protectedData(forKey key: String, legacyFileURL: URL? = nil) -> Data? {
-        if let data = readProtectedData(forKey: key),
-           data.count <= Self.maxCacheBytes {
-            return data
+        switch readProtectedOutcome(forKey: key) {
+        case .found(let data):
+            if data.count <= Self.maxCacheBytes { return data }
+        case .failed:
+            // Unknown, not absent: never fall back to (and migrate over the
+            // protected item with) stale legacy plaintext.
+            return nil
+        case .notFound:
+            break
         }
 
         let legacyData = readLegacyProtectedData(forKey: key)
@@ -300,15 +373,24 @@ final class LicenseCache {
         ]
     }
 
-    func readProtectedData(forKey key: String) -> Data? {
+    func platformReadProtectedOutcome(forKey key: String) -> ProtectedReadOutcome {
         var query = keychainQuery(forKey: key)
         query[kSecReturnData] = true
         query[kSecMatchLimit] = kSecMatchLimitOne
 
         var result: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &result)
-        guard status == errSecSuccess else { return nil }
-        return result as? Data
+        switch status {
+        case errSecSuccess:
+            guard let data = result as? Data else { return .failed }
+            return .found(data)
+        case errSecItemNotFound:
+            return .notFound
+        default:
+            // errSecInteractionNotAllowed (locked), errSecAuthFailed, …
+            logKeychainFailure(status, operation: "read", key: key)
+            return .failed
+        }
     }
 
     func readLegacyProtectedData(forKey key: String) -> Data? {
@@ -374,8 +456,8 @@ final class LicenseCache {
         #endif
     }
     #else
-    func readProtectedData(forKey key: String) -> Data? {
-        userDefaults.data(forKey: prefixed(key))
+    func platformReadProtectedOutcome(forKey key: String) -> ProtectedReadOutcome {
+        userDefaults.data(forKey: prefixed(key)).map(ProtectedReadOutcome.found) ?? .notFound
     }
 
     func readLegacyProtectedData(forKey key: String) -> Data? {

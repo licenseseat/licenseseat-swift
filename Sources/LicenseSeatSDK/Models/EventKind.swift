@@ -22,6 +22,10 @@ public enum EventKind: String, CaseIterable, Sendable {
 
     /// A cached activation was loaded at startup. Payload: ``License``.
     case licenseLoaded = "license:loaded"
+    /// Protected storage could not be read at startup (for example a locked
+    /// Keychain). The activation is unknown, not absent; nothing was purged.
+    /// Payload: `["key": String]`.
+    case licenseStorageUnavailable = "license:storage-unavailable"
     /// ``LicenseSeat/reset()`` cleared SDK state. Payload: empty dictionary.
     case sdkReset = "sdk:reset"
     /// A background operation could not run (for example an offline refresh

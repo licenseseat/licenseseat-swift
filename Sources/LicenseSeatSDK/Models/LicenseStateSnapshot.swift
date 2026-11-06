@@ -45,6 +45,9 @@ public struct LicenseStateSnapshot: Equatable, Sendable {
     public let lastSeenTimestamp: Date?
     /// Next scheduled automatic validation, if automatic validation runs.
     public let nextAutoValidationAt: Date?
+    /// Protected storage could not be read (for example a locked Keychain),
+    /// so `license == nil` means "unknown", not "not activated".
+    public let licenseStorageUnavailable: Bool
 }
 
 /// The outcome of ``LicenseSeat/restoreLicense()``.

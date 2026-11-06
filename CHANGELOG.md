@@ -65,6 +65,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **An unreadable Keychain is no longer "not activated"** (#28). Protected
+  reads now distinguish `errSecItemNotFound` from failures such as
+  `errSecInteractionNotAllowed` (locked) or `errSecAuthFailed`. While the
+  activation cannot be read: `getStatus()` reports `.pending` (not
+  `.inactive`), `isLicenseStorageUnavailable` is `true`,
+  `stateSnapshot().licenseStorageUnavailable` is set, operations that need the
+  activation throw `LicenseSeatError.cacheError` (transient; `.storage`)
+  instead of `.noActiveLicense`, launch emits `license:storage-unavailable`,
+  nothing is purged, legacy plaintext is never migrated over an unreadable
+  item, and the rollback watermark is never rewritten (or lowered) over an
+  unreadable value. `activate()` over an unreadable activation emits
+  `activation:error` and throws `.cacheError` before choosing a fingerprint or
+  sending anything, and offline verification with an unreadable watermark is
+  refused (`cache_error`) rather than skipping the rollback check.
+
 - **Authoritative entitlement denials never fall back to the offline grant**
   (#25). `APIError.isAuthoritativeDenial` covers `version_not_entitled`,
   `not_entitled`, `product_mismatch`, `seat_limit_exceeded`,

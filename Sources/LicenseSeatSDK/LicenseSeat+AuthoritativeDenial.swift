@@ -89,6 +89,16 @@ extension LicenseSeat {
         if let persisted = cache.getAuthoritativeDenial(), persisted.matches(license) {
             return persisted
         }
+        if cache.failedReadKeys.contains(LicenseCache.Key.authoritativeDenial) {
+            // The decision store exists but cannot be read right now (for
+            // example a locked Keychain): unknown is not "no denial".
+            var record = AuthoritativeDecisionRecord(for: license)
+            record.denial = .init(
+                code: "license_storage_unavailable",
+                message: "License storage is temporarily unavailable"
+            )
+            return record
+        }
         if let validation = license.validation, !validation.valid,
            Self.isAuthoritativeDenialCode(validation.code),
            let code = validation.code {

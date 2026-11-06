@@ -469,6 +469,23 @@ final class OfflineValidationTests: LicenseSeatTestCase {
         XCTAssertEqual(result.code, "clock_tamper")
     }
 
+    func testAWatermarkThatFailsToReadNeverSkipsTheRollbackCheck() async throws {
+        // Given: a watermark ahead of the clock, whose first read fails (locked
+        // Keychain) and whose next read succeeds (it unlocks mid-verification).
+        sdk.cache.setLastSeenTimestamp(Date().addingTimeInterval(600).timeIntervalSince1970)
+        let privateKey = Curve25519.Signing.PrivateKey()
+        sdk.cache.setOfflineToken(try makeOfflineToken(privateKey: privateKey))
+        sdk.cache.setPublicKey("test-key-id", Base64URL.encode(privateKey.publicKey.rawRepresentation))
+        cacheTestLicense()
+        sdk.cache.simulatedReadFailureCounts = [LicenseCache.Key.lastSeenTimestamp: 1]
+
+        let result = await sdk.verifyCachedOffline()
+
+        XCTAssertFalse(result.valid, "an unreadable watermark must refuse, not skip the comparison")
+        XCTAssertEqual(result.code, "cache_error")
+        XCTAssertEqual(sdk.cache.simulatedReadFailureCounts[LicenseCache.Key.lastSeenTimestamp], 0)
+    }
+
     // MARK: - Monotonic floor (#12)
 
     private func cacheSignedToken(iat: Int, exp: Int) throws {
