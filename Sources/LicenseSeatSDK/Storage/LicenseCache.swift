@@ -28,7 +28,6 @@ final class LicenseCache {
         static let publicKeys = "public_keys"
         static let lastSeenTimestamp = "last_seen_ts"
         static let authoritativeDenial = "authoritative_denial"
-        static let entitledVersion = "entitled_version"
 
         /// Records deleted by `clear()`.
         ///
@@ -43,7 +42,7 @@ final class LicenseCache {
         /// other LicenseSeat SDKs.
         static let clearedOnReset = [
             license, offlineToken, machineFile, publicKeys,
-            authoritativeDenial, entitledVersion
+            authoritativeDenial
         ]
     }
 

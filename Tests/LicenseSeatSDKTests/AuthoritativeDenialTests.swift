@@ -38,7 +38,8 @@ final class AuthoritativeDenialTests: LicenseSeatTestCase {
 
     private func makeSDK(
         mode: LicenseSeatConfig.OfflineFallbackMode = .always,
-        appVersion: String = "3.0.1"
+        appVersion: String = "3.0.1",
+        telemetryEnabled: Bool = true
     ) -> LicenseSeat {
         LicenseSeat(
             config: LicenseSeatConfig(
@@ -50,6 +51,7 @@ final class AuthoritativeDenialTests: LicenseSeatTestCase {
                 autoValidateInterval: 0,
                 heartbeatInterval: 0,
                 maxRetries: 0,
+                telemetryEnabled: telemetryEnabled,
                 appVersion: appVersion,
                 offlineFallbackMode: mode
             ),
@@ -165,10 +167,19 @@ final class AuthoritativeDenialTests: LicenseSeatTestCase {
         }
     }
 
-    private func relaunch(appVersion: String, mode: LicenseSeatConfig.OfflineFallbackMode = .always) async {
+    private func relaunch(
+        appVersion: String,
+        mode: LicenseSeatConfig.OfflineFallbackMode = .always,
+        telemetryEnabled: Bool = true
+    ) async {
         sdk.shutdown()
-        sdk = makeSDK(mode: mode, appVersion: appVersion)
+        sdk = makeSDK(mode: mode, appVersion: appVersion, telemetryEnabled: telemetryEnabled)
         await sdk.waitForInitialization()
+    }
+
+    private func validateOnline(_ body: [String: Any], status: Int = 200) async {
+        MockURLProtocol.requestHandler = Self.respond(status, body)
+        do { _ = try await sdk.validate(licenseKey: Self.licenseKey) } catch {}
     }
 
     private func assertNotOfflineValid(_ label: String, file: StaticString = #filePath, line: UInt = #line) async {
@@ -182,6 +193,146 @@ final class AuthoritativeDenialTests: LicenseSeatTestCase {
             _ = try await sdk.validate(licenseKey: Self.licenseKey)
             XCTFail("\(label): an outage fell back to the grant", file: file, line: line)
         } catch {}
+    }
+
+    // MARK: - Round 3 (Astra on #26, de86c5b)
+
+    func testAnOnlineAcceptanceOfAnOlderVersionKeepsTheNewerVersionsDenial() async throws {
+        // R2-1: deny 3.0.1, accept 2.9.0 online, relaunch 3.0.1 offline.
+        await validateOnline(Self.validation(valid: false, code: "version_not_entitled"))
+        await relaunch(appVersion: "2.9.0")
+        await validateOnline(Self.validation(valid: true, code: nil))
+        XCTAssertTrue(sdk.checkEntitlement("updates").active)
+
+        MockURLProtocol.requestHandler = { _ in throw URLError(.notConnectedToInternet) }
+        await relaunch(appVersion: "3.0.1")
+        await assertNotOfflineValid("3.0.1 after an online acceptance of 2.9.0")
+    }
+
+    func testALaterDenialOutranksAnEarlierAcceptance() async throws {
+        // R2-2: accept 3.0.1, deny 3.0.1, deny 4.0.0 -> 3.0.1 stays denied.
+        await validateOnline(Self.validation(valid: true, code: nil, ceiling: nil))
+        await validateOnline(Self.validation(valid: false, code: "version_not_entitled"))
+        await relaunch(appVersion: "4.0.0")
+        await validateOnline(Self.validation(valid: false, code: "version_not_entitled"))
+        MockURLProtocol.requestHandler = { _ in throw URLError(.notConnectedToInternet) }
+        await relaunch(appVersion: "3.0.1")
+        await assertNotOfflineValid("3.0.1 after successive denials")
+
+        // And a fresh restrictive ceiling outranks an older acceptance of a
+        // version it no longer covers.
+        sdk.shutdown()
+        storagePrefix = "authoritative_denial_test_\(UUID().uuidString)_"
+        sdk = makeSDK(appVersion: "3.5.0")
+        try cacheActivationWithValidGrant()
+        await validateOnline(Self.validation(valid: true, code: nil, ceiling: "4.0.0"))
+        await relaunch(appVersion: "3.6.0")
+        await validateOnline(Self.validation(valid: false, code: "version_not_entitled", ceiling: "3.0.0"))
+        MockURLProtocol.requestHandler = { _ in throw URLError(.notConnectedToInternet) }
+        await relaunch(appVersion: "3.5.0")
+        await assertNotOfflineValid("3.5.0 above the fresh 3.0.0 ceiling")
+    }
+
+    func testAnUncheckedVersionIsNeverAccepted() async throws {
+        // R2-3: with telemetry off no version is submitted, so an online
+        // success says nothing about 3.0.1.
+        await validateOnline(Self.validation(valid: false, code: "version_not_entitled"))
+        await relaunch(appVersion: "3.0.1", telemetryEnabled: false)
+        await validateOnline(Self.validation(valid: true, code: nil))
+        MockURLProtocol.requestHandler = { _ in throw URLError(.notConnectedToInternet) }
+        await relaunch(appVersion: "3.0.1")
+        await assertNotOfflineValid("3.0.1 after a telemetry-off success")
+    }
+
+    func testAFailedDecisionWriteStillRefusesAfterRelaunch() async throws {
+        // R2-4: only the decision record write fails; the validation is saved.
+        sdk.cache.simulatedWriteFailures = [LicenseCache.Key.authoritativeDenial]
+        await validateOnline(Self.validation(valid: false, code: "not_entitled"))
+        sdk.cache.simulatedWriteFailures = []
+
+        MockURLProtocol.requestHandler = { _ in throw URLError(.notConnectedToInternet) }
+        await relaunch(appVersion: "3.0.1")
+        await assertNotOfflineValid("relaunch after a partial write")
+        assertGrantKept()
+    }
+
+    #if canImport(Combine)
+    func testStatusSubscribersSeeADenialEvenWhenSavingItFails() async throws {
+        // R2-5: background validation, writes failing, existing subscriber.
+        await validateOnline(Self.validation(valid: true, code: nil))
+        var statuses: [LicenseStatus] = []
+        let subscription = sdk.statusPublisher.sink { statuses.append($0) }
+        defer { subscription.cancel() }
+        sdk.cache.simulatedWriteFailures = [LicenseCache.Key.authoritativeDenial, LicenseCache.Key.license]
+
+        await validateOnline(Self.validation(valid: false, code: "not_entitled"))
+
+        let deadline = Date().addingTimeInterval(5)
+        while !statuses.contains(where: { if case .invalid = $0 { return true } else { return false } }),
+              Date() < deadline {
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        XCTAssertTrue(statuses.contains { if case .invalid = $0 { return true } else { return false } },
+                      "subscribers kept a granting status: \(statuses)")
+    }
+    #endif
+
+    func testADelayedRefusalOfASupersededReactivationIsIgnored() async throws {
+        // R2-6: re-activation A's refusal arrives after re-activation B succeeded.
+        #if canImport(Darwin)
+        MockURLProtocol.deliversAsynchronously = true
+        let firstStarted = expectation(description: "first activation started")
+        firstStarted.assertForOverFulfill = false
+        let release = DispatchSemaphore(value: 0)
+        let counter = RequestCounter()
+        let success = try JSONSerialization.data(withJSONObject: [
+            "object": "activation", "id": "act-denial-0001", "fingerprint": Self.deviceId,
+            "device_name": "Test Device", "license_key": Self.licenseKey,
+            "activated_at": ISO8601DateFormatter().string(from: Date()),
+            "deactivated_at": NSNull(), "ip_address": "127.0.0.1", "metadata": NSNull(),
+            "license": (Self.validation(valid: true, code: nil)["license"] as Any)
+        ] as [String: Any])
+        let refusal = try JSONSerialization.data(withJSONObject: [
+            "error": ["code": "version_not_entitled", "message": "Not covered"]
+        ])
+        MockURLProtocol.requestHandler = { request in
+            guard request.url?.path.hasSuffix("/activate") == true else {
+                throw URLError(.notConnectedToInternet)
+            }
+            if counter.next() == 1 {
+                firstStarted.fulfill()
+                release.wait()
+                return (HTTPURLResponse(url: request.url!, statusCode: 403, httpVersion: nil,
+                                        headerFields: ["Content-Type": "application/json"])!, refusal)
+            }
+            return (HTTPURLResponse(url: request.url!, statusCode: 201, httpVersion: nil,
+                                    headerFields: ["Content-Type": "application/json"])!, success)
+        }
+
+        let first = Task { try? await self.sdk.activate(licenseKey: Self.licenseKey) }
+        await assertFulfillment(of: [firstStarted], timeout: 5)
+        _ = try await sdk.activate(licenseKey: Self.licenseKey)
+        release.signal()
+        _ = await first.value
+
+        XCTAssertFalse(sdk.authoritativeDenialApplies(), "a superseded refusal must not land")
+        guard case .active = sdk.getStatus() else {
+            return XCTFail("the newer success must stand, got \(sdk.getStatus())")
+        }
+        #else
+        throw XCTSkip("needs MockURLProtocol.deliversAsynchronously (Darwin)")
+        #endif
+    }
+
+    func testTheVersionParserMatchesTheServer() async {
+        // R2-7: padding then strict rules, as Semver.parse_lenient does.
+        XCTAssertNil(LicenseSeat.serverCoreVersion("02"))
+        XCTAssertNil(LicenseSeat.serverCoreVersion("2.09"))
+        XCTAssertNil(LicenseSeat.serverCoreVersion("01.2.3"))
+        XCTAssertEqual(LicenseSeat.serverCoreVersion("2"), [2, 0, 0])
+        XCTAssertEqual(LicenseSeat.serverCoreVersion("2.10"), [2, 10, 0])
+        XCTAssertEqual(LicenseSeat.serverCoreVersion("v3.0.1-beta.1+build.5"), [3, 0, 1])
+        XCTAssertEqual(LicenseSeat.serverCoreVersion(" 3.0 "), [3, 0, 0])
     }
 
     // MARK: - Round 2 (Astra on #26)
@@ -493,5 +644,18 @@ final class AuthoritativeDenialTests: LicenseSeatTestCase {
         XCTAssertFalse(APIError(code: "rate_limited", message: "", status: 429).isAuthoritativeDenial)
         XCTAssertFalse(APIError(code: "revoked", message: "", status: 422).isAuthoritativeDenial)
         XCTAssertFalse(APIError(code: "version_not_entitled", message: "", status: 403).invalidatesCachedLicense)
+    }
+}
+
+/// Counts requests across the URLProtocol threads.
+private final class RequestCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var count = 0
+
+    func next() -> Int {
+        lock.lock()
+        defer { lock.unlock() }
+        count += 1
+        return count
     }
 }

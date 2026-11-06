@@ -59,11 +59,8 @@ extension LicenseSeat {
     }
 
     private func authoritativeDenialRefusal() -> ValidationResponse? {
-        guard authoritativeDenialApplies() else { return nil }
-        return makeOfflineValidationResponse(
-            valid: false,
-            code: currentAuthoritativeDenial()?.code ?? "not_entitled"
-        )
+        guard let refusal = authoritativeRefusal() else { return nil }
+        return makeOfflineValidationResponse(valid: false, code: refusal.code)
     }
 
     private func verifyCachedOfflineArtifacts() async -> ValidationResponse {

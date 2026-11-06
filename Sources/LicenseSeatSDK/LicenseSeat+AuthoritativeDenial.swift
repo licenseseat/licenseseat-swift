@@ -8,43 +8,49 @@
 
 import Foundation
 
-/// The server's authoritative refusal for one activation, kept apart from
+/// The server's authoritative decisions for one activation, kept apart from
 /// `License.validation` so that no offline result (for example a rollback
-/// launch) can overwrite it. Cleared only by a later online success for the
-/// same activation, a new activation, or reset/revocation/deactivation.
-struct AuthoritativeDenialRecord: Codable, Equatable, Sendable {
+/// launch) can overwrite them.
+///
+/// Version decisions are kept **per version**: an online acceptance of 2.9.0
+/// says nothing about 3.0.1, and a later denial of a version always outranks
+/// an earlier acceptance of it. Only versions the server actually checked (the
+/// app version this SDK submitted) are recorded either way.
+struct AuthoritativeDecisionRecord: Codable, Equatable, Sendable {
+    struct Denial: Codable, Equatable, Sendable {
+        let code: String
+        let message: String?
+    }
+
     let licenseKey: String
     let deviceId: String
     let activationId: String
-    let code: String
-    let message: String?
-    /// The app version this SDK reported when the denial was received (the
-    /// version the server refused), when known.
-    let deniedVersion: String?
-    /// The `updates` ceiling carried by the denial response itself, when the
-    /// server included it. Never copied from older cached metadata.
-    let ceiling: String?
+    /// A denial that does not depend on the app version (not entitled,
+    /// product mismatch, seat limit, unsupported license mode).
+    var denial: Denial?
+    /// Versions the server refused (`version_not_entitled`).
+    var deniedVersions: [String] = []
+    /// Versions the server accepted online and has not refused since.
+    var acceptedVersions: [String] = []
+    /// The most recent version denial's own `updates` ceiling, if it carried one.
+    var ceiling: String?
+    /// The most recent version denial's message, for status display.
+    var versionDenialMessage: String?
+
+    init(for license: License) {
+        licenseKey = license.licenseKey
+        deviceId = license.deviceId
+        activationId = license.activationId
+    }
 
     func matches(_ license: License) -> Bool {
         licenseKey == license.licenseKey &&
             deviceId == license.deviceId &&
             activationId == license.activationId
     }
-}
 
-/// The last app version the server accepted online for one activation:
-/// proof that rolling back to it is entitled, independent of whether the
-/// server's later denial carried a ceiling.
-struct EntitledVersionRecord: Codable, Equatable, Sendable {
-    let licenseKey: String
-    let deviceId: String
-    let activationId: String
-    let version: String
-
-    func matches(_ license: License) -> Bool {
-        licenseKey == license.licenseKey &&
-            deviceId == license.deviceId &&
-            activationId == license.activationId
+    var isEmpty: Bool {
+        denial == nil && deniedVersions.isEmpty && acceptedVersions.isEmpty
     }
 }
 
@@ -60,9 +66,22 @@ extension LicenseSeat {
         TelemetryPayload.reportedAppVersion(override: config.appVersion)
     }
 
-    /// The denial for the cached activation, if any: the in-memory decision
-    /// first (it survives a failed protected write), then the persisted one.
-    func currentAuthoritativeDenial() -> AuthoritativeDenialRecord? {
+    /// The version this SDK actually submits with licensing requests, which
+    /// is the only version the server's gate can have checked. It travels in
+    /// the optional telemetry object, so with telemetry disabled nothing was
+    /// checked and no version decision can be inferred.
+    var submittedAppVersion: String? {
+        config.telemetryEnabled ? reportedAppVersion : nil
+    }
+
+    // MARK: - Reading
+
+    /// The decisions for the cached activation: in memory first (survives a
+    /// failed protected write), then the persisted record. If neither exists
+    /// but the persisted validation itself is an authoritative denial (the
+    /// record write failed while the validation write succeeded), a
+    /// conservative version-independent denial is synthesized from it.
+    func currentAuthoritativeDecisions() -> AuthoritativeDecisionRecord? {
         guard let license = cache.getLicense() else { return nil }
         if let inMemory = authoritativeDenial, inMemory.matches(license) {
             return inMemory
@@ -70,44 +89,52 @@ extension LicenseSeat {
         if let persisted = cache.getAuthoritativeDenial(), persisted.matches(license) {
             return persisted
         }
+        if let validation = license.validation, !validation.valid,
+           Self.isAuthoritativeDenialCode(validation.code),
+           let code = validation.code {
+            var record = AuthoritativeDecisionRecord(for: license)
+            record.denial = .init(code: code.lowercased(), message: validation.message)
+            return record
+        }
         return nil
     }
 
-    /// Whether an authoritative denial forbids answering from an offline
+    /// Whether an authoritative decision forbids answering from an offline
     /// grant for the cached activation in this process right now.
-    ///
-    /// A `version_not_entitled` denial stops applying only with positive
-    /// evidence that the app now runs an entitled version, and never for the
-    /// refused version itself: either the current version is the last one the
-    /// server accepted online for this activation, or the denial's own
-    /// ceiling (strictly parsed, server-compatible) covers it.
     func authoritativeDenialApplies() -> Bool {
-        guard let denial = currentAuthoritativeDenial() else { return false }
-        guard denial.code.lowercased() == "version_not_entitled" else { return true }
-        guard let current = reportedAppVersion else { return true }
-        if let denied = denial.deniedVersion, Self.sameVersion(current, denied) {
-            return true
+        authoritativeRefusal() != nil
+    }
+
+    /// The refusal that applies now, as (code, message), or `nil`.
+    func authoritativeRefusal() -> (code: String, message: String?)? {
+        guard let record = currentAuthoritativeDecisions() else { return nil }
+        if let denial = record.denial {
+            return (denial.code, denial.message)
         }
-        if let license = cache.getLicense(),
-           let entitled = cache.getEntitledVersion(),
-           entitled.matches(license),
-           Self.sameVersion(current, entitled.version) {
-            return false
+        guard !record.deniedVersions.isEmpty else { return nil }
+        let refusal = ("version_not_entitled", record.versionDenialMessage)
+        guard let current = reportedAppVersion else { return refusal }
+        if record.deniedVersions.contains(where: { Self.sameVersion($0, current) }) {
+            return refusal
         }
-        if let ceiling = denial.ceiling,
+        if record.acceptedVersions.contains(where: { Self.sameVersion($0, current) }) {
+            return nil
+        }
+        if let ceiling = record.ceiling,
            let currentCore = Self.serverCoreVersion(current),
            let ceilingCore = Self.serverCoreVersion(ceiling),
            currentCore.lexicographicallyPrecedes(ceilingCore) {
-            return false
+            return nil
         }
-        return true
+        return refusal
     }
 
-    /// Record a denial (from `valid: false`, a thrown error on validate, or a
-    /// thrown error on re-activation) for the activation it was made for. The
-    /// in-memory decision is set first, so a failed protected write can never
-    /// leave the previous authorization usable; the write's outcome is
-    /// returned so callers can surface `cacheError`.
+    // MARK: - Recording
+
+    /// Record a denial for the activation it was made for. The in-memory
+    /// decision is set first, so a failed protected write can never leave the
+    /// previous authorization usable in this process; the write's outcome is
+    /// returned. Any in-flight SDK artifact refresh is fenced.
     @discardableResult
     func recordAuthoritativeDenial(
         code: String,
@@ -115,48 +142,68 @@ extension LicenseSeat {
         ceiling: String?,
         for license: License
     ) -> Bool {
-        let record = AuthoritativeDenialRecord(
-            licenseKey: license.licenseKey,
-            deviceId: license.deviceId,
-            activationId: license.activationId,
-            code: code.lowercased(),
-            message: message,
-            deniedVersion: reportedAppVersion,
-            ceiling: ceiling
-        )
+        var record = currentDecisionsForWriting(license)
+        let normalizedCode = code.lowercased()
+        if normalizedCode == "version_not_entitled", let version = submittedAppVersion {
+            if !record.deniedVersions.contains(where: { Self.sameVersion($0, version) }) {
+                record.deniedVersions.append(version)
+            }
+            record.acceptedVersions.removeAll { Self.sameVersion($0, version) }
+            if let ceiling {
+                record.ceiling = ceiling
+                // A fresh, restrictive ceiling outranks historical acceptance.
+                record.acceptedVersions.removeAll { accepted in
+                    guard let acceptedCore = Self.serverCoreVersion(accepted),
+                          let ceilingCore = Self.serverCoreVersion(ceiling) else { return true }
+                    return !acceptedCore.lexicographicallyPrecedes(ceilingCore)
+                }
+            }
+            record.versionDenialMessage = message
+        } else {
+            record.denial = .init(code: normalizedCode, message: message)
+        }
         authoritativeDenial = record
-        // Fence any in-flight artifact refresh this SDK started: it must not
-        // re-store a grant after this decision.
         currentOfflineSyncRequestID = nil
         lastOfflineValidation = nil
         recordRuntimeTrust(.failClosedDenial)
         return cache.setAuthoritativeDenial(record)
     }
 
-    /// An authoritative online acceptance for the cached activation: the
-    /// denial no longer applies, and the reported version is proven entitled.
-    func recordOnlineAcceptance(for license: License) {
-        authoritativeDenial = nil
-        cache.clearAuthoritativeDenial()
-        if let version = reportedAppVersion {
-            cache.setEntitledVersion(EntitledVersionRecord(
-                licenseKey: license.licenseKey,
-                deviceId: license.deviceId,
-                activationId: license.activationId,
-                version: version
-            ))
+    /// An authoritative online acceptance for the cached activation. It
+    /// clears version-independent denials, and accepts exactly the version the
+    /// server checked — never others, and nothing when no version was sent.
+    @discardableResult
+    func recordOnlineAcceptance(for license: License) -> Bool {
+        var record = currentDecisionsForWriting(license)
+        record.denial = nil
+        if let version = submittedAppVersion {
+            record.deniedVersions.removeAll { Self.sameVersion($0, version) }
+            if !record.acceptedVersions.contains(where: { Self.sameVersion($0, version) }) {
+                record.acceptedVersions.append(version)
+            }
         }
+        authoritativeDenial = record
+        return cache.setAuthoritativeDenial(record)
     }
 
-    /// Thrown-denial path: persist the decision and a matching `valid: false`
+    private func currentDecisionsForWriting(_ license: License) -> AuthoritativeDecisionRecord {
+        if let inMemory = authoritativeDenial, inMemory.matches(license) { return inMemory }
+        if let persisted = cache.getAuthoritativeDenial(), persisted.matches(license) { return persisted }
+        return AuthoritativeDecisionRecord(for: license)
+    }
+
+    /// Thrown-denial path: record the decision and a matching `valid: false`
     /// validation for status display, keeping the activation and its grant.
+    /// The state transition is always published; a persistence failure is
+    /// reported through `sdk:error` (the API error itself is rethrown by the
+    /// caller, so the host still sees the refusal).
     func recordThrownAuthoritativeDenial(
         _ error: APIError,
         expectedIdentity: CachedLicenseIdentity
     ) {
         guard cachedLicenseMatches(expectedIdentity),
               let cached = cache.getLicense() else { return }
-        recordAuthoritativeDenial(
+        let recordPersisted = recordAuthoritativeDenial(
             code: error.code ?? "not_entitled",
             message: error.message,
             ceiling: nil,
@@ -184,16 +231,23 @@ extension LicenseSeat {
             ),
             activation: nil
         )
-        cache.updateValidation(denial)
+        let validationPersisted = cache.updateValidation(denial)
         eventBus.emit(.validationFailed, denial)
+        if !recordPersisted || !validationPersisted {
+            eventBus.emit(.sdkError, [
+                "message": "An authoritative license denial could not be saved; it applies for this session",
+                "code": error.code ?? "not_entitled"
+            ])
+        }
     }
 
     // MARK: - Server-compatible version comparison
 
     /// Mirrors the engine's `Semver.parse_lenient` for declared versions:
-    /// trims whitespace, drops one leading `v`, accepts full SemVer or
-    /// `N` / `N.N` (padded with zeros). Anything else, including components
-    /// that overflow, is `nil` — never proof of coverage.
+    /// trims whitespace, drops one leading `v`, accepts full SemVer or `N` /
+    /// `N.N` (padded with `.0`, then held to the same strict rules — no
+    /// leading zeros). Anything else, including components that overflow, is
+    /// `nil` — never proof of coverage.
     static func serverCoreVersion(_ string: String) -> [Int]? {
         guard string.utf8.count <= 255 else { return nil }
         var trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -204,7 +258,7 @@ extension LicenseSeat {
         let core: Substring
         if trimmed.range(of: semver, options: .regularExpression) != nil {
             core = trimmed.split(whereSeparator: { $0 == "-" || $0 == "+" }).first ?? ""
-        } else if trimmed.range(of: "^[0-9]+(\\.[0-9]+)?$", options: .regularExpression) != nil {
+        } else if trimmed.range(of: "^\(numeric)(\\.\(numeric))?$", options: .regularExpression) != nil {
             core = Substring(trimmed)
         } else {
             return nil

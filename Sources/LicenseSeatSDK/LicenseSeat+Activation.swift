@@ -80,7 +80,10 @@ public extension LicenseSeat {
             eventBus.emit(.activationSuccess, license)
             return license
         } catch {
+            // Only the current request may mutate state: a delayed failure of a
+            // superseded re-activation must not undo a newer success.
             if let apiError = error as? APIError,
+               currentActivationRequestID == requestID,
                let identity = reactivatedIdentity,
                cachedLicenseMatches(identity) {
                 if apiError.invalidatesCachedLicense {

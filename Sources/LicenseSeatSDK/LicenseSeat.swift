@@ -182,8 +182,8 @@ public final class LicenseSeat {
     )?
 
     /// The authoritative denial established in this process (mirrors the
-    /// persisted record; see `currentAuthoritativeDenial()`).
-    internal var authoritativeDenial: AuthoritativeDenialRecord?
+    /// persisted record; see `currentAuthoritativeDecisions()`).
+    internal var authoritativeDenial: AuthoritativeDecisionRecord?
 
     /// Most recent successful heartbeat acknowledgement in this process.
     public internal(set) var lastHeartbeatResponse: HeartbeatResponse?

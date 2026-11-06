@@ -189,6 +189,12 @@ private extension LicenseSeat {
                 cache.clearMachineFile()
             }
             guard cache.updateValidation(result), denialPersisted else {
+                // Publish the authoritative transition even though it could
+                // not be fully saved: status and entitlement subscribers must
+                // stop granting now. The failure still surfaces as cacheError.
+                if !result.valid {
+                    eventBus.emit(.validationFailed, result)
+                }
                 throw LicenseSeatError.cacheError
             }
             if result.valid, let cached = cache.getLicense() {

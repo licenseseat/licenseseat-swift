@@ -59,8 +59,8 @@ public extension LicenseSeat {
             return .inactive(message: "No license activated")
         }
 
-        if authoritativeDenialApplies(), let denial = currentAuthoritativeDenial() {
-            return .invalid(message: denial.message ?? denial.code)
+        if let refusal = authoritativeRefusal() {
+            return .invalid(message: refusal.message ?? refusal.code)
         }
 
         guard let validation = license.validation else {

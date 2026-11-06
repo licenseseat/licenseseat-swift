@@ -75,13 +75,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   it applies, offline fallback (both modes), launch-time offline
   verification, `verifyCachedOffline()` (checked again after any key fetch),
   `getStatus()`, and `checkEntitlement()` all refuse, even if persisting it
-  failed. Any in-flight artifact refresh is fenced. The activation and its
+  failed (and, after a partial write, on relaunch from the saved
+  validation). Any in-flight artifact refresh is fenced, and status
+  subscribers are notified even when saving fails. The activation and its
   offline grant are **kept** (behaviour change for the `valid: false` shape,
-  which used to purge). A `version_not_entitled` denial stops applying only
-  with positive evidence of an entitled version — the version last accepted
-  online for this activation, or the denial's own ceiling compared with a
-  strict, server-compatible parser — and never for the refused version
-  itself. 401/403 auth errors and 429 stay eligible for `.always` fallback;
+  which used to purge). Version decisions are kept per version: an online
+  acceptance only covers the version the server actually checked (the one
+  submitted with telemetry — nothing when telemetry is off), a later denial
+  of a version always outranks an earlier acceptance, and a fresh restrictive
+  ceiling discards accepted versions it no longer covers. Other versions are
+  exempt only via the denial's own ceiling, compared with a strict,
+  server-compatible parser. A delayed failure of a superseded re-activation
+  never mutates state. 401/403 auth errors and 429 stay eligible for `.always` fallback;
   revocation still purges. `LicenseSeatFailure` gains `.notEntitled`.
 
 - Offline authorization time is now paired with a monotonic process clock
