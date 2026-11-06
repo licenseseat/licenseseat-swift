@@ -36,17 +36,19 @@ struct AuthorizationInstant: Equatable {
 ///
 /// where `tolerance` is the configured `maxClockSkewMs`.
 ///
-/// **Only trusted samples create a floor.** A trusted sample is the licensing
-/// server's HTTP `Date` on an authoritative online success (activation,
-/// validation, heartbeat), accepted only if it is no more than
-/// ``maximumTrustedLead`` ahead of the local wall clock (a proxy stamping
-/// 2099 is ignored). The local wall clock is never a trusted sample: a fast
+/// **Only trusted samples create a floor.** A trusted sample is the signed
+/// issuance time (`iat`) of an offline artifact (machine file or legacy
+/// token) this process has just fetched from the licensing server and
+/// verified, accepted only if it is no more than ``maximumTrustedLead``
+/// ahead of the local wall clock. HTTP `Date` headers are never used: a
+/// proxy can write them, and a few minutes of error would expire grants
+/// early. The local wall clock is never a trusted sample: a fast
 /// clock that NTP later corrects and a deliberate rollback produce identical
 /// wall/monotonic observations, so flooring on the local clock either locks a
 /// legitimate customer out early or reopens rollback. Until the first trusted
 /// sample in this process, `authorizationTime == wall` and rollback detection
-/// is the persisted watermark's alone (the pre-0.6 behaviour). A later online
-/// success without a usable `Date` keeps the existing trusted baseline.
+/// is the persisted watermark's alone (the pre-0.6 behaviour). The floor only
+/// rises; nothing but a newer signed issuance moves it.
 ///
 /// Lockout safety:
 /// - Never earlier than the wall clock; the watermark comparison only becomes
@@ -147,9 +149,14 @@ final class AuthorizationClock {
 
     // MARK: - Anchoring
 
-    /// Record authoritative online acceptance. A plausible `trustedTime` (the
-    /// server's `Date`) becomes the new trusted baseline, which may lower the
-    /// floor. Without one, an existing trusted baseline is kept unchanged.
+    /// Record a trusted time sample: the **signed issuance time** (`iat`) of
+    /// an offline artifact this process has just fetched and verified. The
+    /// licensing server signed it before the response arrived, so it is a
+    /// lower bound on real time with verifiable provenance — unlike an HTTP
+    /// `Date` header, which any proxy can write. Implausible samples (more
+    /// than ``maximumTrustedLead`` ahead of the local clock) are ignored. The
+    /// floor only ever rises: the stronger of the existing floor and the new
+    /// sample is kept.
     func anchor(trustedTime: Date? = nil) {
         guard let trusted = trustedTime?.timeIntervalSince1970,
               trusted.isFinite, trusted > 0,
@@ -157,7 +164,7 @@ final class AuthorizationClock {
               let monotonic = monotonicClock() else {
             return
         }
-        trustedSample = trusted
+        trustedSample = max(trusted, monotonicFloor() ?? trusted)
         trustedMonotonic = monotonic
     }
 

@@ -563,6 +563,30 @@ On Apple platforms the activation, offline token, signing keys, rollback timesta
 
 ---
 
+### Offline Security Model and Known Limits
+
+What the SDK defends against offline, and what it deliberately does not:
+
+- **Clock rollback.** A persisted watermark refuses verification when the
+  clock is more than `maxClockSkewMs` behind the last accepted verification.
+  Once this process has fetched and verified a fresh offline artifact, its
+  *signed issuance time* plus a monotonic clock (which cannot be set and
+  counts through sleep) also floors authorization time, so winding the clock
+  back mid-session cannot revive an expired grant.
+- **Limit: cold offline sessions.** Before any artifact refresh in this
+  process, only the watermark applies. The local clock is never treated as
+  trusted: a clock corrected by NTP and a deliberate rollback look identical,
+  and trusting either would lock legitimate users out early.
+- **Limit: tolerance window.** A rollback smaller than `maxClockSkewMs` below
+  the floor or the watermark is accepted, by design.
+- **Limit: server time.** Signed issuance times come from the licensing
+  server's clock; HTTP `Date` headers (which proxies can rewrite) are never
+  used.
+- **Out of scope: a local attacker who controls the device.** Someone who can
+  rewrite the app's Keychain items, run the app under a debugger, or patch the
+  binary can defeat any client-side licensing check; offline grants are
+  bounded by their signed expiry and `maxOfflineDays`.
+
 ## Heartbeat
 
 The SDK includes a heartbeat mechanism that sends periodic health-check pings to the LicenseSeat API. This lets the dashboard track active devices in real time and powers online/offline seat visibility.

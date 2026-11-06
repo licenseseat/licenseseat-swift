@@ -179,18 +179,19 @@ extension LicenseSeat {
         }
     }
 
-    /// Record an authoritative online acceptance: re-anchor both the persisted
-    /// rollback watermark (which may lower it, per the cross-SDK contract) and
-    /// the in-process monotonic floor. Returns `false` if the watermark could
-    /// not be stored.
-    ///
-    /// The in-process floor is anchored only on the server's HTTP `Date` (a
-    /// trusted sample, see ``AuthorizationClock``); without one, any existing
-    /// trusted baseline is kept. The persisted watermark keeps the cross-SDK
-    /// contract and records the local wall clock.
+    /// Record an authoritative online acceptance: re-anchor the persisted
+    /// rollback watermark (which may lower it, per the cross-SDK contract).
+    /// The in-process floor is not touched here; only a freshly verified
+    /// signed issuance moves it (``anchorSignedIssuance(_:)``). Returns
+    /// `false` if the watermark could not be stored.
     func anchorAuthoritativeTime(_ timestamp: Date) -> Bool {
-        authorizationClock.anchor(trustedTime: apiClient.lastServerDate)
-        return cache.anchorLastSeenTimestamp(timestamp.timeIntervalSince1970)
+        cache.anchorLastSeenTimestamp(timestamp.timeIntervalSince1970)
+    }
+
+    /// A freshly fetched offline artifact has been verified and committed:
+    /// its signed issuance time is a trusted lower bound on real time.
+    func anchorSignedIssuance(_ issuedAtUnix: Int) {
+        authorizationClock.anchor(trustedTime: Date(timeIntervalSince1970: Double(issuedAtUnix)))
     }
 
     /// The instant local authorization decisions are evaluated at: the wall

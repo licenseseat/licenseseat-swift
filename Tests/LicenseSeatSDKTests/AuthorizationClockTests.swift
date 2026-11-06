@@ -146,9 +146,11 @@ final class AuthorizationClockTests: LicenseSeatTestCase {
         source.elapse(10)
         XCTAssertEqual(clock.now().timeIntervalSince1970, base + 20)
 
-        // A new trusted sample may lower it.
+        // An older sample never lowers it; a newer one raises it.
         clock.anchor(trustedTime: Date(timeIntervalSince1970: source.wall))
-        XCTAssertEqual(clock.now().timeIntervalSince1970, source.wall)
+        XCTAssertEqual(clock.now().timeIntervalSince1970, base + 20)
+        clock.anchor(trustedTime: Date(timeIntervalSince1970: base + 600))
+        XCTAssertEqual(clock.now().timeIntervalSince1970, base + 600)
     }
 
     func testAnImplausibleServerDateIsIgnored() async {
@@ -189,16 +191,6 @@ final class AuthorizationClockTests: LicenseSeatTestCase {
         let decomposed = composed.replacingOccurrences(of: "\u{00E9}", with: "e\u{0301}")
         XCTAssertEqual(composed, decomposed) // Swift String equality
         XCTAssertFalse(AuthorizationClock.shared(scope: composed) === AuthorizationClock.shared(scope: decomposed))
-    }
-
-    func testHTTPDateParsing() async {
-        XCTAssertEqual(
-            APIClient.parseHTTPDate("Sun, 06 Nov 2022 08:49:37 GMT")?.timeIntervalSince1970,
-            1_667_724_577
-        )
-        XCTAssertNil(APIClient.parseHTTPDate("Sunday, 06-Nov-22 08:49:37 GMT"))
-        XCTAssertNil(APIClient.parseHTTPDate("Thu, 01 Jan 1970 00:00:00 GMT"))
-        XCTAssertNil(APIClient.parseHTTPDate("garbage"))
     }
 
     func testUnavailableOrRegressingMonotonicSourceFallsBackToTheWallClock() async {
