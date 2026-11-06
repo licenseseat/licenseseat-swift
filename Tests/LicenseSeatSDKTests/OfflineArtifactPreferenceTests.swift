@@ -438,6 +438,12 @@ final class OfflineArtifactPreferenceTests: LicenseSeatTestCase {
     }
 
     func testALateMachineFileCheckoutCannotRestoreAGrantAfterADenial() async throws {
+        #if !canImport(Darwin)
+        throw XCTSkip("needs MockURLProtocol.deliversAsynchronously (Darwin)")
+        #endif
+        // The machine-file response is held while the denial is delivered and
+        // committed; only then is the (now stale) checkout released.
+        MockURLProtocol.deliversAsynchronously = true
         let started = expectation(description: "machine-file request started")
         started.assertForOverFulfill = false
         let release = DispatchSemaphore(value: 0)
@@ -460,19 +466,22 @@ final class OfflineArtifactPreferenceTests: LicenseSeatTestCase {
                                      headerFields: ["Content-Type": "application/json"])!
             if path.hasSuffix("/machine-file") {
                 started.fulfill()
-                _ = release.wait(timeout: .now() + 5)
+                release.wait()
                 return (ok, machineFileData)
             }
             if path.hasSuffix("/validate") { return (ok, denial) }
             throw URLError(.notConnectedToInternet)
         }
 
+        let events = observe(["offlineAssets:ready", "machineFile:ready"])
         let sync = Task { await self.sdk.syncOfflineAssets() }
         await assertFulfillment(of: [started], timeout: 5)
         let decision = try await sdk.validate(licenseKey: Self.fixture.licenseKey)
-        XCTAssertFalse(decision.valid)
+        XCTAssertFalse(decision.valid, "the denial must be committed while the checkout is held")
         release.signal()
         await sync.value
+        await waitForEvents(events, count: 0)
+        XCTAssertEqual(events.names, [], "a superseded checkout must not report a refreshed artifact")
 
         XCTAssertNil(sdk.currentMachineFile, "the late checkout must not re-cache a grant")
         XCTAssertNil(sdk.cache.getOfflineToken())

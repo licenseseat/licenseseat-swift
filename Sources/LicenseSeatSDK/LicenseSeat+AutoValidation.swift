@@ -432,6 +432,9 @@ extension LicenseSeat {
         // example after the license end date moved earlier, or when that
         // machine file has expired). Newest artifact wins, in both directions.
         cache.clearMachineFile()
+        guard cache.getMachineFile() == nil else {
+            throw LicenseSeatError.cacheError
+        }
         anchorSignedIssuance(offlineToken.token.iat)
     }
 

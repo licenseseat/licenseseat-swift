@@ -63,8 +63,8 @@ extension LicenseSeat {
             fetched = true
             // Revocation, reset, or re-activation may have happened while the
             // key request was suspended: never vouch for a stale activation.
-            guard cachedLicenseMatches(identity), cache.getMachineFile() == machineFile else {
-                return makeOfflineValidationResponse(valid: false, code: "license_mismatch")
+            if let superseded = await supersededMachineFileOutcome(machineFile, identity: identity) {
+                return superseded
             }
         }
 
@@ -79,8 +79,8 @@ extension LicenseSeat {
         if case .failure(let code) = result, code == "signature_invalid",
            !fetched, allowNetwork,
            let refreshed = try? await getSigningKey(keyId: keyId) {
-            guard cachedLicenseMatches(identity), cache.getMachineFile() == machineFile else {
-                return makeOfflineValidationResponse(valid: false, code: "license_mismatch")
+            if let superseded = await supersededMachineFileOutcome(machineFile, identity: identity) {
+                return superseded
             }
             publicKey = refreshed
             fetched = true
@@ -100,6 +100,25 @@ extension LicenseSeat {
             }
             return makeMachineFileValidationResponse(payload)
         }
+    }
+
+    /// After a suspension: `nil` when the same activation still holds the
+    /// same machine file. A changed activation never gets a verdict from the
+    /// stale one; a machine file replaced by a concurrent refresh is verified
+    /// in its place (locally) rather than reported as a denial.
+    private func supersededMachineFileOutcome(
+        _ machineFile: MachineFile,
+        identity: CachedLicenseIdentity
+    ) async -> ValidationResponse?? {
+        guard cachedLicenseMatches(identity) else {
+            return .some(makeOfflineValidationResponse(valid: false, code: "license_mismatch"))
+        }
+        let current = cache.getMachineFile()
+        guard current != machineFile else { return nil }
+        guard let current else {
+            return .some(makeOfflineValidationResponse(valid: false, code: "license_mismatch"))
+        }
+        return .some(await verifyCachedMachineFileForAuthorization(current, allowNetwork: false))
     }
 
     private enum CachedMachineFileOutcome {

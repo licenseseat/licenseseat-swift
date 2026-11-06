@@ -103,6 +103,9 @@ extension LicenseSeat {
             // machine file's verdict later (for example after the license end
             // date was moved earlier), so it is discarded.
             cache.clearOfflineToken()
+            guard cache.getOfflineToken() == nil else {
+                throw LicenseSeatError.cacheError
+            }
             if let issuedAt = verification.payload?.iat {
                 anchorSignedIssuance(issuedAt)
             }
