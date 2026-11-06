@@ -222,6 +222,7 @@ public extension LicenseSeat {
             throw LicenseSeatError.invalidPublicKey
         }
 
+        let instant = authorizationSnapshot()
         do {
             let payload = try verifyMachineFileArtifact(
                 machineFile,
@@ -230,7 +231,8 @@ public extension LicenseSeat {
                     fingerprint: resolvedFingerprint,
                     publicKeyB64: publicKey,
                     productSlug: productSlug,
-                    now: authorizationTime()
+                    now: instant.effective,
+                    wallNow: instant.wall
                 )
             )
             // A verified artifact must describe the activation this

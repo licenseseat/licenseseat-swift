@@ -144,8 +144,8 @@ extension LicenseSeat {
                 throw OfflineVerificationFailure(code: "signature_invalid")
             }
             try validateOfflineIdentity(offlineToken)
-            let now = authorizationTime()
-            let nowUnix = Int(now.timeIntervalSince1970)
+            let instant = authorizationSnapshot()
+            let nowUnix = Int(instant.effective.timeIntervalSince1970)
             let clockSkewSeconds = offlineClockSkewSeconds(nowUnix: nowUnix)
             try validateOfflineTimeClaims(
                 offlineToken.token,
@@ -157,7 +157,7 @@ extension LicenseSeat {
                 nowUnix: nowUnix,
                 clockSkewSeconds: clockSkewSeconds
             )
-            try persistOfflineClockState(now: now, clockSkewSeconds: clockSkewSeconds)
+            try persistOfflineClockState(instant, clockSkewSeconds: clockSkewSeconds)
             return makeOfflineValidationResponse(valid: true, code: nil, token: offlineToken)
         } catch let failure as OfflineVerificationFailure {
             return makeOfflineValidationResponse(valid: false, code: failure.code)

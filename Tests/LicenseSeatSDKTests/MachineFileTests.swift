@@ -820,7 +820,7 @@ final class MachineFileTests: LicenseSeatTestCase {
     func testMachineFileExpiryIsEvaluatedAtTheMonotonicFloor() async throws {
         // #12: the machine-file path shares the authorization clock.
         let source = ManualClockSource()
-        sdk.authorizationClock = source.makeClock()
+        sdk.authorizationClock = source.makeTrustedClock()
         let now = Int(source.wall)
         let artifact = try makeSyntheticMachineFile(iat: now - 60, exp: now + 3_600)
 

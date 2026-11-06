@@ -41,6 +41,14 @@ final class ManualClockSource {
             monotonicClock: { [unowned self] in self.monotonic }
         )
     }
+
+    /// A clock that has already seen an authoritative online success whose
+    /// server time equalled the current (accurate) wall clock.
+    func makeTrustedClock() -> AuthorizationClock {
+        let clock = makeClock()
+        clock.anchor(trustedTime: Date(timeIntervalSince1970: wall))
+        return clock
+    }
 }
 
 // Linux discovery: every test method of a @MainActor suite must be async.
@@ -50,7 +58,7 @@ final class AuthorizationClockTests: LicenseSeatTestCase {
 
     func testMatchesTheWallClockWhileTheWallClockIsHonest() async {
         let source = ManualClockSource(wall: base)
-        let clock = source.makeClock()
+        let clock = source.makeTrustedClock()
 
         XCTAssertEqual(clock.now().timeIntervalSince1970, base)
         source.elapse(3_600)
@@ -58,9 +66,9 @@ final class AuthorizationClockTests: LicenseSeatTestCase {
         XCTAssertEqual(clock.wallClockLag(), 0)
     }
 
-    func testWallClockRolledBackInProcessIsRaisedToTheMonotonicFloor() async {
+    func testWallClockRolledBackAfterATrustedSampleIsRaisedToTheFloor() async {
         let source = ManualClockSource(wall: base)
-        let clock = source.makeClock()
+        let clock = source.makeTrustedClock()
 
         source.elapse(7_200)
         source.wall = base + 1_800 // wound back 90 minutes
@@ -69,11 +77,25 @@ final class AuthorizationClockTests: LicenseSeatTestCase {
         XCTAssertEqual(clock.wallClockLag(), 5_400)
     }
 
-    func testSleepNeverLagsTheWallClock() async {
-        // The system source counts through sleep, so the floor tracks the
-        // wall clock; even a source that did not would only fall behind it.
-        let source = ManualClockSource(wall: base)
+    func testWithoutATrustedSampleTheWallClockIsUsedAsIs() async {
+        // R2-1: a local reading is never a trusted epoch. A fast clock that
+        // is corrected and a rollback look identical; flooring on either
+        // would lock out the first. Cold sessions rely on the watermark.
+        let source = ManualClockSource(wall: base + 360) // six minutes fast
         let clock = source.makeClock()
+        source.elapse(60)
+        source.wall = base + 60 // corrected by NTP
+
+        XCTAssertFalse(clock.hasTrustedBaseline)
+        XCTAssertEqual(clock.now(tolerance: 300).timeIntervalSince1970, base + 60)
+        source.elapse(3_600)
+        source.wall = base // a rollback in a cold session is not floored
+        XCTAssertEqual(clock.now(tolerance: 300).timeIntervalSince1970, base)
+    }
+
+    func testSleepNeverLagsTheWallClock() async {
+        let source = ManualClockSource(wall: base)
+        let clock = source.makeTrustedClock()
 
         source.elapse(8 * 3_600)
         XCTAssertEqual(clock.now().timeIntervalSince1970, base + 8 * 3_600)
@@ -84,10 +106,8 @@ final class AuthorizationClockTests: LicenseSeatTestCase {
     }
 
     func testForwardClockErrorCorrectedByNTPDoesNotStickInTheFuture() async {
-        // A transiently wrong future clock must not leave the process living
-        // in the future after NTP corrects it; that would be a lockout.
         let source = ManualClockSource(wall: base)
-        let clock = source.makeClock()
+        let clock = source.makeTrustedClock()
 
         source.elapse(10)
         source.wall = base + 365 * 86_400
@@ -98,61 +118,77 @@ final class AuthorizationClockTests: LicenseSeatTestCase {
         XCTAssertEqual(clock.now().timeIntervalSince1970, base + 20)
     }
 
-    func testAnchorReBaselinesAndMayLowerTheFloor() async {
-        // Started with a clock that was an hour fast, then NTP corrected it.
-        let source = ManualClockSource(wall: base + 3_600)
-        let clock = source.makeClock()
-        source.elapse(60)
-        source.wall = base + 60
-        XCTAssertEqual(clock.now().timeIntervalSince1970, base + 3_660)
+    func testRollbackWithinToleranceOfTheTrustedFloorIsTheDocumentedWindow() async {
+        // R2-4: the skew allowance applies to the floor too. Rolling back by
+        // less than the tolerance is accepted; by more, it is floored.
+        let source = ManualClockSource(wall: base)
+        let clock = source.makeTrustedClock()
+        source.elapse(1_860)
 
-        clock.anchor() // authoritative online success
-
-        XCTAssertEqual(clock.now().timeIntervalSince1970, base + 60)
-        XCTAssertEqual(clock.wallClockLag(), 0)
+        source.wall = base + 1_860 - 120 // 2 minutes back
+        XCTAssertEqual(clock.now(tolerance: 300).timeIntervalSince1970, base + 1_740)
+        source.wall = base + 1_860 - 3_600 // an hour back
+        XCTAssertEqual(clock.now(tolerance: 300).timeIntervalSince1970, base + 1_860 - 300)
     }
 
-    func testToleranceAbsorbsAFastAnchorCorrectedByNTP() async {
-        // Anchored while two minutes fast, then corrected. Without slack the
-        // floor would sit two minutes in the future and expire grants early.
-        let source = ManualClockSource(wall: base + 120)
+    func testTrustedServerTimeSetsTheFloorAndAMissingDateKeepsIt() async {
+        let source = ManualClockSource(wall: base - 7_200) // two hours slow
         let clock = source.makeClock()
-        source.elapse(60)
-        source.wall = base + 60
 
-        XCTAssertEqual(clock.now().timeIntervalSince1970, base + 180)
-        XCTAssertEqual(clock.now(tolerance: 300).timeIntervalSince1970, base + 60)
-
-        // A genuine rollback beyond the tolerance is still floored.
-        source.elapse(3_600)
-        source.wall = base
-        XCTAssertEqual(clock.now(tolerance: 300).timeIntervalSince1970, base + 3_780 - 300)
-    }
-
-    func testTrustedServerTimeAnchorReplacesAWrongLocalAnchor() async {
-        let source = ManualClockSource(wall: base + 3_600) // an hour fast
-        let clock = source.makeClock()
-        source.wall = base
-
-        clock.anchor(trustedTime: Date(timeIntervalSince1970: base))
-        XCTAssertEqual(clock.now().timeIntervalSince1970, base)
-
-        // A slow local clock is raised to server time instead.
-        source.wall = base - 7_200
         clock.anchor(trustedTime: Date(timeIntervalSince1970: base))
         source.elapse(10)
         XCTAssertEqual(clock.now().timeIntervalSince1970, base + 10)
         XCTAssertEqual(clock.wallTime().timeIntervalSince1970, base - 7_190)
 
-        // A missing or nonsensical server time falls back to the wall clock.
+        // A later online success without a usable Date keeps the baseline.
+        clock.anchor(trustedTime: nil)
         clock.anchor(trustedTime: Date(timeIntervalSince1970: -.infinity))
-        XCTAssertEqual(clock.now().timeIntervalSince1970, base - 7_190)
+        source.elapse(10)
+        XCTAssertEqual(clock.now().timeIntervalSince1970, base + 20)
+
+        // A new trusted sample may lower it.
+        clock.anchor(trustedTime: Date(timeIntervalSince1970: source.wall))
+        XCTAssertEqual(clock.now().timeIntervalSince1970, source.wall)
+    }
+
+    func testAnImplausibleServerDateIsIgnored() async {
+        // R2-1: a proxy stamping 2099 must not expire valid grants.
+        let source = ManualClockSource(wall: base)
+        let clock = source.makeClock()
+
+        clock.anchor(trustedTime: Date(timeIntervalSince1970: 4_070_908_800)) // 2099
+        XCTAssertFalse(clock.hasTrustedBaseline)
+        XCTAssertEqual(clock.now().timeIntervalSince1970, base)
+
+        clock.anchor(trustedTime: Date(timeIntervalSince1970: base + AuthorizationClock.maximumTrustedLead + 1))
+        XCTAssertFalse(clock.hasTrustedBaseline)
+        clock.anchor(trustedTime: Date(timeIntervalSince1970: base + 3_600))
+        XCTAssertTrue(clock.hasTrustedBaseline)
+    }
+
+    func testSnapshotSamplesTheWallClockOnce() async {
+        let source = ManualClockSource(wall: base)
+        let clock = source.makeClock()
+        clock.anchor(trustedTime: Date(timeIntervalSince1970: base + 3_600))
+
+        let instant = clock.snapshot(tolerance: 300)
+        source.wall = base + 7_200 // the clock moves after sampling
+
+        XCTAssertEqual(instant.wall.timeIntervalSince1970, base)
+        XCTAssertEqual(instant.effective.timeIntervalSince1970, base + 3_300)
     }
 
     func testClocksAreSharedPerStorageScope() async {
         let scope = "clock_scope_\(UUID().uuidString)"
         XCTAssertTrue(AuthorizationClock.shared(scope: scope) === AuthorizationClock.shared(scope: scope))
         XCTAssertFalse(AuthorizationClock.shared(scope: scope) === AuthorizationClock.shared(scope: scope + "x"))
+
+        // R2-3: canonically equivalent but byte-different prefixes have
+        // separate caches, so they must not share a clock.
+        let composed = "caf\u{00E9}_\(UUID().uuidString)"
+        let decomposed = composed.replacingOccurrences(of: "\u{00E9}", with: "e\u{0301}")
+        XCTAssertEqual(composed, decomposed) // Swift String equality
+        XCTAssertFalse(AuthorizationClock.shared(scope: composed) === AuthorizationClock.shared(scope: decomposed))
     }
 
     func testHTTPDateParsing() async {
@@ -167,12 +203,12 @@ final class AuthorizationClockTests: LicenseSeatTestCase {
 
     func testUnavailableOrRegressingMonotonicSourceFallsBackToTheWallClock() async {
         let missing = ManualClockSource(wall: base, monotonic: nil)
-        let missingClock = missing.makeClock()
+        let missingClock = missing.makeTrustedClock()
         missing.wall = base - 3_600
         XCTAssertEqual(missingClock.now().timeIntervalSince1970, base - 3_600)
 
         let regressing = ManualClockSource(wall: base, monotonic: 10_000_000_000)
-        let regressingClock = regressing.makeClock()
+        let regressingClock = regressing.makeTrustedClock()
         regressing.monotonic = 1
         regressing.wall = base - 3_600
         XCTAssertEqual(regressingClock.now().timeIntervalSince1970, base - 3_600)
@@ -202,7 +238,7 @@ final class AuthorizationClockTests: LicenseSeatTestCase {
         )
         defer { sdk.reset() }
         let source = ManualClockSource()
-        sdk.authorizationClock = source.makeClock()
+        sdk.authorizationClock = source.makeTrustedClock()
 
         source.elapse(3_600)
         source.wall -= 3_600
@@ -213,13 +249,36 @@ final class AuthorizationClockTests: LicenseSeatTestCase {
         sdk.reset()
         XCTAssertEqual(sdk.authorizationClock.wallClockLag(), 3_600)
 
-        // Authoritative online success re-anchors both.
+        // An online success without a server Date anchors the watermark (on
+        // the wall clock, per the cross-SDK contract) but keeps the trusted
+        // floor: the local clock is never promoted to a trusted epoch.
         XCTAssertTrue(sdk.anchorAuthoritativeTime(Date(timeIntervalSince1970: source.wall)))
-        XCTAssertEqual(sdk.authorizationClock.wallClockLag(), 0)
+        XCTAssertEqual(sdk.authorizationClock.wallClockLag(), 3_600)
         XCTAssertEqual(
             try XCTUnwrap(sdk.lastSeenTimestamp()).timeIntervalSince1970,
             source.wall,
             accuracy: 0.001
         )
     }
-}
+
+    func testOnlyTheSampledWallReadingIsPersisted() async throws {
+        // R2-2: the wall clock moving between evaluation and persistence must
+        // not let the synthetic floor (or a later reading) into the watermark.
+        let sdk = LicenseSeat(
+            config: LicenseSeatConfig(
+                productSlug: "clock-app",
+                storagePrefix: "authorization_clock_test_\(UUID().uuidString)_"
+            )
+        )
+        defer { sdk.reset() }
+        let source = ManualClockSource(wall: base)
+        sdk.authorizationClock = source.makeClock()
+        sdk.authorizationClock.anchor(trustedTime: Date(timeIntervalSince1970: base + 3_600))
+
+        let instant = sdk.authorizationSnapshot()
+        XCTAssertEqual(instant.effective.timeIntervalSince1970, base + 3_300)
+        source.wall = base + 7_200
+        try sdk.persistOfflineClockState(instant, clockSkewSeconds: 300)
+
+        XCTAssertEqual(try XCTUnwrap(sdk.lastSeenTimestamp()).timeIntervalSince1970, base)
+    }}

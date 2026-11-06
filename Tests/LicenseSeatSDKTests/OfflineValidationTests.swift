@@ -492,7 +492,7 @@ final class OfflineValidationTests: LicenseSeatTestCase {
         // hours later the clock is wound back to T+30m: above the persisted
         // watermark, below the expiry. Only the monotonic floor knows.
         let source = ManualClockSource()
-        sdk.authorizationClock = source.makeClock()
+        sdk.authorizationClock = source.makeTrustedClock()
         let start = Int(source.wall)
         try cacheSignedToken(iat: start - 60, exp: start + 3_600)
 
@@ -507,38 +507,29 @@ final class OfflineValidationTests: LicenseSeatTestCase {
         XCTAssertEqual(second.code, "token_expired")
     }
 
-    func testInProcessBackwardClockCorrectionDoesNotLockOut() async throws {
-        // The clock was an hour fast when the app launched and verified;
-        // NTP then corrected it while the app kept running. Comparing the
-        // corrected wall clock with the watermark would report clock_tamper
-        // and lock a legitimate customer out until real time caught up.
+    func testRollbackInAColdSessionIsLeftToTheWatermark() async throws {
+        // Without a trusted sample the floor does not apply (R2-1); a
+        // rollback below the watermark is still clock_tamper, as in 0.5.x.
         let source = ManualClockSource()
         sdk.authorizationClock = source.makeClock()
         let start = Int(source.wall)
-        try cacheSignedToken(iat: start - 7_200, exp: start + 30 * 86_400)
-
+        try cacheSignedToken(iat: start - 60, exp: start + 30 * 86_400)
         let first = await sdk.verifyCachedOffline()
         XCTAssertTrue(first.valid, first.code ?? "")
 
         source.elapse(60)
         source.wall -= 3_600
-
         let second = await sdk.verifyCachedOffline()
-        XCTAssertTrue(second.valid, second.code ?? "")
-        // Only wall-clock readings are persisted: the ratchet keeps the
-        // earlier reading and never records the process-local floor.
-        XCTAssertEqual(
-            try XCTUnwrap(sdk.lastSeenTimestamp()).timeIntervalSince1970,
-            Double(start),
-            accuracy: 1
-        )
+        XCTAssertFalse(second.valid)
+        XCTAssertEqual(second.code, "clock_tamper")
     }
 
-    func testFastClockCorrectedWithinToleranceNeverExpiresAGrantEarly() async throws {
-        // Launched with a clock two minutes fast; NTP corrects it; the token
-        // expires at real T+30m. At real T+29m it must still be valid.
+    func testAFastLaunchClockCorrectedByNTPNeverExpiresAGrantEarly() async throws {
+        // R2-1: launched six minutes fast (beyond the 5-minute tolerance),
+        // corrected before verification; the token expires at real T+30m.
+        // At real T+29m it must still be valid.
         let trueStart = Date().timeIntervalSince1970
-        let source = ManualClockSource(wall: trueStart + 120)
+        let source = ManualClockSource(wall: trueStart + 360)
         sdk.authorizationClock = source.makeClock()
         try cacheSignedToken(iat: Int(trueStart) - 60, exp: Int(trueStart) + 1_800)
 
@@ -652,6 +643,38 @@ final class OfflineValidationTests: LicenseSeatTestCase {
             Date().timeIntervalSince1970,
             accuracy: 30
         )
+    }
+
+    func testAnImplausibleServerDateNeverAdvancesAuthorizationTime() async throws {
+        // R2-1: an otherwise valid response whose Date says 2099.
+        let source = ManualClockSource()
+        sdk.authorizationClock = source.makeClock()
+        cacheTestLicense()
+        let body = try JSONSerialization.data(withJSONObject: [
+            "object": "validation_result", "valid": true, "code": NSNull(), "message": NSNull(),
+            "warnings": NSNull(),
+            "license": [
+                "object": "license", "key": Self.testLicenseKey, "status": "active",
+                "starts_at": NSNull(), "expires_at": NSNull(), "mode": "hardware_locked",
+                "plan_key": "pro", "seat_limit": 5, "active_seats": 1,
+                "active_entitlements": [], "metadata": NSNull(),
+                "product": ["slug": Self.testProductSlug, "name": "Test App"]
+            ],
+            "activation": NSNull()
+        ] as [String: Any])
+        MockURLProtocol.requestHandler = { request in
+            (
+                HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil,
+                                headerFields: ["Content-Type": "application/json",
+                                               "Date": "Thu, 01 Jan 2099 00:00:00 GMT"])!,
+                body
+            )
+        }
+
+        _ = try await sdk.validate(licenseKey: Self.testLicenseKey)
+
+        XCTAssertFalse(sdk.authorizationClock.hasTrustedBaseline)
+        XCTAssertEqual(sdk.authorizationTime().timeIntervalSince1970, source.wall, accuracy: 0.001)
     }
 
     func testForwardThenBackwardTamperingIsStillCaughtByTheWatermark() async throws {

@@ -108,19 +108,25 @@ struct MachineFileVerificationContext {
     let fingerprint: String
     let publicKeyB64: String
     let productSlug: String
+    /// Authorization instant the claims are evaluated at.
     let now: Date
+    /// The wall-clock reading sampled together with `now`; the only value
+    /// the rollback watermark may record.
+    let wallNow: Date
 
     init(
         licenseKey: String,
         fingerprint: String,
         publicKeyB64: String,
         productSlug: String,
-        now: Date = Date()
+        now: Date = Date(),
+        wallNow: Date? = nil
     ) {
         self.licenseKey = licenseKey
         self.fingerprint = fingerprint
         self.publicKeyB64 = publicKeyB64
         self.productSlug = productSlug
         self.now = now
+        self.wallNow = min(wallNow ?? now, now)
     }
 }

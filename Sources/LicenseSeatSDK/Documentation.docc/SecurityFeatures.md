@@ -133,22 +133,25 @@ expired grant, without ever locking out a customer whose clock behaves normally:
   success (activation, validation, heartbeat) *anchors* it to the current time,
   which may lower it, so a transiently wrong future clock heals on the next
   online contact. `reset()` and `clear()` preserve it, like the installation ID.
-- **In-process monotonic floor.** Offline artifacts and entitlement expiry are
-  evaluated at `max(wall clock, anchor + monotonic elapsed − maxClockSkewMs)`.
-  The anchor is taken when the SDK starts and re-taken on every authoritative
-  online success, on the server's HTTP `Date` when the response carries one
-  (otherwise on the wall clock). The monotonic clock cannot be set and counts
-  through sleep, so rolling the clock back while the app runs cannot make time
-  appear to go backwards, even by less than the time since the last recorded
-  verification. Lockout safety: the result is never earlier than the wall
-  clock, so the watermark check only becomes more lenient; a fast clock that
-  NTP corrects is absorbed by the skew tolerance (and fully by the next
-  server-time anchor); only wall-clock readings are ever persisted, so a
-  relaunch with a correct clock is never compared with a synthetic future;
-  forward wall-clock excursions are not remembered, so a briefly wrong future
-  clock settles back to real time. The floor is shared by every SDK instance
-  with the same storage prefix and lives for the process: a relaunch or reboot
-  starts a fresh anchor.
+- **In-process monotonic floor (after a trusted time sample).** Once an
+  authoritative online success (activation, validation, heartbeat) has
+  carried a plausible server `Date` (no more than 24 hours ahead of the local
+  clock), offline artifacts and entitlement expiry are evaluated at
+  `max(wall clock, serverTime + monotonic elapsed − maxClockSkewMs)` for the
+  rest of the process. The monotonic clock cannot be set and counts through
+  sleep, so winding the clock back by more than `maxClockSkewMs` cannot revive
+  an expired grant. A later success without a usable `Date` keeps the
+  baseline; one with a plausible `Date` replaces it.
+
+  Limits, by design: the local clock is never a trusted sample (a fast clock
+  that NTP corrects and a deliberate rollback look identical, so flooring on
+  it would either expire grants early or reopen rollback), so a cold offline
+  session with no online success relies on the persisted watermark alone, as
+  before 0.6. Rollback by less than `maxClockSkewMs` below the floor is
+  accepted. The floor is never persisted: only the wall-clock reading sampled
+  together with each accepted verification ratchets the watermark. It is
+  shared by every SDK instance with the same storage prefix (exact bytes) and
+  lives for the process.
 
 Time zones and daylight saving time never enter either check: both operate on
 UTC seconds since 1970.

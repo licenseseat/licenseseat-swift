@@ -76,7 +76,7 @@ final class EntitlementTests: LicenseSeatTestCase {
         // entitlement whose expiry has really passed.
         let sdk = try XCTUnwrap(sdk)
         let source = ManualClockSource()
-        sdk.authorizationClock = source.makeClock()
+        sdk.authorizationClock = source.makeTrustedClock()
         let entitlement = Entitlement(
             key: "trial-access",
             expiresAt: Date(timeIntervalSince1970: source.wall + 3_600)

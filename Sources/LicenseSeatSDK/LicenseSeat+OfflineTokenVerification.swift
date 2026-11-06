@@ -184,8 +184,9 @@ extension LicenseSeat {
     /// the in-process monotonic floor. Returns `false` if the watermark could
     /// not be stored.
     ///
-    /// The in-process floor is anchored on the server's HTTP `Date` when the
-    /// response carried one; the persisted watermark keeps the cross-SDK
+    /// The in-process floor is anchored only on the server's HTTP `Date` (a
+    /// trusted sample, see ``AuthorizationClock``); without one, any existing
+    /// trusted baseline is kept. The persisted watermark keeps the cross-SDK
     /// contract and records the local wall clock.
     func anchorAuthoritativeTime(_ timestamp: Date) -> Bool {
         authorizationClock.anchor(trustedTime: apiClient.lastServerDate)
@@ -196,23 +197,28 @@ extension LicenseSeat {
     /// clock, raised to the monotonic floor (less the configured clock-skew
     /// tolerance) if the wall clock has been wound behind it.
     func authorizationTime() -> Date {
+        authorizationSnapshot().effective
+    }
+
+    /// One consistent reading: the wall clock sampled once plus the
+    /// authorization instant derived from it.
+    func authorizationSnapshot() -> AuthorizationInstant {
         let skewMs = config.maxClockSkewMs
         let tolerance = skewMs.isFinite && skewMs > 0 ? min(skewMs, 86_400_000) / 1_000 : 0
-        return authorizationClock.now(tolerance: tolerance)
+        return authorizationClock.snapshot(tolerance: tolerance)
     }
 
     /// Rollback check plus `max()` ratchet after a successful offline
-    /// verification. `now` is the authorization time the claims were checked
-    /// at; only the *wall-clock* reading is persisted, never the process-local
-    /// floor, so a later relaunch with a correct clock is never compared with
-    /// a synthetic future.
-    func persistOfflineClockState(now: Date, clockSkewSeconds: Int) throws {
+    /// verification. Claims were checked at `instant.effective`; only the wall
+    /// reading taken *in the same sample* is persisted — never the floor, and
+    /// never a later re-sample — so a relaunch with a correct clock is never
+    /// compared with a synthetic future.
+    func persistOfflineClockState(_ instant: AuthorizationInstant, clockSkewSeconds: Int) throws {
         if let lastSeen = cache.getLastSeenTimestamp(),
-           now.timeIntervalSince1970 + Double(clockSkewSeconds) < lastSeen {
+           instant.effective.timeIntervalSince1970 + Double(clockSkewSeconds) < lastSeen {
             throw OfflineVerificationFailure(code: "clock_tamper")
         }
-        let wall = min(authorizationClock.wallTime(), now)
-        guard cache.setLastSeenTimestamp(wall.timeIntervalSince1970) else {
+        guard cache.setLastSeenTimestamp(instant.wall.timeIntervalSince1970) else {
             throw OfflineVerificationFailure(code: "cache_error")
         }
     }

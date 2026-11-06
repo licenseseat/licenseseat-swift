@@ -15,60 +15,69 @@ import Glibc
 import Musl
 #endif
 
+/// One reading of the authorization clock: the wall clock as sampled, and the
+/// authorization instant derived from it. Claims are evaluated at
+/// `effective`; only `wall` is ever persisted.
+struct AuthorizationInstant: Equatable {
+    let wall: Date
+    let effective: Date
+}
+
 /// The instant every local authorization decision is evaluated at.
 ///
 /// The persisted clock-rollback watermark only remembers the last moment the
 /// SDK *recorded*. Between two recordings the wall clock can be wound back
-/// without falling below that watermark: verify a signed grant at 09:00, keep
-/// the app running until 11:00, set the clock to 09:30, and a grant that
-/// expired at 10:00 would look valid again. A monotonic clock cannot be set
-/// by the user, so an anchor plus monotonic elapsed time is a lower bound on
-/// the real current time for as long as the process lives:
+/// without falling below it. A monotonic clock cannot be set, so a **trusted**
+/// time sample plus monotonic elapsed time is a lower bound on real time for
+/// as long as the process lives:
 ///
-///     floor             = anchor + monotonicElapsed
+///     floor             = trustedSample + monotonicElapsed
 ///     authorizationTime = max(wallNow, floor − tolerance)
 ///
 /// where `tolerance` is the configured `maxClockSkewMs`.
 ///
-/// **Anchor.** The process starts anchored on its own wall clock. Every
-/// authoritative online success re-anchors it — on the server's HTTP `Date`
-/// when the response carried one (a trusted lower bound on real time), else on
-/// the wall clock — mirroring the persisted watermark's anchor-on-online-
-/// success contract. The anchor is shared by every `LicenseSeat` instance with
-/// the same storage prefix in this process, so replacing the instance (for
-/// example `configure(force: true)`) cannot be used to discard it.
+/// **Only trusted samples create a floor.** A trusted sample is the licensing
+/// server's HTTP `Date` on an authoritative online success (activation,
+/// validation, heartbeat), accepted only if it is no more than
+/// ``maximumTrustedLead`` ahead of the local wall clock (a proxy stamping
+/// 2099 is ignored). The local wall clock is never a trusted sample: a fast
+/// clock that NTP later corrects and a deliberate rollback produce identical
+/// wall/monotonic observations, so flooring on the local clock either locks a
+/// legitimate customer out early or reopens rollback. Until the first trusted
+/// sample in this process, `authorizationTime == wall` and rollback detection
+/// is the persisted watermark's alone (the pre-0.6 behaviour). A later online
+/// success without a usable `Date` keeps the existing trusted baseline.
 ///
-/// **Lockout safety** is the other half of the contract:
+/// Lockout safety:
+/// - Never earlier than the wall clock; the watermark comparison only becomes
+///   more lenient.
+/// - No floor from an untrusted local reading, so a clock that was wrong at
+///   launch can never expire a grant early.
+/// - Only wall-clock readings are persisted (``AuthorizationInstant/wall``,
+///   sampled once with the effective time), never the floor.
+/// - The monotonic source keeps counting through sleep; a lagging source only
+///   weakens detection. UTC throughout, so time zones and DST never enter.
 ///
-/// - The result is never earlier than the wall clock, so a check that passes
-///   on wall-clock time cannot start failing because of a *slow* wall clock,
-///   and the watermark comparison (`authorizationTime + skew < watermark`)
-///   can only become more lenient.
-/// - A wall clock that was fast when the anchor was taken and is then
-///   corrected by NTP moves the floor ahead of real time by the error. The
-///   `tolerance` absorbs errors up to `maxClockSkewMs`; a server-time anchor
-///   (the next online success) removes the error entirely.
-/// - Only wall-clock readings are ever persisted; the floor is process-local
-///   and never written to the watermark, so a relaunch or reboot starts fresh
-///   and a corrected clock is never compared against a synthetic future.
-/// - The monotonic source keeps counting through system sleep (Darwin
-///   `CLOCK_MONOTONIC`, Linux `CLOCK_BOOTTIME`). Were it ever to lag, the floor
-///   would only fall behind real time — weaker detection, never a lockout.
-/// - Time zones and daylight saving time do not exist at this layer: every
-///   value is seconds since 1970 UTC.
-/// - Forward wall-clock excursions are not remembered: a briefly wrong future
-///   clock settles back to real time once corrected. Forward-then-backward
-///   *tampering* during which an offline verification succeeded is still
-///   caught by the persisted watermark.
+/// Known, bounded limits (documented, tested):
+/// - Rollback by less than `tolerance` below the trusted floor is accepted
+///   (the skew allowance applies to the floor too).
+/// - A cold offline session with no trusted sample relies on the persisted
+///   watermark only.
 @MainActor
 final class AuthorizationClock {
     typealias WallClock = @MainActor () -> TimeInterval
     typealias MonotonicClock = @MainActor () -> UInt64?
 
+    /// How far ahead of the local wall clock a server time may be and still
+    /// be trusted. A local clock slower than this gets no floor (the
+    /// persisted watermark still applies); an implausible server/proxy date
+    /// can never move authorization time more than this far ahead.
+    static let maximumTrustedLead: TimeInterval = 24 * 3_600
+
     private let wallClock: WallClock
     private let monotonicClock: MonotonicClock
-    private var anchorWall: TimeInterval
-    private var anchorMonotonic: UInt64?
+    private var trustedSample: TimeInterval?
+    private var trustedMonotonic: UInt64?
 
     /// - Parameters:
     ///   - wallClock: Seconds since 1970 UTC. Defaults to the system clock.
@@ -80,44 +89,57 @@ final class AuthorizationClock {
     ) {
         self.wallClock = wallClock
         self.monotonicClock = monotonicClock
-        self.anchorWall = wallClock()
-        self.anchorMonotonic = monotonicClock()
     }
 
     // MARK: - Process-wide scope
 
-    private static var clocksByScope: [String: AuthorizationClock] = [:]
+    /// Keyed by the scope's exact UTF-8 bytes, matching how the storage
+    /// namespace is derived (Swift `String` equality would merge canonically
+    /// equivalent but byte-different prefixes that have separate caches).
+    private static var clocksByScope: [[UInt8]: AuthorizationClock] = [:]
 
     /// The clock shared by every SDK instance using `scope` (the storage
     /// prefix) in this process.
     static func shared(scope: String) -> AuthorizationClock {
-        if let clock = clocksByScope[scope] { return clock }
+        let key = Array(scope.utf8)
+        if let clock = clocksByScope[key] { return clock }
         let clock = AuthorizationClock()
-        clocksByScope[scope] = clock
+        clocksByScope[key] = clock
         return clock
     }
 
     // MARK: - Reading
 
-    /// The current wall-clock reading, the only time value ever persisted.
+    /// The current wall-clock reading.
     func wallTime() -> Date {
         Date(timeIntervalSince1970: wallClock())
     }
 
-    /// The current authorization instant: the wall clock, raised to the
-    /// monotonic floor (less `tolerance` seconds) when the wall clock has been
-    /// moved behind it.
-    func now(tolerance: TimeInterval = 0) -> Date {
+    /// Whether a trusted sample has established a floor in this process.
+    var hasTrustedBaseline: Bool { trustedSample != nil }
+
+    /// One consistent reading: the wall clock sampled once, and the
+    /// authorization instant derived from that same sample.
+    func snapshot(tolerance: TimeInterval = 0) -> AuthorizationInstant {
         let wall = wallClock()
         let slack = tolerance.isFinite ? max(0, tolerance) : 0
         guard let floor = monotonicFloor(), floor - slack > wall else {
-            return Date(timeIntervalSince1970: wall)
+            let date = Date(timeIntervalSince1970: wall)
+            return AuthorizationInstant(wall: date, effective: date)
         }
-        return Date(timeIntervalSince1970: floor - slack)
+        return AuthorizationInstant(
+            wall: Date(timeIntervalSince1970: wall),
+            effective: Date(timeIntervalSince1970: floor - slack)
+        )
     }
 
-    /// How far the wall clock currently trails the monotonic floor, in seconds
-    /// (zero when it does not). Diagnostic only.
+    /// The current authorization instant (see ``snapshot(tolerance:)``).
+    func now(tolerance: TimeInterval = 0) -> Date {
+        snapshot(tolerance: tolerance).effective
+    }
+
+    /// How far the wall clock currently trails the trusted floor, in seconds
+    /// (zero when it does not or there is no trusted floor). Diagnostic only.
     func wallClockLag() -> TimeInterval {
         guard let floor = monotonicFloor() else { return 0 }
         return max(0, floor - wallClock())
@@ -125,27 +147,28 @@ final class AuthorizationClock {
 
     // MARK: - Anchoring
 
-    /// Re-baseline after authoritative online acceptance. `trustedTime` is the
-    /// server's `Date`; without one the current wall clock is used. Either may
-    /// lower the floor (for example after NTP corrected a fast clock).
+    /// Record authoritative online acceptance. A plausible `trustedTime` (the
+    /// server's `Date`) becomes the new trusted baseline, which may lower the
+    /// floor. Without one, an existing trusted baseline is kept unchanged.
     func anchor(trustedTime: Date? = nil) {
-        let trusted = trustedTime?.timeIntervalSince1970
-        if let trusted, trusted.isFinite, trusted > 0 {
-            anchorWall = trusted
-        } else {
-            anchorWall = wallClock()
+        guard let trusted = trustedTime?.timeIntervalSince1970,
+              trusted.isFinite, trusted > 0,
+              trusted <= wallClock() + Self.maximumTrustedLead,
+              let monotonic = monotonicClock() else {
+            return
         }
-        anchorMonotonic = monotonicClock()
+        trustedSample = trusted
+        trustedMonotonic = monotonic
     }
 
     private func monotonicFloor() -> TimeInterval? {
-        guard anchorWall.isFinite, anchorWall > 0,
-              let anchorMonotonic,
+        guard let trustedSample, trustedSample.isFinite, trustedSample > 0,
+              let trustedMonotonic,
               let current = monotonicClock(),
-              current >= anchorMonotonic else {
+              current >= trustedMonotonic else {
             return nil
         }
-        let floor = anchorWall + Double(current - anchorMonotonic) / 1_000_000_000
+        let floor = trustedSample + Double(current - trustedMonotonic) / 1_000_000_000
         return floor.isFinite ? floor : nil
     }
 

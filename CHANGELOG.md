@@ -10,19 +10,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Security
 
 - Offline authorization time is now paired with a monotonic process clock
-  (#12). Offline tokens, machine files, and entitlement expiry are evaluated at
-  `max(wall clock, anchor + monotonic elapsed − maxClockSkewMs)`, so winding
-  the system clock back while the app runs can no longer revive an expired
-  grant, including by less than the time since the last recorded watermark.
-  The anchor is re-taken on every authoritative online success, on the
-  server's HTTP `Date` when present, and is shared by SDK instances with the
-  same storage prefix (replacing the instance does not discard it). The floor
-  counts through sleep, never runs behind the wall clock, is never persisted
-  (the watermark still records wall-clock readings only), and does not
-  remember forward wall-clock excursions. The persisted watermark's cross-SDK
-  contract is unchanged: anchor on online success, `max` ratchet offline,
-  preserved by `reset()`/`clear()`. Side effect: an in-session NTP correction
-  of a fast clock no longer reports `clock_tamper`.
+  (#12), anchored on a **trusted** time sample: the licensing server's HTTP
+  `Date` on an authoritative online success (ignored if more than 24 hours
+  ahead of the local clock; a later success without one keeps the baseline).
+  From then on, offline tokens, machine files, and entitlement expiry are
+  evaluated at `max(wall clock, serverTime + monotonic elapsed −
+  maxClockSkewMs)`, so winding the clock back in-process can no longer revive
+  an expired grant. The local clock is never treated as trusted, so a clock
+  that was wrong at launch can never expire a grant early; a cold offline
+  session relies on the persisted watermark alone, as before. Only the
+  wall-clock reading sampled with each accepted verification is persisted.
+  Floors are shared per storage prefix (exact bytes). The persisted
+  watermark's cross-SDK contract is unchanged: anchor on online success, `max`
+  ratchet offline, preserved by `reset()`/`clear()`.
 
 ## [0.5.2] - 2026-08-19
 
