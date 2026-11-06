@@ -85,7 +85,7 @@ Add LicenseSeat to your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/licenseseat/licenseseat-swift.git", from: "0.4.2")
+    .package(url: "https://github.com/licenseseat/licenseseat-swift.git", from: "0.6.0")
 ]
 ```
 
@@ -963,7 +963,7 @@ License keys and installation identifiers are sent together and are therefore tr
 | Field | Example | Purpose |
 |-------|---------|---------|
 | `sdk_name` | `swift` | Identifies the SDK platform |
-| `sdk_version` | `0.4.2` | SDK adoption tracking |
+| `sdk_version` | `0.6.0` | SDK adoption tracking |
 | `os_name` | `macOS` | Platform distribution |
 | `os_version` | `15.2.0` | OS breakdown |
 | `platform` | `native` | Runtime platform |
@@ -1081,17 +1081,17 @@ That's it! Swift Package Manager uses git tags for versioning. Once a tag is pus
 
 ```swift
 // Users can now specify the new version
-.package(url: "https://github.com/licenseseat/licenseseat-swift.git", from: "0.4.2")
+.package(url: "https://github.com/licenseseat/licenseseat-swift.git", from: "0.6.0")
 ```
 
 ### Version Requirements for Users
 
 | Requirement      | Example                         | Description                          |
 | ---------------- | ------------------------------- | ------------------------------------ |
-| `from:`          | `from: "0.4.2"`                 | Any version >= 0.4.2 (recommended)   |
-| `exact:`         | `exact: "0.4.2"`                | Exactly version 0.4.2                |
-| `upToNextMajor:` | `.upToNextMajor(from: "0.4.2")` | 0.x.x versions only                  |
-| `upToNextMinor:` | `.upToNextMinor(from: "0.4.2")` | 0.4.x versions only                  |
+| `from:`          | `from: "0.6.0"`                 | Any version >= 0.6.0 (recommended)   |
+| `exact:`         | `exact: "0.6.0"`                | Exactly version 0.6.0                |
+| `upToNextMajor:` | `.upToNextMajor(from: "0.6.0")` | 0.x.x versions only                  |
+| `upToNextMinor:` | `.upToNextMinor(from: "0.6.0")` | 0.6.x versions only                  |
 | `branch:`        | `branch: "master"`              | Latest from branch (for development) |
 
 ### CI/CD

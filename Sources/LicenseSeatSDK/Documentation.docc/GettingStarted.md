@@ -10,7 +10,7 @@ Add the package with Swift Package Manager:
 dependencies: [
     .package(
         url: "https://github.com/licenseseat/licenseseat-swift.git",
-        from: "0.4.2"
+        from: "0.6.0"
     )
 ]
 ```

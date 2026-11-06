@@ -5,7 +5,7 @@ All notable changes to LicenseSeat will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.6.0] - 2026-11-06
 
 ### Changed
 
@@ -242,6 +242,7 @@ with (and in places beyond) the Rust SDK.
 - Refresh README and DocC documentation against the actual 0.4.2 API and security behavior
 - Correct the initial changelog entry to the release tag that actually exists (`v0.1.0`)
 
+[0.6.0]: https://github.com/licenseseat/licenseseat-swift/compare/v0.5.2...v0.6.0
 [0.4.2]: https://github.com/licenseseat/licenseseat-swift/compare/v0.4.1...v0.4.2
 
 ## [0.4.1] - 2026-02-09
