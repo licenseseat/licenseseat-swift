@@ -175,7 +175,11 @@ public final class LicenseSeat {
     /// activation it was made for. Anything persisted by a previous process
     /// is untrusted until an online response or verified offline artifact
     /// re-establishes it. See ``isLicenseStateTrusted``.
-    internal var runtimeTrust: (identity: CachedLicenseIdentity, source: TrustedLicenseSource)?
+    internal var runtimeTrust: (
+        identity: CachedLicenseIdentity,
+        source: TrustedLicenseSource,
+        validation: ValidationResponse?
+    )?
 
     /// Most recent successful heartbeat acknowledgement in this process.
     public internal(set) var lastHeartbeatResponse: HeartbeatResponse?

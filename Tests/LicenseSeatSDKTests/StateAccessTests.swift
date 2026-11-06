@@ -279,6 +279,59 @@ final class StateAccessTests: LicenseSeatTestCase {
         XCTAssertFalse(sdk.isLicenseStateTrusted)
     }
 
+    func testRestoreIsNotReportedOnANonAuthoritativeFailure() async throws {
+        // 429: no fallback under .networkOnly, persisted status stays .active,
+        // but nothing was re-established.
+        try cachePersistedLicense(validated: true)
+        await relaunch()
+        MockURLProtocol.requestHandler = {
+            try Self.json($0, 429, ["error": ["code": "rate_limited", "message": "Slow down"]])
+        }
+
+        let result = await sdk.restoreLicense()
+
+        XCTAssertFalse(result.restored)
+        XCTAssertNotNil(result.error)
+        guard case .active = result.status else {
+            return XCTFail("persisted status is still reported, got \(result.status)")
+        }
+    }
+
+    func testRestoreRevalidatesAfterADenial() async throws {
+        try cachePersistedLicense(validated: true)
+        let denial = Self.validationJSON(valid: false)
+        MockURLProtocol.requestHandler = { try Self.json($0, 200, denial) }
+        _ = try await sdk.validate(licenseKey: Self.licenseKey)
+        XCTAssertEqual(sdk.currentTrustedLicenseSource, .failClosedDenial)
+
+        let body = Self.validationJSON()
+        var requests = 0
+        MockURLProtocol.requestHandler = { request in
+            requests += 1
+            return try Self.json(request, 200, body)
+        }
+        let result = await sdk.restoreLicense()
+
+        XCTAssertEqual(requests, 1, "a denial is re-checked online")
+        XCTAssertTrue(result.restored)
+        XCTAssertEqual(sdk.currentTrustedLicenseSource, .onlineResponse)
+    }
+
+    func testRevocationDropsTrust() async throws {
+        try cachePersistedLicense(validated: false)
+        MockURLProtocol.requestHandler = { try Self.json($0, 200, Self.validationJSON()) }
+        _ = try await sdk.validate(licenseKey: Self.licenseKey)
+        XCTAssertTrue(sdk.isLicenseStateTrusted)
+
+        MockURLProtocol.requestHandler = {
+            try Self.json($0, 422, ["error": ["code": "revoked", "message": "Revoked"]])
+        }
+        do { _ = try await sdk.validate(licenseKey: Self.licenseKey) } catch {}
+
+        XCTAssertFalse(sdk.isLicenseStateTrusted)
+        XCTAssertNil(sdk.currentTrustedLicense)
+    }
+
     func testRestoreAppliesAnAuthoritativeRefusal() async throws {
         try cachePersistedLicense(validated: true)
         await relaunch()

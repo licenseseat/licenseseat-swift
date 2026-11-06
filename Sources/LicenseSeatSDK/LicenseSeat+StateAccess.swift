@@ -15,7 +15,9 @@ extension LicenseSeat {
             runtimeTrust = nil
             return
         }
-        runtimeTrust = (CachedLicenseIdentity(license), source)
+        // Hold the decision itself in memory: what this process established,
+        // not whatever the shared persisted cache says later.
+        runtimeTrust = (CachedLicenseIdentity(license), source, license.validation)
     }
 
     /// A verified artifact establishes access; a rejected one is a fail-closed
@@ -53,9 +55,9 @@ public extension LicenseSeat {
     /// signed offline artifact, or a fail-closed denial — for the activation
     /// that is cached right now.
     ///
-    /// `false` means the cached state was persisted by an earlier process and
-    /// has not been re-established yet (for example right after launch with
-    /// no network and no offline artifact). ``getStatus()`` still reports that
+    /// `false` means nothing is cached, or the cached state was persisted by
+    /// an earlier process and has not been re-established yet (for example
+    /// right after launch with no network and no offline artifact). ``getStatus()`` still reports that
     /// persisted state; use this to tell the two apart.
     var isLicenseStateTrusted: Bool {
         currentRuntimeTrust != nil
@@ -74,7 +76,7 @@ public extension LicenseSeat {
     var currentTrustedLicense: LicenseResponse? {
         guard let source = currentRuntimeTrust,
               source != .failClosedDenial,
-              let validation = cache.getLicense()?.validation,
+              let validation = runtimeTrust?.validation,
               validation.valid else {
             return nil
         }
@@ -149,7 +151,7 @@ public extension LicenseSeat {
         var failure: (any Error)?
         if let source = currentRuntimeTrust, source != .failClosedDenial {
             // Already re-established by this process; no network request.
-            validation = cachedLicense.validation
+            validation = runtimeTrust?.validation
         } else {
             do {
                 validation = try await validate(licenseKey: cachedLicense.licenseKey)
@@ -158,11 +160,15 @@ public extension LicenseSeat {
             }
         }
 
+        // Restored means this process actually re-established access. A
+        // non-authoritative failure (rate limit, auth, transport without
+        // fallback) leaves the persisted status in place, which is reported
+        // in `status` but is not a restoration.
         let status = getStatus()
         let restored: Bool
         switch status {
         case .active, .offlineValid:
-            restored = true
+            restored = failure == nil && currentRuntimeTrust != nil
         default:
             restored = false
         }

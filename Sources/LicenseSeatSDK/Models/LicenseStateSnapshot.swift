@@ -49,8 +49,9 @@ public struct LicenseStateSnapshot: Equatable, Sendable {
 
 /// The outcome of ``LicenseSeat/restoreLicense()``.
 public struct RestoreResult {
-    /// Whether the cached license now grants access (`.active` or
-    /// `.offlineValid`).
+    /// Whether this process re-established access for the cached license
+    /// (an online response or a verified offline artifact). `false` whenever
+    /// `error` is set, even if `status` still reports a persisted grant.
     public let restored: Bool
     /// Status after the restore attempt.
     public let status: LicenseStatus
