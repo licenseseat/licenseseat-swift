@@ -7,21 +7,26 @@ Observe license lifecycle transitions without polling SDK state.
 The closure API returns a cancellable. Retain it for as long as events are needed:
 
 ```swift
-let subscription = LicenseSeat.shared.on("validation:success") { payload in
+let subscription = LicenseSeat.shared.on(.validationSuccess) { payload in
     refreshLicensedUI()
 }
 ```
+
+Every event has a typed ``EventKind`` case whose raw value is the wire name,
+so `on(.validationSuccess)` and `on("validation:success")` are
+interchangeable. Prefer the enum: a misspelled case does not compile, while a
+misspelled string silently never fires. Each case documents its payload.
 
 Combine provides a filtered publisher and a true all-events publisher. The all-events publisher receives newly introduced event names automatically.
 
 ```swift
 LicenseSeat.shared.eventPublisher
     .sink { event in
-        print(event.name)
+        print(event.name, event.kind as Any) // kind is nil only for names newer than this SDK
     }
     .store(in: &cancellables)
 
-LicenseSeat.shared.eventPublisher(for: "heartbeat:error")
+LicenseSeat.shared.eventPublisher(for: .heartbeatError)
     .sink { event in
         report(event.error)
     }
@@ -32,20 +37,20 @@ Handlers are delivered on the main queue.
 
 ## Lifecycle Events
 
-| Area | Events |
+| Area | Events (`EventKind` case) |
 | --- | --- |
-| Cached state | `license:loaded`, `sdk:reset` |
-| Activation | `activation:start`, `activation:success`, `activation:error` |
-| Validation | `validation:start`, `validation:success`, `validation:failed`, `validation:error` |
-| Offline validation | `validation:offline-success`, `validation:offline-failed` |
-| Background work | `validation:auto-failed`, `validation:auth-failed`, `autovalidation:cycle`, `autovalidation:stopped` |
-| Invalidation | `license:revoked` |
-| Deactivation | `deactivation:start`, `deactivation:success`, `deactivation:error` |
-| Connectivity | `network:online`, `network:offline` |
-| Offline assets | `offlineAssets:ready`, `offlineAssets:fetchError`, `offlineToken:fetching`, `offlineToken:fetched`, `offlineToken:fetchError`, `offlineToken:ready`, `offlineToken:verified`, `offlineToken:verificationFailed` |
-| Machine files | `machineFile:fetching`, `machineFile:fetched`, `machineFile:fetchError`, `machineFile:ready`, `machineFile:verified`, `machineFile:verificationFailed` |
-| Heartbeat | `heartbeat:success`, `heartbeat:error` |
-| General errors | `sdk:error` |
+| Cached state | `license:loaded` (`.licenseLoaded`), `sdk:reset` (`.sdkReset`), `sdk:error` (`.sdkError`) |
+| Activation | `activation:start` (`.activationStart`), `activation:success` (`.activationSuccess`), `activation:error` (`.activationError`) |
+| Validation | `validation:start` (`.validationStart`), `validation:success` (`.validationSuccess`), `validation:failed` (`.validationFailed`), `validation:error` (`.validationError`) |
+| Offline validation | `validation:offline-success` (`.validationOfflineSuccess`), `validation:offline-failed` (`.validationOfflineFailed`) |
+| Background work | `validation:auto-failed` (`.validationAutoFailed`), `validation:auth-failed` (`.validationAuthFailed`), `autovalidation:cycle` (`.autoValidationCycle`), `autovalidation:stopped` (`.autoValidationStopped`) |
+| Invalidation | `license:revoked` (`.licenseRevoked`) |
+| Deactivation | `deactivation:start` (`.deactivationStart`), `deactivation:success` (`.deactivationSuccess`), `deactivation:error` (`.deactivationError`) |
+| Connectivity | `network:online` (`.networkOnline`), `network:offline` (`.networkOffline`) |
+| Offline refresh | `offlineAssets:ready` (`.offlineAssetsReady`), `offlineAssets:fetchError` (`.offlineAssetsFetchError`) |
+| Legacy offline tokens | `offlineToken:fetching` (`.offlineTokenFetching`), `offlineToken:fetched` (`.offlineTokenFetched`), `offlineToken:fetchError` (`.offlineTokenFetchError`), `offlineToken:ready` (`.offlineTokenReady`), `offlineToken:verified` (`.offlineTokenVerified`), `offlineToken:verificationFailed` (`.offlineTokenVerificationFailed`) |
+| Machine files | `machineFile:fetching` (`.machineFileFetching`), `machineFile:fetched` (`.machineFileFetched`), `machineFile:fetchError` (`.machineFileFetchError`), `machineFile:ready` (`.machineFileReady`), `machineFile:verified` (`.machineFileVerified`), `machineFile:verificationFailed` (`.machineFileVerificationFailed`) |
+| Heartbeat | `heartbeat:success` (`.heartbeatSuccess`), `heartbeat:error` (`.heartbeatError`) |
 
 `license:revoked` is the compatibility event for any authoritative terminal invalidation, including suspended, expired, inactive, missing-license, and missing-activation decisions. Inspect its dictionary fields `code`, `status`, and `message` instead of assuming the reason is literally revocation.
 

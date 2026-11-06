@@ -51,7 +51,7 @@ extension LicenseSeat {
     }
 
     private func handleNetworkReconnection() {
-        eventBus.emit("network:online", [:])
+        eventBus.emit(.networkOnline, [:])
         stopConnectivityPolling()
 
         if let licenseKey = currentAutoLicenseKey {
@@ -67,7 +67,7 @@ extension LicenseSeat {
     }
 
     private func handleNetworkDisconnection() {
-        eventBus.emit("network:offline", [:])
+        eventBus.emit(.networkOffline, [:])
         stopAutoValidation()
         stopHeartbeat()
         stopOfflineRefresh()

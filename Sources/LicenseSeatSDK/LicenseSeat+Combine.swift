@@ -64,18 +64,24 @@ extension LicenseSeat {
     public func eventPublisher(for eventName: String) -> EventPublisher {
         EventPublisher(eventName: eventName, eventBus: eventBus)
     }
+
+    /// A publisher for one documented event. Equivalent to
+    /// `eventPublisher(for: kind.rawValue)`, but a typo does not compile.
+    public func eventPublisher(for kind: EventKind) -> EventPublisher {
+        EventPublisher(eventName: kind.rawValue, eventBus: eventBus)
+    }
     
     /// Publisher for license status changes
     public var statusPublisher: AnyPublisher<LicenseStatus, Never> {
         eventPublisher
             .compactMap { event in
-                switch event.name {
-                case "license:loaded",
-                     "activation:success", "activation:error",
-                     "validation:success", "validation:failed",
-                     "validation:offline-success", "validation:offline-failed",
-                     "license:revoked",
-                     "deactivation:success", "sdk:reset":
+                switch event.kind {
+                case .licenseLoaded,
+                     .activationSuccess, .activationError,
+                     .validationSuccess, .validationFailed,
+                     .validationOfflineSuccess, .validationOfflineFailed,
+                     .licenseRevoked,
+                     .deactivationSuccess, .sdkReset:
                     return self.getStatus()
                 default:
                     return nil
@@ -89,11 +95,11 @@ extension LicenseSeat {
     public func entitlementPublisher(for key: String) -> AnyPublisher<EntitlementStatus, Never> {
         eventPublisher
             .compactMap { event in
-                switch event.name {
-                case "activation:success",
-                     "validation:success", "validation:failed",
-                     "validation:offline-success", "validation:offline-failed",
-                     "license:revoked", "deactivation:success", "sdk:reset":
+                switch event.kind {
+                case .activationSuccess,
+                     .validationSuccess, .validationFailed,
+                     .validationOfflineSuccess, .validationOfflineFailed,
+                     .licenseRevoked, .deactivationSuccess, .sdkReset:
                     return self.checkEntitlement(key)
                 default:
                     return nil
@@ -105,9 +111,9 @@ extension LicenseSeat {
     
     /// Publisher for network status changes
     public var networkStatusPublisher: AnyPublisher<Bool, Never> {
-        eventPublisher(for: "network:online")
+        eventPublisher(for: .networkOnline)
             .map { _ in true }
-            .merge(with: eventPublisher(for: "network:offline").map { _ in false })
+            .merge(with: eventPublisher(for: .networkOffline).map { _ in false })
             .removeDuplicates()
             .eraseToAnyPublisher()
     }
@@ -202,6 +208,12 @@ where S.Input == LicenseSeat.Event, S.Failure == Never {
 // MARK: - Convenience Extensions
 
 extension LicenseSeat.Event {
+    /// The typed kind of this event, or `nil` for a name the SDK does not
+    /// document (only possible for events added by a newer SDK).
+    public var kind: EventKind? {
+        EventKind(rawValue: name)
+    }
+
     /// Type-safe event data accessors
     
     public var licenseKey: String? {

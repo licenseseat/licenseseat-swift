@@ -28,6 +28,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `EventKind` (#10): a typed enum over every event the SDK emits, with each
+  payload documented. `on(_: EventKind)`, `eventPublisher(for: EventKind)`,
+  and `LicenseSeat.Event.kind` sit beside the string API (raw values are the
+  wire names, so both observe the same events). The nine previously
+  undocumented events (`validation:auth-failed`, `validation:auto-failed`,
+  `offlineToken:fetching/fetched/fetchError/ready`, `deactivation:start`,
+  `sdk:error`, `autovalidation:stopped`) are now documented. SDK code emits
+  only typed kinds, and a test keeps the enum, the docs, and the emit sites
+  in sync.
 - `LicenseSeatFailure` (#11): one umbrella over every error a throwing call
   can surface (`APIError`, `LicenseSeatError`, `URLError`,
   `CancellationError`, decoding errors, `LicenseSeatStoreError`). Wrap any

@@ -928,6 +928,9 @@ final class LicenseSeatSDKTests: LicenseSeatTestCase {
 
     func testLateOfflineErrorForOldActivationDoesNotPurgeSameKeyReplacement() async throws {
         let requestStarted = expectation(description: "old offline request started")
+        // Background work (network-monitor-triggered offline refresh) may reach the
+        // mock too; only the first arrival is the signal.
+        requestStarted.assertForOverFulfill = false
         let releaseResponse = DispatchSemaphore(value: 0)
         MockURLProtocol.requestHandler = { request in
             guard let url = request.url else { throw URLError(.badURL) }
@@ -1062,6 +1065,9 @@ final class LicenseSeatSDKTests: LicenseSeatTestCase {
         guard let sdk else { return XCTFail("SDK was not initialized") }
         await sdk.waitForInitialization()
         let requestStarted = expectation(description: "activation request started")
+        // Background work (network-monitor-triggered offline refresh) may reach the
+        // mock too; only the first arrival is the signal.
+        requestStarted.assertForOverFulfill = false
         let releaseResponse = DispatchSemaphore(value: 0)
         MockURLProtocol.requestHandler = { request in
             requestStarted.fulfill()
@@ -1212,6 +1218,9 @@ final class LicenseSeatSDKTests: LicenseSeatTestCase {
             lastValidated: Date()
         )))
         let requestStarted = expectation(description: "deactivation request started")
+        // Background work (network-monitor-triggered offline refresh) may reach the
+        // mock too; only the first arrival is the signal.
+        requestStarted.assertForOverFulfill = false
         let releaseResponse = DispatchSemaphore(value: 0)
         MockURLProtocol.requestHandler = { request in
             requestStarted.fulfill()
@@ -1320,6 +1329,9 @@ final class LicenseSeatSDKTests: LicenseSeatTestCase {
             activationId: "old-activation"
         )
         let requestStarted = expectation(description: "validation request started")
+        // Background work (network-monitor-triggered offline refresh) may reach the
+        // mock too; only the first arrival is the signal.
+        requestStarted.assertForOverFulfill = false
         let releaseResponse = DispatchSemaphore(value: 0)
         MockURLProtocol.requestHandler = { request in
             requestStarted.fulfill()
@@ -1368,6 +1380,9 @@ final class LicenseSeatSDKTests: LicenseSeatTestCase {
             activationId: "old-activation"
         )
         let requestStarted = expectation(description: "validation request started")
+        // Background work (network-monitor-triggered offline refresh) may reach the
+        // mock too; only the first arrival is the signal.
+        requestStarted.assertForOverFulfill = false
         let releaseResponse = DispatchSemaphore(value: 0)
         MockURLProtocol.requestHandler = { request in
             requestStarted.fulfill()
@@ -1414,6 +1429,9 @@ final class LicenseSeatSDKTests: LicenseSeatTestCase {
             activationId: "old-activation"
         )
         let requestStarted = expectation(description: "validation request started")
+        // Background work (network-monitor-triggered offline refresh) may reach the
+        // mock too; only the first arrival is the signal.
+        requestStarted.assertForOverFulfill = false
         let releaseResponse = DispatchSemaphore(value: 0)
         MockURLProtocol.requestHandler = { _ in
             requestStarted.fulfill()

@@ -261,15 +261,15 @@ extension LicenseSeat {
 
         if isValid {
             log("Offline token signature VERIFIED successfully client-side.")
-            eventBus.emit("offlineToken:verified", ["kid": offlineToken.token.kid])
+            eventBus.emit(.offlineTokenVerified, ["kid": offlineToken.token.kid])
         } else {
             log("Offline token signature INVALID client-side.")
-            eventBus.emit("offlineToken:verificationFailed", ["kid": offlineToken.token.kid])
+            eventBus.emit(.offlineTokenVerificationFailed, ["kid": offlineToken.token.kid])
         }
         return isValid
         #else
         log("Offline verification crypto is unavailable")
-        eventBus.emit("sdk:error", [
+        eventBus.emit(.sdkError, [
             "message": "Client-side verification crypto not available"
         ])
         throw LicenseSeatError.cryptoUnavailable

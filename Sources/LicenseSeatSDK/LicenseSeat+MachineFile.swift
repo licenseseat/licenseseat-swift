@@ -128,15 +128,15 @@ public extension LicenseSeat {
                 options: options,
                 requestID: requestID
             )
-            eventBus.emit("machineFile:fetched", ["licenseKey": licenseKey])
-            eventBus.emit("machineFile:ready", [
+            eventBus.emit(.machineFileFetched, ["licenseKey": licenseKey])
+            eventBus.emit(.machineFileReady, [
                 "kid": machineFileKeyId(machineFile) ?? "",
                 "expiresAt": machineFile.expiresAt as Any
             ])
             return machineFile
         } catch {
             log("Machine-file checkout failed:", LogRedaction.describe(error))
-            eventBus.emit("machineFile:fetchError", [
+            eventBus.emit(.machineFileFetchError, [
                 "licenseKey": licenseKey,
                 "error": error
             ])
@@ -175,10 +175,10 @@ public extension LicenseSeat {
         let keyId = machineFileKeyId(machineFile) ?? ""
         if result.valid {
             log("Machine file VERIFIED successfully client-side.")
-            eventBus.emit("machineFile:verified", ["kid": keyId])
+            eventBus.emit(.machineFileVerified, ["kid": keyId])
         } else {
             log("Machine file INVALID client-side.")
-            eventBus.emit("machineFile:verificationFailed", [
+            eventBus.emit(.machineFileVerificationFailed, [
                 "kid": keyId,
                 "code": result.code ?? "verification_failed"
             ])

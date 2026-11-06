@@ -241,7 +241,7 @@ public final class LicenseSeat {
             if config.deviceIdentifier == nil {
                 DeviceIdentifier.adoptCachedLicenseIdentifier(cachedLicense.deviceId)
             }
-            eventBus.emit("license:loaded", cachedLicense)
+            eventBus.emit(.licenseLoaded, cachedLicense)
 
             // Complete local verification before starting the online request.
             // Ordering these operations prevents a late local task from
@@ -251,13 +251,13 @@ public final class LicenseSeat {
                 if cache.updateValidation(offlineResult, markValidatedOnline: false) {
                     recordOfflineRuntimeTrust(offlineResult)
                     if offlineResult.valid {
-                        eventBus.emit("validation:offline-success", offlineResult)
+                        eventBus.emit(.validationOfflineSuccess, offlineResult)
                     } else {
-                        eventBus.emit("validation:offline-failed", offlineResult)
+                        eventBus.emit(.validationOfflineFailed, offlineResult)
                     }
                     lastOfflineValidation = offlineResult
                 } else {
-                    eventBus.emit("validation:offline-failed", [
+                    eventBus.emit(.validationOfflineFailed, [
                         "code": "cache_error"
                     ])
                 }
@@ -298,7 +298,7 @@ public final class LicenseSeat {
                     if let apiError = error as? APIError,
                        apiError.status == 401 || apiError.status == 501 {
                         self.log("Authentication issue during validation, using cached license data")
-                        self.eventBus.emit("validation:auth-failed", [
+                        self.eventBus.emit(.validationAuthFailed, [
                             "licenseKey": cachedLicense.licenseKey,
                             "error": error,
                             "cached": true
@@ -342,7 +342,7 @@ public final class LicenseSeat {
         lastOfflineValidation = nil
         runtimeTrust = nil
 
-        eventBus.emit("license:revoked", [
+        eventBus.emit(.licenseRevoked, [
             "code": error.code ?? "unknown",
             "status": error.status,
             "message": error.message

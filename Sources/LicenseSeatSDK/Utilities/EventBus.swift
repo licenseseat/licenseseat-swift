@@ -180,6 +180,12 @@ final class EventBus: @unchecked Sendable {
         }
     }
 
+    /// Emit one of the SDK's documented events. SDK code uses only this
+    /// overload, so an event name cannot be misspelled.
+    func emit(_ kind: EventKind, _ data: Any) {
+        emit(kind.rawValue, data)
+    }
+
     /// Emit an event
     ///
     /// - Parameters:

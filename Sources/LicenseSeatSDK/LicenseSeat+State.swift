@@ -139,7 +139,7 @@ public extension LicenseSeat {
         isOnline = true
         apiClient.resetNetworkStatus()
         setupNetworkMonitoring()
-        eventBus.emit("sdk:reset", [:])
+        eventBus.emit(.sdkReset, [:])
     }
 
     /// Purge any cached license and related offline assets.
@@ -157,5 +157,13 @@ public extension LicenseSeat {
     @discardableResult
     func on(_ event: String, handler: @escaping (Any) -> Void) -> AnyCancellable {
         eventBus.on(event, handler: handler)
+    }
+
+    /// Subscribe to one documented event. Equivalent to
+    /// `on(kind.rawValue, handler:)`, but a misspelled kind does not compile.
+    /// See ``EventKind`` for each event's payload.
+    @discardableResult
+    func on(_ kind: EventKind, handler: @escaping (Any) -> Void) -> AnyCancellable {
+        eventBus.on(kind.rawValue, handler: handler)
     }
 }

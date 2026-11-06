@@ -302,7 +302,7 @@ public final class LicenseSeatStore {
             .store(in: &subscriptions)
         
         // Listen for auto-validation cycles to keep `nextAutoValidationAt` in sync.
-        seat?.eventPublisher(for: "autovalidation:cycle")
+        seat?.eventPublisher(for: .autoValidationCycle)
             .compactMap { $0.dictionary?["nextRunAt"] as? Date }
             .receive(on: RunLoop.main)
             .sink { [weak self] date in
@@ -311,7 +311,7 @@ public final class LicenseSeatStore {
             .store(in: &subscriptions)
         
         // When auto-validation stops, clear the date so UI knows it's inactive.
-        seat?.eventPublisher(for: "autovalidation:stopped")
+        seat?.eventPublisher(for: .autoValidationStopped)
             .map { _ in Optional<Date>.none }
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in

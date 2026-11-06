@@ -50,7 +50,7 @@ extension LicenseSeat {
         validationTask = Task { @MainActor [weak self] in
             guard let self else { return }
             // Emit first cycle information immediately so the UI can show when the next run will be.
-            self.eventBus.emit("autovalidation:cycle", [
+            self.eventBus.emit(.autoValidationCycle, [
                 "nextRunAt": firstRunAt
             ])
 
@@ -84,7 +84,7 @@ extension LicenseSeat {
         validationTask?.cancel()
         validationTask = nil
         nextAutoValidationAt = nil
-        eventBus.emit("autovalidation:stopped", [:])
+        eventBus.emit(.autoValidationStopped, [:])
     }
 
     // MARK: - Standalone Heartbeat
@@ -139,7 +139,7 @@ extension LicenseSeat {
             _ = try await validate(licenseKey: licenseKey)
         } catch {
             log("Auto-validation failed:", LogRedaction.describe(error))
-            eventBus.emit("validation:auto-failed", [
+            eventBus.emit(.validationAutoFailed, [
                 "licenseKey": licenseKey,
                 "error": error
             ])
@@ -149,7 +149,7 @@ extension LicenseSeat {
         if validationTask != nil {
             let nextRunAt = Date().addingTimeInterval(config.autoValidateInterval)
             nextAutoValidationAt = nextRunAt
-            eventBus.emit("autovalidation:cycle", ["nextRunAt": nextRunAt])
+            eventBus.emit(.autoValidationCycle, ["nextRunAt": nextRunAt])
         }
     }
 }
@@ -255,9 +255,9 @@ extension LicenseSeat {
         // replacement, even when the key and fingerprint are unchanged.
         guard let requestedLicense = cache.getLicense() else {
             let error = LicenseSeatError.noActiveLicense
-            eventBus.emit("sdk:error", ["message": error.localizedDescription])
-            eventBus.emit("offlineToken:fetchError", ["error": error])
-            eventBus.emit("offlineAssets:fetchError", ["error": error])
+            eventBus.emit(.sdkError, ["message": error.localizedDescription])
+            eventBus.emit(.offlineTokenFetchError, ["error": error])
+            eventBus.emit(.offlineAssetsFetchError, ["error": error])
             return
         }
         let requestedIdentity = CachedLicenseIdentity(requestedLicense)
@@ -273,7 +273,7 @@ extension LicenseSeat {
         case .failed(let failure):
             machineFileError = failure
             guard config.legacyOfflineTokensEnabled else {
-                eventBus.emit("offlineAssets:fetchError", [
+                eventBus.emit(.offlineAssetsFetchError, [
                     "licenseKey": requestedLicense.licenseKey,
                     "error": failure,
                     "machineFileError": failure
@@ -291,11 +291,11 @@ extension LicenseSeat {
             try verifyDownloadedOfflineToken(verification.result)
             try ensureCurrentOfflineSync(requestID, identity: requestedIdentity)
             try persistOfflineAssets(offlineToken, publicKey: verification.publicKey)
-            eventBus.emit("offlineToken:ready", [
+            eventBus.emit(.offlineTokenReady, [
                 "kid": kid,
                 "exp": offlineToken.token.exp
             ])
-            eventBus.emit("offlineAssets:ready", [
+            eventBus.emit(.offlineAssetsReady, [
                 "artifact": "offline_token",
                 "kid": kid,
                 "exp": offlineToken.token.exp
@@ -308,7 +308,7 @@ extension LicenseSeat {
                 handleAuthoritativeInvalidation(apiError, expectedIdentity: requestedIdentity)
             }
             log("Failed to sync offline assets:", LogRedaction.describe(error))
-            eventBus.emit("offlineToken:fetchError", [
+            eventBus.emit(.offlineTokenFetchError, [
                 "licenseKey": requestedLicense.licenseKey,
                 "error": error
             ])
@@ -319,7 +319,7 @@ extension LicenseSeat {
             if let machineFileError {
                 payload["machineFileError"] = machineFileError
             }
-            eventBus.emit("offlineAssets:fetchError", payload)
+            eventBus.emit(.offlineAssetsFetchError, payload)
         }
     }
 
@@ -359,12 +359,12 @@ extension LicenseSeat {
             )
             try ensureCurrentOfflineSync(requestID, identity: identity)
             let kid = machineFileKeyId(machineFile) ?? ""
-            eventBus.emit("machineFile:fetched", ["licenseKey": license.licenseKey])
-            eventBus.emit("machineFile:ready", [
+            eventBus.emit(.machineFileFetched, ["licenseKey": license.licenseKey])
+            eventBus.emit(.machineFileReady, [
                 "kid": kid,
                 "expiresAt": machineFile.expiresAt as Any
             ])
-            eventBus.emit("offlineAssets:ready", [
+            eventBus.emit(.offlineAssetsReady, [
                 "artifact": "machine_file",
                 "kid": kid,
                 "expiresAt": machineFile.expiresAt as Any
@@ -377,7 +377,7 @@ extension LicenseSeat {
                 return .stop
             }
             log("Machine-file refresh failed:", LogRedaction.describe(error))
-            eventBus.emit("machineFile:fetchError", [
+            eventBus.emit(.machineFileFetchError, [
                 "licenseKey": license.licenseKey,
                 "error": error
             ])
@@ -386,7 +386,7 @@ extension LicenseSeat {
                !Self.genericMachineFileRefusalCodes.contains(apiError.code?.lowercased() ?? "") {
                 if cachedLicenseMatches(identity) {
                     handleAuthoritativeInvalidation(apiError, expectedIdentity: identity)
-                    eventBus.emit("offlineAssets:fetchError", [
+                    eventBus.emit(.offlineAssetsFetchError, [
                         "licenseKey": license.licenseKey,
                         "error": error
                     ])
@@ -481,7 +481,7 @@ extension LicenseSeat {
             allowLegacyShortValue: true
         )
 
-        eventBus.emit("offlineToken:fetching", ["licenseKey": license.licenseKey])
+        eventBus.emit(.offlineTokenFetching, ["licenseKey": license.licenseKey])
         let response: OfflineTokenResponse = try await apiClient.post(
             pathComponents: ["products", productSlug, "licenses", "offline-token"],
             body: [
@@ -489,7 +489,7 @@ extension LicenseSeat {
                 "fingerprint": license.deviceId
             ]
         )
-        eventBus.emit("offlineToken:fetched", ["licenseKey": license.licenseKey])
+        eventBus.emit(.offlineTokenFetched, ["licenseKey": license.licenseKey])
         return response
     }
 
