@@ -218,6 +218,10 @@ public enum LicenseSeatFailure: Error, Equatable, Sendable {
         case .seatLimitReached:
             return "Deactivate the license on another device, then try again."
         case .licenseNotUsable:
+            if case .api(let error) = self,
+               ["device_not_activated", "activation_not_found"].contains(error.code?.lowercased() ?? "") {
+                return "Enter your license key again to re-activate this device."
+            }
             return "Contact support or renew your license."
         case .notActivated:
             return "Enter your license key to activate this device."
@@ -265,8 +269,16 @@ public enum LicenseSeatFailure: Error, Equatable, Sendable {
         "invalid_identity", "request_too_large", "invalid_release_filter"
     ]
 
+    /// Only "this key does not exist". The generic invalid-license codes are
+    /// also how the engine reports other refusals (and unexpected errors) from
+    /// some endpoints (license_seat#34), so they must not tell the user to
+    /// re-type a key; they classify as `.licenseNotUsable`.
     private static let invalidKeyCodes: Set<String> = [
-        "license_not_found", "invalid_license", "license_invalid"
+        "license_not_found"
+    ]
+
+    private static let genericInvalidLicenseCodes: Set<String> = [
+        "invalid_license", "license_invalid", "license_invalid_general"
     ]
 
     private static let seatLimitCodes: Set<String> = [
@@ -280,6 +292,7 @@ public enum LicenseSeatFailure: Error, Equatable, Sendable {
             if localRequestCodes.contains(code) { return .invalidRequest }
             if invalidKeyCodes.contains(code) { return .invalidLicenseKey }
             if seatLimitCodes.contains(code) { return .seatLimitReached }
+            if genericInvalidLicenseCodes.contains(code) { return .licenseNotUsable }
         }
         if error.isLicenseTerminalError || error.status == 410 { return .licenseNotUsable }
         switch error.status {

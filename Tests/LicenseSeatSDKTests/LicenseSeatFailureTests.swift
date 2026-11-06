@@ -19,7 +19,9 @@ final class LicenseSeatFailureTests: LicenseSeatTestCase {
     func testServerErrorsAreClassifiedWithoutStringMatching() {
         let cases: [(LicenseSeatFailure, LicenseSeatFailure.Category)] = [
             (api(404, "license_not_found"), .invalidLicenseKey),
-            (api(422, "invalid_license"), .invalidLicenseKey),
+            (api(422, "invalid_license"), .licenseNotUsable),
+            (api(422, "license_invalid"), .licenseNotUsable),
+            (api(422, "license_invalid_general"), .licenseNotUsable),
             (api(422, "seat_limit_exceeded"), .seatLimitReached),
             (api(422, "device_limit_reached"), .seatLimitReached),
             (api(422, "revoked"), .licenseNotUsable),
@@ -70,6 +72,8 @@ final class LicenseSeatFailureTests: LicenseSeatTestCase {
             (.cacheError, .storage),
             (.validationFailed(reason: "mismatch"), .invalidResponse),
             (.validationFailed(reason: "A newer validation request superseded this response."), .cancelled),
+            (.validationFailed(reason: "A newer license-state operation superseded this validation request."), .cancelled),
+            (.validationFailed(reason: "A newer heartbeat request superseded this response."), .cancelled),
             (.activationFailed(reason: "x"), .invalidResponse)
         ]
         for (error, expected) in sdkCases {
@@ -124,6 +128,11 @@ final class LicenseSeatFailureTests: LicenseSeatTestCase {
         XCTAssertEqual(api(422, "expired").userMessage, "This license has expired.")
         XCTAssertNotNil(LicenseSeatFailure(LicenseSeatError.deviceIdentifierError).recoverySuggestion)
         XCTAssertNil(LicenseSeatFailure.cancelled.recoverySuggestion)
+        XCTAssertEqual(
+            api(422, "device_not_activated").recoverySuggestion,
+            "Enter your license key again to re-activate this device."
+        )
+        XCTAssertFalse(api(422, "license_invalid_general").userMessage.contains("typo"))
     }
 
     func testThrownErrorsFromTheSDKClassify() async throws {
