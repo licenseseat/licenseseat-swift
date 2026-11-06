@@ -172,6 +172,7 @@ private extension LicenseSeat {
             guard cache.updateValidation(result) else {
                 throw LicenseSeatError.cacheError
             }
+            recordRuntimeTrust(result.valid ? .onlineResponse : .failClosedDenial)
             lastOfflineValidation = nil
         }
 
@@ -235,6 +236,7 @@ private extension LicenseSeat {
             offlineResult,
             markValidatedOnline: false
         ) else {
+            runtimeTrust = nil
             if !offlineResult.valid {
                 lastOfflineValidation = offlineResult
                 eventBus.emit("validation:offline-failed", offlineResult)
@@ -242,6 +244,7 @@ private extension LicenseSeat {
             throw LicenseSeatError.cacheError
         }
 
+        recordOfflineRuntimeTrust(offlineResult)
         if offlineResult.valid {
             if lastOfflineValidation?.valid != true {
                 eventBus.emit("validation:offline-success", offlineResult)

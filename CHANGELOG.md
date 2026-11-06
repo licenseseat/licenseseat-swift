@@ -28,6 +28,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Typed state accessors at parity with the Rust SDK (#13):
+  `restoreLicense()` (never throws; returns a `RestoreResult`),
+  `stateSnapshot()` (`LicenseStateSnapshot`: status, online flag, license,
+  validation, unexpired entitlements, trusted source, watermark, next
+  auto-validation), `isLicenseStateTrusted`, `currentTrustedLicense`,
+  `currentTrustedLicenseSource` (`TrustedLicenseSource`), and the retained
+  `lastHeartbeatResponse` / `lastHeartbeatError` / `lastHealthResponse` /
+  `lastHealthError`. `HeartbeatResponse` is now public. Persisted state from
+  an earlier process is still reported by `getStatus()` but is not *trusted*
+  until this process re-establishes it; an absent offline artifact is not a
+  verdict and establishes nothing.
 - `LicenseSeatConfig.legacyOfflineTokensEnabled` (default `true`). Set it to
   `false` for machine-file-only behaviour, the Rust SDK's default.
 - `offlineAssets:ready` (`artifact`: `machine_file` | `offline_token`) and

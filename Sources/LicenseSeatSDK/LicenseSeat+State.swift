@@ -105,8 +105,16 @@ public extension LicenseSeat {
     /// Check API health
     func healthCheck() async throws -> HealthResponse {
         await waitForInitialization()
-        // GET /health
-        return try await apiClient.get(path: "/health")
+        do {
+            // GET /health
+            let response: HealthResponse = try await apiClient.get(path: "/health")
+            lastHealthResponse = response
+            lastHealthError = nil
+            return response
+        } catch {
+            lastHealthError = error
+            throw error
+        }
     }
 
     /// Reset SDK state
@@ -125,6 +133,9 @@ public extension LicenseSeat {
         cache.clear()
         currentAutoLicenseKey = nil
         lastOfflineValidation = nil
+        runtimeTrust = nil
+        lastHeartbeatResponse = nil
+        lastHeartbeatError = nil
         isOnline = true
         apiClient.resetNetworkStatus()
         setupNetworkMonitoring()

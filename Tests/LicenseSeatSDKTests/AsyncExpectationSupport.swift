@@ -104,6 +104,7 @@ extension LicenseSeatSDKTests: @unchecked Sendable {}
 extension LicenseSeatStoreTests: @unchecked Sendable {}
 extension MachineFileTests: @unchecked Sendable {}
 extension ReleasesTests: @unchecked Sendable {}
+extension StateAccessTests: @unchecked Sendable {}
 extension OfflineArtifactPreferenceTests: @unchecked Sendable {}
 extension OfflineValidationTests: @unchecked Sendable {}
 extension PublicAPISurfaceTests: @unchecked Sendable {}
