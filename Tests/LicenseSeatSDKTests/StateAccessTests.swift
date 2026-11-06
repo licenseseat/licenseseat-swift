@@ -252,7 +252,9 @@ final class StateAccessTests: LicenseSeatTestCase {
         let body = Self.validationJSON()
         var requests = 0
         MockURLProtocol.requestHandler = { request in
-            requests += 1
+            // Count validations only: the connectivity monitor may probe or
+            // refresh in the background while the test runs.
+            if request.url?.path.hasSuffix("/validate") == true { requests += 1 }
             return try Self.json(request, 200, body)
         }
 
