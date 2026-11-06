@@ -176,6 +176,8 @@ private extension LicenseSeat {
         currentAutoLicenseKey = nil
         lastOfflineValidation = nil
         runtimeTrust = nil
+        authoritativeDenial = nil
+        cache.clearAuthoritativeDenial()
         return true
     }
 

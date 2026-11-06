@@ -126,7 +126,8 @@ public struct APIError: LocalizedError, Equatable, @unchecked Sendable {
     /// validate (as `valid: false`) and activate (as errors).
     static let authoritativeDenialCodes: Set<String> = [
         "version_not_entitled", "not_entitled", "product_mismatch",
-        "floating_not_implemented", "named_user_not_implemented"
+        "floating_not_implemented", "named_user_not_implemented",
+        "seat_limit_exceeded"
     ]
 
     /// Whether the server authoritatively refused this request for a reason a

@@ -109,7 +109,11 @@ final class AuthoritativeDenialTests: LicenseSeatTestCase {
         ))
     }
 
-    private static func validation(valid: Bool, code: String?) -> [String: Any] {
+    private static func validation(
+        valid: Bool,
+        code: String?,
+        ceiling: String? = "3.0.0"
+    ) -> [String: Any] {
         [
             "object": "validation_result",
             "valid": valid,
@@ -126,10 +130,10 @@ final class AuthoritativeDenialTests: LicenseSeatTestCase {
                 "plan_key": "personal",
                 "seat_limit": 1,
                 "active_seats": 1,
-                "active_entitlements": [[
+                "active_entitlements": ceiling.map { ceiling -> [[String: Any]] in [[
                     "key": "updates", "expires_at": NSNull(),
-                    "below_version": "3.0.0", "metadata": NSNull()
-                ]],
+                    "below_version": ceiling, "metadata": NSNull()
+                ]] } ?? [],
                 "metadata": NSNull(),
                 "product": ["slug": productSlug, "name": "Denial App"]
             ],
@@ -159,6 +163,158 @@ final class AuthoritativeDenialTests: LicenseSeatTestCase {
         guard case .invalid = sdk.getStatus() else {
             return XCTFail("expected .invalid, got \(sdk.getStatus())", file: file, line: line)
         }
+    }
+
+    private func relaunch(appVersion: String, mode: LicenseSeatConfig.OfflineFallbackMode = .always) async {
+        sdk.shutdown()
+        sdk = makeSDK(mode: mode, appVersion: appVersion)
+        await sdk.waitForInitialization()
+    }
+
+    private func assertNotOfflineValid(_ label: String, file: StaticString = #filePath, line: UInt = #line) async {
+        if case .offlineValid = sdk.getStatus() {
+            XCTFail("\(label): status is offlineValid", file: file, line: line)
+        }
+        let explicit = await sdk.verifyCachedOffline()
+        XCTAssertFalse(explicit.valid, "\(label): verifyCachedOffline granted", file: file, line: line)
+        MockURLProtocol.requestHandler = { _ in throw URLError(.notConnectedToInternet) }
+        do {
+            _ = try await sdk.validate(licenseKey: Self.licenseKey)
+            XCTFail("\(label): an outage fell back to the grant", file: file, line: line)
+        } catch {}
+    }
+
+    // MARK: - Round 2 (Astra on #26)
+
+    func testRollbackThenUpgradeOfflineStaysDenied() async throws {
+        // F1: the rollback launch must not erase the denial.
+        MockURLProtocol.requestHandler = Self.respond(200, Self.validation(valid: false, code: "version_not_entitled"))
+        _ = try await sdk.validate(licenseKey: Self.licenseKey)
+
+        MockURLProtocol.requestHandler = { _ in throw URLError(.notConnectedToInternet) }
+        await relaunch(appVersion: "2.9.0")
+        guard case .offlineValid = sdk.getStatus() else {
+            return XCTFail("the covered rollback must work offline, got \(sdk.getStatus())")
+        }
+
+        await relaunch(appVersion: "3.0.1")
+        await assertNotOfflineValid("3.0.1 after rollback")
+        assertGrantKept()
+    }
+
+    func testALeadingVOnTheDeniedVersionIsNotARollback() async throws {
+        // F2: the server strips a leading "v"; "v3.0.1" is the refused version.
+        await relaunch(appVersion: "v3.0.1")
+        MockURLProtocol.requestHandler = Self.respond(200, Self.validation(valid: false, code: "version_not_entitled"))
+        _ = try await sdk.validate(licenseKey: Self.licenseKey)
+
+        await assertNotOfflineValid("same process")
+        await relaunch(appVersion: "v3.0.1")
+        await assertNotOfflineValid("relaunch")
+        XCTAssertEqual(LicenseSeat.serverCoreVersion("v3.0.1"), [3, 0, 1])
+        XCTAssertEqual(LicenseSeat.serverCoreVersion(" 3 "), [3, 0, 0])
+        XCTAssertNil(LicenseSeat.serverCoreVersion("3.0.99999999999999999999"))
+        XCTAssertNil(LicenseSeat.serverCoreVersion("V3.0.1"))
+    }
+
+    func testARefusedReactivationIsRecordedAndARevokedOnePurges() async throws {
+        // F3: activate's refusals are decisions about the cached activation.
+        MockURLProtocol.requestHandler = Self.respond(403, [
+            "error": ["code": "version_not_entitled", "message": "Not covered"]
+        ])
+        do {
+            _ = try await sdk.activate(licenseKey: Self.licenseKey)
+            XCTFail("expected the refusal")
+        } catch {}
+        assertInvalid()
+        assertGrantKept()
+        await assertNotOfflineValid("after refused re-activation")
+
+        MockURLProtocol.requestHandler = Self.respond(422, [
+            "error": ["code": "revoked", "message": "Revoked"]
+        ])
+        do {
+            _ = try await sdk.activate(licenseKey: Self.licenseKey)
+            XCTFail("expected the revocation")
+        } catch {}
+        XCTAssertNil(sdk.currentLicense())
+        XCTAssertNil(sdk.cache.getOfflineToken())
+    }
+
+    func testAThrownDenialIsNotExemptedByAnOlderCeiling() async throws {
+        // F4: cached metadata says < 4.0.0; the server now refuses 3.5.0.
+        await relaunch(appVersion: "3.5.0")
+        MockURLProtocol.requestHandler = Self.respond(200, Self.validation(valid: true, code: nil, ceiling: "4.0.0"))
+        _ = try await sdk.validate(licenseKey: Self.licenseKey)
+
+        MockURLProtocol.requestHandler = Self.respond(403, [
+            "error": ["code": "version_not_entitled", "message": "Not covered"]
+        ])
+        do { _ = try await sdk.validate(licenseKey: Self.licenseKey) } catch {}
+
+        await assertNotOfflineValid("3.5.0 with an obsolete 4.0.0 ceiling")
+    }
+
+    func testRollingBackToTheLastAcceptedVersionWorksWithoutCeilingEvidence() async throws {
+        // F5: thrown denial (no ceiling) and valid:false without an updates
+        // entitlement; the version accepted online before is still entitled.
+        for thrown in [true, false] {
+            sdk.shutdown()
+            storagePrefix = "authoritative_denial_test_\(UUID().uuidString)_"
+            sdk = makeSDK(appVersion: "2.9.0")
+            try cacheActivationWithValidGrant()
+            MockURLProtocol.requestHandler = Self.respond(200, Self.validation(valid: true, code: nil, ceiling: nil))
+            _ = try await sdk.validate(licenseKey: Self.licenseKey)
+
+            await relaunch(appVersion: "3.0.1")
+            MockURLProtocol.requestHandler = thrown
+                ? Self.respond(403, ["error": ["code": "version_not_entitled", "message": "Not covered"]])
+                : Self.respond(200, Self.validation(valid: false, code: "version_not_entitled", ceiling: nil))
+            do { _ = try await sdk.validate(licenseKey: Self.licenseKey) } catch {}
+            await assertNotOfflineValid("3.0.1, thrown=\(thrown)")
+
+            MockURLProtocol.requestHandler = { _ in throw URLError(.notConnectedToInternet) }
+            await relaunch(appVersion: "2.9.0")
+            guard case .offlineValid = sdk.getStatus() else {
+                return XCTFail("thrown=\(thrown): rollback to 2.9.0 must work offline, got \(sdk.getStatus())")
+            }
+        }
+    }
+
+    func testSeatLimitExceededIsAnAuthoritativeDenial() async throws {
+        // F6, both shapes.
+        MockURLProtocol.requestHandler = Self.respond(422, [
+            "error": ["code": "seat_limit_exceeded", "message": "All seats in use"]
+        ])
+        do {
+            _ = try await sdk.validate(licenseKey: Self.licenseKey)
+            XCTFail("a seat-limit refusal must not fall back")
+        } catch {}
+        assertInvalid()
+        assertGrantKept()
+
+        sdk.shutdown()
+        storagePrefix = "authoritative_denial_test_\(UUID().uuidString)_"
+        sdk = makeSDK()
+        try cacheActivationWithValidGrant()
+        MockURLProtocol.requestHandler = Self.respond(200, Self.validation(valid: false, code: "seat_limit_exceeded"))
+        _ = try await sdk.validate(licenseKey: Self.licenseKey)
+        assertGrantKept()
+        await assertNotOfflineValid("valid:false seat_limit_exceeded")
+    }
+
+    func testAFailedDenialWriteStillRefuses() async throws {
+        // F8: neither the denial record nor the validation can be persisted.
+        sdk.cache.simulatedWriteFailures = [LicenseCache.Key.authoritativeDenial, LicenseCache.Key.license]
+        MockURLProtocol.requestHandler = Self.respond(200, Self.validation(valid: false, code: "not_entitled"))
+        do {
+            _ = try await sdk.validate(licenseKey: Self.licenseKey)
+            XCTFail("a failed write must surface")
+        } catch {}
+
+        assertInvalid()
+        XCTAssertFalse(sdk.checkEntitlement("updates").active)
+        await assertNotOfflineValid("unpersisted denial")
     }
 
     // MARK: - Error-shaped denials

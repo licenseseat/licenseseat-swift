@@ -67,17 +67,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Authoritative entitlement denials never fall back to the offline grant**
   (#25). `APIError.isAuthoritativeDenial` covers `version_not_entitled`,
-  `not_entitled`, `product_mismatch`, `floating_not_implemented`, and
-  `named_user_not_implemented`. Under both `OfflineFallbackMode`s such a
-  denial (thrown, or `valid: false`) is persisted as the cached decision and
-  blocks offline fallback, launch-time offline verification, and
-  `verifyCachedOffline()` until the next online decision. It does **not**
-  purge the activation or its offline grant (behaviour change for the
-  `valid: false` shape, which used to purge): a `version_not_entitled`
-  denial stops applying when the app reports a version the license's
-  `updates` ceiling covers, so rolling back keeps working offline. 401/403
-  auth errors and 429 stay eligible for `.always` fallback; revocation still
-  purges. `LicenseSeatFailure` gains the `.notEntitled` category.
+  `not_entitled`, `product_mismatch`, `seat_limit_exceeded`,
+  `floating_not_implemented`, and `named_user_not_implemented`. A denial from
+  validate (`valid: false` or thrown) or from re-activating the cached
+  activation is recorded as a separate authoritative decision (in memory
+  first, then protected storage) that no offline result can overwrite. While
+  it applies, offline fallback (both modes), launch-time offline
+  verification, `verifyCachedOffline()` (checked again after any key fetch),
+  `getStatus()`, and `checkEntitlement()` all refuse, even if persisting it
+  failed. Any in-flight artifact refresh is fenced. The activation and its
+  offline grant are **kept** (behaviour change for the `valid: false` shape,
+  which used to purge). A `version_not_entitled` denial stops applying only
+  with positive evidence of an entitled version — the version last accepted
+  online for this activation, or the denial's own ceiling compared with a
+  strict, server-compatible parser — and never for the refused version
+  itself. 401/403 auth errors and 429 stay eligible for `.always` fallback;
+  revocation still purges. `LicenseSeatFailure` gains `.notEntitled`.
 
 - Offline authorization time is now paired with a monotonic process clock
   (#12), anchored on a **trusted** time sample: the signed issuance time

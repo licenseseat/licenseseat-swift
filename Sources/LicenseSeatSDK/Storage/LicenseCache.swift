@@ -27,6 +27,8 @@ final class LicenseCache {
         static let machineFile = "machine_file"
         static let publicKeys = "public_keys"
         static let lastSeenTimestamp = "last_seen_ts"
+        static let authoritativeDenial = "authoritative_denial"
+        static let entitledVersion = "entitled_version"
 
         /// Records deleted by `clear()`.
         ///
@@ -39,13 +41,20 @@ final class LicenseCache {
         /// backward) only by an authoritative online operation — see
         /// `anchorLastSeenTimestamp(_:)`. This contract is shared with the
         /// other LicenseSeat SDKs.
-        static let clearedOnReset = [license, offlineToken, machineFile, publicKeys]
+        static let clearedOnReset = [
+            license, offlineToken, machineFile, publicKeys,
+            authoritativeDenial, entitledVersion
+        ]
     }
 
     /// New storage is always addressed by a fixed-length digest. The
     /// caller-controlled compatibility prefix is never used as a path
     /// component or an unbounded Keychain/UserDefaults account.
     let namespacePrefix: String
+
+    /// Keys whose protected writes fail, so tests can prove the SDK does not
+    /// fail open when persistence breaks. Always empty in production.
+    var simulatedWriteFailures: Set<String> = []
     let legacyPreferencesPrefix: String?
     let legacyFilePrefix: String?
     let userDefaults: UserDefaults
@@ -318,7 +327,8 @@ final class LicenseCache {
 
     @discardableResult
     func storeProtectedData(_ data: Data, forKey key: String) -> Bool {
-        guard data.count <= Self.maxCacheBytes else { return false }
+        guard data.count <= Self.maxCacheBytes,
+              !simulatedWriteFailures.contains(key) else { return false }
         let query = keychainQuery(forKey: key)
         let updateStatus = SecItemUpdate(
             query as CFDictionary,
@@ -376,7 +386,8 @@ final class LicenseCache {
 
     @discardableResult
     func storeProtectedData(_ data: Data, forKey key: String) -> Bool {
-        guard data.count <= Self.maxCacheBytes else { return false }
+        guard data.count <= Self.maxCacheBytes,
+              !simulatedWriteFailures.contains(key) else { return false }
         userDefaults.set(data, forKey: prefixed(key))
         return true
     }
