@@ -251,6 +251,22 @@ final class MachineFileTests: LicenseSeatTestCase {
         XCTAssertEqual(result.code, try Self.expectedCode("expired"))
     }
 
+    func testServerFixturesWithNonActiveEmbeddedLicensesAreRejected() async throws {
+        for name in ["revoked_license", "suspended_license"] {
+            let result = try sdk.verifyMachineFile(try Self.machineFile(name))
+            XCTAssertFalse(result.valid, name)
+            XCTAssertNil(result.payload, name)
+            XCTAssertEqual(result.code, try Self.expectedCode(name), name)
+        }
+    }
+
+    func testServerFixtureFromAnotherActivationIsAMismatch() async throws {
+        let result = try sdk.verifyMachineFile(try Self.machineFile("foreign_activation_expired"))
+        XCTAssertFalse(result.valid)
+        XCTAssertEqual(result.code, "activation_mismatch")
+        XCTAssertEqual(result.code, try Self.expectedCode("foreign_activation_expired"))
+    }
+
     func testTamperedServerFixtureIsRejectedBeforeDecryption() async throws {
         // One flipped ciphertext character. The signature covers `enc`, so this
         // must fail on the signature and never reach AES at all.

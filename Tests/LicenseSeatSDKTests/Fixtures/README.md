@@ -22,10 +22,12 @@ provider) is stubbed; the script's header documents each stub with the gem
 ```sh
 ruby Tests/LicenseSeatSDKTests/Fixtures/generate_machine_file_fixtures.rb
 # override the gem location if it is installed elsewhere
-LICENSE_SEAT_GEM_ROOT=/path/to/license_seat-0.9.2 ruby …
+LICENSE_SEAT_GEM_ROOT=~/GitHub/license_seat ruby …   # how the current fixtures were made (0.15.1)
 ```
 
 Requires the `ed25519` gem. Output is deterministic apart from the AES nonce,
-and covers one valid artifact plus four that must each be rejected for a
+and covers one valid artifact plus seven that must each be rejected for a
 different reason: expired, tampered signature, tampered ciphertext re-signed
-with the legitimate key, and signed by the wrong key.
+with the legitimate key, signed by the wrong key, embedded license revoked,
+embedded license suspended, and an expired file from another activation of the
+same license and device.

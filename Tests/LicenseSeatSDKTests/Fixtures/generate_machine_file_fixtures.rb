@@ -168,10 +168,10 @@ ISSUED_AT  = Time.utc(2026, 8, 16, 12, 0, 0)
 LONG_TTL   = 3650 # ~10 years, so the "valid" fixture does not rot
 GRACE_DAYS = 3
 
-def build_license(ends_at:)
+def build_license(ends_at:, status: "active")
   FakeLicense.new(
     license_key: LICENSE_KEY,
-    status: "active",
+    status: status,
     starts_at: Time.utc(2026, 1, 1),
     ends_at: ends_at,
     metadata: { "tier" => "studio", "unicode" => "Olá 👋" },
@@ -191,13 +191,14 @@ ACTIVATION = FakeActivation.new(
   metadata: { "device_name" => "Fixture Studio Mac", "platform" => "macos" }
 )
 
-def issue(now:, ttl_days:, grace_period_days:, ends_at:, signing_seed: SIGNING_SEED)
+def issue(now:, ttl_days:, grace_period_days:, ends_at:, signing_seed: SIGNING_SEED,
+          status: "active", activation: ACTIVATION)
   Time.fixture_now = now
   service = FixtureMachineFile.new(
     signing_key_bytes: signing_seed,
     kid: KEY_ID,
-    activation: ACTIVATION,
-    license: build_license(ends_at: ends_at),
+    activation: activation,
+    license: build_license(ends_at: ends_at, status: status),
     fingerprint: FINGERPRINT,
     ttl_days: ttl_days,
     grace_period_days: grace_period_days,
@@ -311,9 +312,54 @@ cases["wrong_key"] = {
   "expected" => { "valid" => false, "code" => "signature_invalid" }
 }
 
+# --- 6./7. embedded license no longer active --------------------------------
+# A correctly signed, correctly bound file whose embedded license status is
+# not active. The server refuses to issue these today, but a file captured
+# while the license was being revoked/suspended (or a restored backup) must be
+# a final "no" that an older legacy token cannot override.
+%w[revoked suspended].each do |status|
+  cert, = issue(
+    now: ISSUED_AT,
+    ttl_days: LONG_TTL,
+    grace_period_days: GRACE_DAYS,
+    ends_at: Time.utc(2099, 1, 1),
+    status: status
+  )
+  cases["#{status}_license"] = {
+    "description" => "Signed and bound to this device, but the embedded license is #{status}.",
+    "response" => api_response(certificate: cert, issued: ISSUED_AT, ttl_days: LONG_TTL),
+    "expected" => { "valid" => false, "code" => "invalid_machine_file_claims" }
+  }
+end
+
+# --- 8. expired file from another activation of the same license+device ---
+OTHER_ACTIVATION = FakeActivation.new(
+  id: "55555555-5555-5555-5555-555555555555",
+  activated_at: Time.utc(2025, 1, 1, 9, 0, 0),
+  metadata: { "device_name" => "Fixture Studio Mac", "platform" => "macos" }
+)
+foreign_cert, = issue(
+  now: expired_issued,
+  ttl_days: 30,
+  grace_period_days: 0,
+  ends_at: Time.utc(2099, 1, 1),
+  activation: OTHER_ACTIVATION
+)
+cases["foreign_activation_expired"] = {
+  "description" => "Expired file issued for an earlier activation of the same license and device.",
+  "response" => api_response(certificate: foreign_cert, issued: expired_issued, ttl_days: 30),
+  "expected" => { "valid" => false, "code" => "activation_mismatch" }
+}
+
+gem_version = begin
+  File.read(File.join(GEM_ROOT, "lib/license_seat/version.rb"))[/VERSION\s*=\s*"([^"]+)"/, 1]
+rescue StandardError
+  nil
+end
+
 fixture = {
   "generated_by" => "Tests/LicenseSeatSDKTests/Fixtures/generate_machine_file_fixtures.rb",
-  "gem" => File.basename(GEM_ROOT),
+  "gem" => gem_version ? "license_seat-#{gem_version}" : File.basename(GEM_ROOT),
   "algorithm" => LicenseSeat::Services::OfflineMachineFile::ALGORITHM,
   "schema_version" => LicenseSeat::Services::OfflineMachineFile::SCHEMA_VERSION,
   # Standard Base64, matching the `/signing_keys/{kid}` response and the

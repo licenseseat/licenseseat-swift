@@ -487,6 +487,44 @@ final class OfflineArtifactPreferenceTests: LicenseSeatTestCase {
         XCTAssertNil(sdk.cache.getOfflineToken())
     }
 
+    // MARK: - Signed status / activation verdicts next to a valid token (F4/F5)
+
+    func testASignedRevokedOrSuspendedMachineFileIsFinalOverAValidToken() async throws {
+        for name in ["revoked_license", "suspended_license"] {
+            sdk.cache.clear()
+            cacheFixtureIdentity()
+            XCTAssertTrue(sdk.cache.setMachineFile(try Self.machineFile(name)))
+            XCTAssertTrue(sdk.cache.setOfflineToken(try signedToken()))
+            XCTAssertTrue(sdk.cache.setPublicKey(Self.tokenKeyId, tokenPublicKey))
+
+            let result = await sdk.verifyCachedOffline()
+            XCTAssertFalse(result.valid, "\(name): an older token must not overrule a signed refusal")
+            XCTAssertEqual(result.code, "invalid_machine_file_claims", name)
+
+            reconfigure(legacyOfflineTokensEnabled: true)
+            await sdk.waitForInitialization()
+            if case .offlineValid = sdk.getStatus() {
+                XCTFail("\(name): launch verification granted access from the older token")
+            }
+        }
+    }
+
+    func testAForeignActivationsExpiredFileFallsBackToTheValidToken() async throws {
+        XCTAssertTrue(sdk.cache.setMachineFile(try Self.machineFile("foreign_activation_expired")))
+        XCTAssertTrue(sdk.cache.setOfflineToken(try signedToken()))
+        XCTAssertTrue(sdk.cache.setPublicKey(Self.tokenKeyId, tokenPublicKey))
+
+        let result = await sdk.verifyCachedOffline()
+        XCTAssertTrue(result.valid, result.code ?? "")
+        XCTAssertEqual(result.license.planKey, "legacy-plan")
+
+        reconfigure(legacyOfflineTokensEnabled: true)
+        await sdk.waitForInitialization()
+        guard case .offlineValid = sdk.getStatus() else {
+            return XCTFail("launch must fall back to the current activation's token, got \(sdk.getStatus())")
+        }
+    }
+
     // MARK: - Verification preference
 
     func testVerifyCachedOfflineUsesTheMachineFile() async throws {
