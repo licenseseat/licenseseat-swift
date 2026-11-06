@@ -107,7 +107,9 @@ public enum EventKind: String, CaseIterable, Sendable {
     /// An offline refresh produced an artifact. Payload: `["artifact":
     /// "machine_file" | "offline_token", "kid": String, …]`.
     case offlineAssetsReady = "offlineAssets:ready"
-    /// An offline refresh produced no artifact. Payload: `["error": Error]`.
+    /// An offline refresh produced no artifact. Payload: `["error": Error]`,
+    /// plus `"licenseKey"` when an activation was cached and
+    /// `"machineFileError"` when the machine-file attempt failed first.
     case offlineAssetsFetchError = "offlineAssets:fetchError"
 
     /// Legacy offline-token request started. Payload: `["licenseKey": String]`.
