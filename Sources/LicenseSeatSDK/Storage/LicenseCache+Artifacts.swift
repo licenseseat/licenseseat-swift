@@ -171,3 +171,24 @@ extension LicenseCache {
         }
     }
 }
+
+// MARK: - Authoritative decisions (kept apart from offline results)
+
+extension LicenseCache {
+    func getAuthoritativeDenial() -> AuthoritativeDecisionRecord? {
+        guard let data = protectedData(forKey: Key.authoritativeDenial),
+              data.count <= 64 * 1024 else { return nil }
+        return try? licenseDecoder.decode(AuthoritativeDecisionRecord.self, from: data)
+    }
+
+    @discardableResult
+    func setAuthoritativeDenial(_ record: AuthoritativeDecisionRecord) -> Bool {
+        guard let data = try? licenseEncoder.encode(record) else { return false }
+        return storeProtectedData(data, forKey: Key.authoritativeDenial)
+    }
+
+    func clearAuthoritativeDenial() {
+        deleteProtectedData(forKey: Key.authoritativeDenial)
+    }
+
+}

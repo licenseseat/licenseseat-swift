@@ -417,6 +417,89 @@ final class OfflineArtifactPreferenceTests: LicenseSeatTestCase {
         XCTAssertTrue(result.valid, result.code ?? "")
     }
 
+    func testADenialRecordedDuringAKeyFetchIsHonoured() async throws {
+        // Astra #26 F7: the denial lands while verification is suspended on a
+        // signing-key fetch; the result must not be a grant.
+        #if canImport(Darwin)
+        MockURLProtocol.deliversAsynchronously = true
+        XCTAssertTrue(sdk.cache.setMachineFile(try Self.machineFile("valid")))
+        sdk.cache.deleteProtectedData(forKey: LicenseCache.Key.publicKeys)
+        let started = expectation(description: "signing-key request started")
+        started.assertForOverFulfill = false
+        let release = DispatchSemaphore(value: 0)
+        let keyId = Self.fixture.keyId
+        let publicKey = Self.fixture.publicKey
+        MockURLProtocol.requestHandler = { request in
+            let path = request.url?.path ?? ""
+            if path.contains("/signing_keys/") {
+                started.fulfill()
+                release.wait()
+                return try Self.response(request, status: 200, json: [
+                    "object": "signing_key", "key_id": keyId, "algorithm": "Ed25519",
+                    "public_key": publicKey, "status": "active"
+                ])
+            }
+            if path.hasSuffix("/validate") {
+                return try Self.response(request, status: 403, json: [
+                    "error": ["code": "not_entitled", "message": "Not entitled"]
+                ])
+            }
+            throw URLError(.notConnectedToInternet)
+        }
+
+        let verification = Task { await self.sdk.verifyCachedOffline() }
+        await assertFulfillment(of: [started], timeout: 5)
+        do { _ = try await sdk.validate(licenseKey: Self.fixture.licenseKey) } catch {}
+        release.signal()
+        let result = await verification.value
+
+        XCTAssertFalse(result.valid, "a denial recorded mid-verification must win")
+        XCTAssertNotNil(sdk.currentMachineFile, "the grant is kept")
+        #else
+        throw XCTSkip("needs MockURLProtocol.deliversAsynchronously (Darwin)")
+        #endif
+    }
+
+    func testADenialFencesAnInFlightRefresh() async throws {
+        // An SDK-started refresh in flight when a denial is recorded must not
+        // store an artifact afterwards (licensing slice item 2).
+        #if canImport(Darwin)
+        MockURLProtocol.deliversAsynchronously = true
+        let started = expectation(description: "machine-file request started")
+        started.assertForOverFulfill = false
+        let release = DispatchSemaphore(value: 0)
+        let machineFileData = try Self.responseData("valid")
+        MockURLProtocol.requestHandler = { request in
+            let path = request.url?.path ?? ""
+            if path.hasSuffix("/machine-file") {
+                started.fulfill()
+                release.wait()
+                return (
+                    HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil,
+                                    headerFields: ["Content-Type": "application/json"])!,
+                    machineFileData
+                )
+            }
+            if path.hasSuffix("/validate") {
+                return try Self.response(request, status: 403, json: [
+                    "error": ["code": "not_entitled", "message": "Not entitled"]
+                ])
+            }
+            throw URLError(.notConnectedToInternet)
+        }
+
+        let sync = Task { await self.sdk.syncOfflineAssets() }
+        await assertFulfillment(of: [started], timeout: 5)
+        do { _ = try await sdk.validate(licenseKey: Self.fixture.licenseKey) } catch {}
+        release.signal()
+        await sync.value
+
+        XCTAssertNil(sdk.currentMachineFile, "the fenced refresh must not store its artifact")
+        #else
+        throw XCTSkip("needs MockURLProtocol.deliversAsynchronously (Darwin)")
+        #endif
+    }
+
     func testASigningKeyFetchRacingRevocationNeverVouches() async throws {
         XCTAssertTrue(sdk.cache.setMachineFile(try Self.machineFile("valid")))
         sdk.cache.deleteProtectedData(forKey: LicenseCache.Key.publicKeys)

@@ -162,15 +162,43 @@ private extension LicenseSeat {
             // An online invalid result is authoritative. Remove the old signed
             // grant before persisting that state so relaunch cannot resurrect
             // a revoked, suspended, or expired activation offline.
-            if !result.valid {
+            //
+            // An authoritative denial of this version/product/feature is not
+            // a revocation: the license (and its grant) may still be valid
+            // for an older version the user rolls back to. It is kept, and
+            // `authoritativeDenialApplies()` stops it from overruling the
+            // denial offline. The decision is recorded (in memory first)
+            // before any write, so a failed write can't leave the previous
+            // authorization usable.
+            var denialPersisted = true
+            if !result.valid, Self.isAuthoritativeDenialCode(result.code),
+               let cached = cache.getLicense() {
+                denialPersisted = recordAuthoritativeDenial(
+                    code: result.code ?? "not_entitled",
+                    message: result.message,
+                    ceiling: result.license.activeEntitlements
+                        .first(where: { $0.key == "updates" })?.belowVersion,
+                    for: cached
+                )
+            }
+            if !result.valid, !Self.isAuthoritativeDenialCode(result.code) {
                 // Invalidate any in-flight artifact refresh first, so a late
                 // checkout cannot re-cache a grant after this decision.
                 currentOfflineSyncRequestID = nil
                 cache.clearOfflineToken()
                 cache.clearMachineFile()
             }
-            guard cache.updateValidation(result) else {
+            guard cache.updateValidation(result), denialPersisted else {
+                // Publish the authoritative transition even though it could
+                // not be fully saved: status and entitlement subscribers must
+                // stop granting now. The failure still surfaces as cacheError.
+                if !result.valid {
+                    eventBus.emit(.validationFailed, result)
+                }
                 throw LicenseSeatError.cacheError
+            }
+            if result.valid, let cached = cache.getLicense() {
+                recordOnlineAcceptance(for: cached)
             }
             recordRuntimeTrust(result.valid ? .onlineResponse : .failClosedDenial)
             lastOfflineValidation = nil
@@ -216,7 +244,15 @@ private extension LicenseSeat {
             throw error
         }
 
+        if let apiError = error as? APIError,
+           apiError.isAuthoritativeDenial,
+           let cachedIdentity = context.cachedIdentity {
+            recordThrownAuthoritativeDenial(apiError, expectedIdentity: cachedIdentity)
+            throw error
+        }
+
         guard shouldFallbackToOffline(error: error),
+              !authoritativeDenialApplies(),
               let cachedIdentity = context.cachedIdentity,
               cachedLicenseMatches(cachedIdentity) else {
             throw error

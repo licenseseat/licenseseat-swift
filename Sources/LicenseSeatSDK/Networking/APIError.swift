@@ -117,6 +117,30 @@ public struct APIError: LocalizedError, Equatable, @unchecked Sendable {
         ].contains(code.lowercased())
     }
 
+    /// Codes with which the server authoritatively refuses *this request*
+    /// without invalidating the license itself: the license does not cover
+    /// this app version (`version_not_entitled`), this product
+    /// (`product_mismatch`), or this feature (`not_entitled`), or the license
+    /// mode cannot be validated (`floating_not_implemented`,
+    /// `named_user_not_implemented`). The LicenseSeat engine returns them from
+    /// validate (as `valid: false`) and activate (as errors).
+    static let authoritativeDenialCodes: Set<String> = [
+        "version_not_entitled", "not_entitled", "product_mismatch",
+        "floating_not_implemented", "named_user_not_implemented",
+        "seat_limit_exceeded"
+    ]
+
+    /// Whether the server authoritatively refused this request for a reason a
+    /// signed offline grant cannot overrule (see the codes above). Such a
+    /// denial never falls back to offline validation, under either
+    /// ``LicenseSeatConfig/OfflineFallbackMode``, but it also does not purge
+    /// the cached license or its offline grant: the same license may still
+    /// be valid for an older app version the user rolls back to.
+    public var isAuthoritativeDenial: Bool {
+        guard let code = code?.lowercased() else { return false }
+        return Self.authoritativeDenialCodes.contains(code)
+    }
+
     /// Whether the server has authoritatively invalidated this installation's
     /// cached license. Authentication, authorization, rate-limit, and malformed
     /// request errors must not erase an otherwise valid signed offline grant.

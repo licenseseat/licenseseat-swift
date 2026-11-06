@@ -18,6 +18,11 @@ public extension LicenseSeat {
         guard let license = cache.getLicense() else {
             return EntitlementStatus(active: false, reason: .noLicense, expiresAt: nil, entitlement: nil)
         }
+        // An authoritative denial outranks whatever the cache last recorded
+        // (it may have failed to persist, or a rollback launch overwrote it).
+        if authoritativeDenialApplies() {
+            return EntitlementStatus(active: false, reason: .noLicense, expiresAt: nil, entitlement: nil)
+        }
         if lastOfflineValidation?.valid == false,
            lastOfflineValidation?.license.key == license.licenseKey {
             return EntitlementStatus(active: false, reason: .noLicense, expiresAt: nil, entitlement: nil)
@@ -52,6 +57,10 @@ public extension LicenseSeat {
     func getStatus() -> LicenseStatus {
         guard let license = cache.getLicense() else {
             return .inactive(message: "No license activated")
+        }
+
+        if let refusal = authoritativeRefusal() {
+            return .invalid(message: refusal.message ?? refusal.code)
         }
 
         guard let validation = license.validation else {
@@ -134,6 +143,7 @@ public extension LicenseSeat {
         currentAutoLicenseKey = nil
         lastOfflineValidation = nil
         runtimeTrust = nil
+        authoritativeDenial = nil
         lastHeartbeatResponse = nil
         lastHeartbeatError = nil
         isOnline = true

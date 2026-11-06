@@ -65,6 +65,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **Authoritative entitlement denials never fall back to the offline grant**
+  (#25). `APIError.isAuthoritativeDenial` covers `version_not_entitled`,
+  `not_entitled`, `product_mismatch`, `seat_limit_exceeded`,
+  `floating_not_implemented`, and `named_user_not_implemented`. A denial from
+  validate (`valid: false` or thrown) or from re-activating the cached
+  activation is recorded as a separate authoritative decision (in memory
+  first, then protected storage) that no offline result can overwrite. While
+  it applies, offline fallback (both modes), launch-time offline
+  verification, `verifyCachedOffline()` (checked again after any key fetch),
+  `getStatus()`, and `checkEntitlement()` all refuse, even if persisting it
+  failed (and, after a partial write, on relaunch from the saved
+  validation). Any in-flight artifact refresh is fenced, and status
+  subscribers are notified even when saving fails. The activation and its
+  offline grant are **kept** (behaviour change for the `valid: false` shape,
+  which used to purge). Version decisions are kept per version: an online
+  acceptance only covers the version the server actually checked (the one
+  submitted with telemetry — nothing when telemetry is off), a later denial
+  of a version always outranks an earlier acceptance, and a fresh restrictive
+  ceiling discards accepted versions it no longer covers. Other versions are
+  exempt only via the denial's own ceiling, compared with a strict,
+  server-compatible parser. A delayed failure of a superseded re-activation
+  never mutates state. 401/403 auth errors and 429 stay eligible for `.always` fallback;
+  revocation still purges. `LicenseSeatFailure` gains `.notEntitled`.
+
 - Offline authorization time is now paired with a monotonic process clock
   (#12), anchored on a **trusted** time sample: the signed issuance time
   (`iat`) of an offline artifact this process has just fetched and verified

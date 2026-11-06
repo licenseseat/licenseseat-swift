@@ -181,6 +181,10 @@ public final class LicenseSeat {
         validation: ValidationResponse?
     )?
 
+    /// The authoritative denial established in this process (mirrors the
+    /// persisted record; see `currentAuthoritativeDecisions()`).
+    internal var authoritativeDenial: AuthoritativeDecisionRecord?
+
     /// Most recent successful heartbeat acknowledgement in this process.
     public internal(set) var lastHeartbeatResponse: HeartbeatResponse?
 
@@ -246,7 +250,10 @@ public final class LicenseSeat {
             // Complete local verification before starting the online request.
             // Ordering these operations prevents a late local task from
             // overwriting an authoritative invalid response from the server.
-            if let offlineResult = await quickVerifyCachedOfflineLocal() {
+            // A persisted authoritative denial (for example this app version
+            // is not covered) is not overruled by a cached offline grant.
+            if !authoritativeDenialApplies(),
+               let offlineResult = await quickVerifyCachedOfflineLocal() {
                 guard !Task.isCancelled else { return }
                 if cache.updateValidation(offlineResult, markValidatedOnline: false) {
                     recordOfflineRuntimeTrust(offlineResult)
@@ -341,6 +348,7 @@ public final class LicenseSeat {
         currentAutoLicenseKey = nil
         lastOfflineValidation = nil
         runtimeTrust = nil
+        authoritativeDenial = nil
 
         eventBus.emit(.licenseRevoked, [
             "code": error.code ?? "unknown",

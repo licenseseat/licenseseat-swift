@@ -50,6 +50,20 @@ extension LicenseSeat {
                 code: "invalid_configuration"
             )
         }
+        if let refusal = authoritativeDenialRefusal() { return refusal }
+        let result = await verifyCachedOfflineArtifacts()
+        // Re-check after every suspension: a denial may have been recorded
+        // while a signing key was being fetched.
+        if result.valid, let refusal = authoritativeDenialRefusal() { return refusal }
+        return result
+    }
+
+    private func authoritativeDenialRefusal() -> ValidationResponse? {
+        guard let refusal = authoritativeRefusal() else { return nil }
+        return makeOfflineValidationResponse(valid: false, code: refusal.code)
+    }
+
+    private func verifyCachedOfflineArtifacts() async -> ValidationResponse {
         var machineFileFailure: ValidationResponse?
         if let machineFile = cache.getMachineFile() {
             let result = await verifyCachedMachineFileForAuthorization(

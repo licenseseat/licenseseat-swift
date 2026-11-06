@@ -49,6 +49,12 @@ public extension LicenseSeat {
         }
         try validateFingerprint(deviceId, allowLegacyShortValue: false)
         eventBus.emit(.activationStart, ["licenseKey": licenseKey, "deviceId": deviceId])
+        // A re-activation of the activation already cached here: an
+        // authoritative refusal of it is a decision about that activation.
+        let reactivatedIdentity = cache.getLicense().flatMap { cached in
+            cached.licenseKey == licenseKey && cached.deviceId == deviceId
+                ? CachedLicenseIdentity(cached) : nil
+        }
 
         do {
             let activation: ActivationResponse = try await apiClient.post(
@@ -74,6 +80,18 @@ public extension LicenseSeat {
             eventBus.emit(.activationSuccess, license)
             return license
         } catch {
+            // Only the current request may mutate state: a delayed failure of a
+            // superseded re-activation must not undo a newer success.
+            if let apiError = error as? APIError,
+               currentActivationRequestID == requestID,
+               let identity = reactivatedIdentity,
+               cachedLicenseMatches(identity) {
+                if apiError.invalidatesCachedLicense {
+                    handleAuthoritativeInvalidation(apiError, expectedIdentity: identity)
+                } else if apiError.isAuthoritativeDenial {
+                    recordThrownAuthoritativeDenial(apiError, expectedIdentity: identity)
+                }
+            }
             eventBus.emit(.activationError, ["licenseKey": licenseKey, "error": error])
             throw error
         }
@@ -175,6 +193,7 @@ private extension LicenseSeat {
         cache.clearOfflineToken()
         cache.clearMachineFile()
         lastOfflineValidation = nil
+        recordOnlineAcceptance(for: license)
         recordRuntimeTrust(.onlineResponse)
 
         startAutoValidation(licenseKey: license.licenseKey)
