@@ -350,23 +350,31 @@ final class OfflineArtifactPreferenceTests: LicenseSeatTestCase {
     }
 
     func testSyncDoesNotFallBackWhenLegacyTokensAreDisabled() async throws {
+        // Fresh storage, and assertions on this instance's own events and
+        // cache: the instance replaced here may still finish a
+        // network-monitor refresh against the shared mock (filed as #33).
+        sdk.shutdown()
+        storagePrefix = "offline_artifact_test_\(UUID().uuidString)_"
         reconfigure(legacyOfflineTokensEnabled: false)
-        let paths = try installServer { request in
+        cacheFixtureIdentity()
+        _ = try installServer { request in
             try Self.response(request, status: 404, json: [
                 "error": ["code": "not_found", "message": "Not found"]
             ])
         }
-        let events = observe(["offlineAssets:fetchError", "offlineToken:ready"])
+        let events = observe([
+            "offlineAssets:fetchError", "offlineToken:fetching", "offlineToken:ready"
+        ])
 
         await sdk.syncOfflineAssets()
         await waitForEvents(events, count: 1)
 
         XCTAssertNil(sdk.cache.getOfflineToken())
-        XCTAssertFalse(paths.paths.contains { $0.hasSuffix("/offline-token") })
-        XCTAssertEqual(events.names, ["offlineAssets:fetchError"])
+        XCTAssertEqual(events.names, ["offlineAssets:fetchError"], "no legacy-token request from this instance")
         let payload = events.events.first?.1 as? [String: Any]
         XCTAssertEqual((payload?["machineFileError"] as? APIError)?.status, 404)
     }
+
 
     func testAuthoritativeMachineFileRefusalRevokesWithoutFallingBack() async throws {
         let paths = try installServer { request in
