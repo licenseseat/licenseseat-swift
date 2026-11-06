@@ -140,12 +140,25 @@ do {
     print("Activated: \(license.licenseKey)")
     print("Device ID: \(license.deviceId)")
     print("Activation ID: \(license.activationId)")
-} catch let error as APIError {
-    print("Activation failed: \(error.code ?? "unknown") - \(error.message)")
 } catch {
-    print("Activation failed: \(error.localizedDescription)")
+    // One classification over every error type the SDK throws
+    // (APIError, LicenseSeatError, URLError, CancellationError, ...).
+    let failure = LicenseSeatFailure(error)
+    switch failure.category {
+    case .invalidLicenseKey, .seatLimitReached, .licenseNotUsable:
+        showActivationError(failure.userMessage, failure.recoverySuggestion)
+    case _ where failure.isRetryable:
+        showRetryBanner(failure.userMessage)
+    default:
+        showActivationError(failure.userMessage, failure.recoverySuggestion)
+    }
 }
 ```
+
+`LicenseSeatFailure` is additive: the SDK still throws its original error
+types, so existing `catch let error as APIError` ladders keep working.
+`userMessage` is safe to show (it never echoes keys, URLs, or server text);
+`isRetryable` and `isTerminal` tell you whether to retry or stop.
 
 ### 3. Check License Status
 

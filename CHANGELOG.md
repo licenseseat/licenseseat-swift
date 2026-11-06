@@ -28,6 +28,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `LicenseSeatFailure` (#11): one umbrella over every error a throwing call
+  can surface (`APIError`, `LicenseSeatError`, `URLError`,
+  `CancellationError`, decoding errors, `LicenseSeatStoreError`). Wrap any
+  caught error with `LicenseSeatFailure(error)` for an exhaustive `category`
+  (invalid key, seat limit, license not usable, network, server, rate
+  limited, unauthorized, configuration, device identity, storage, …),
+  `isRetryable`, `isTerminal`, a display-safe `userMessage`, and a
+  `recoverySuggestion`. Purely additive: thrown types are unchanged.
 - Typed state accessors at parity with the Rust SDK (#13):
   `restoreLicense()` (never throws; returns a `RestoreResult`),
   `stateSnapshot()` (`LicenseStateSnapshot`: status, online flag, license,
