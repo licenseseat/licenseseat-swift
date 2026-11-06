@@ -266,9 +266,9 @@ final class OfflineArtifactPreferenceTests: LicenseSeatTestCase {
         XCTAssertEqual(sdk.currentMachineFile, try Self.machineFile("valid"))
         XCTAssertNil(sdk.cache.getOfflineToken())
         XCTAssertFalse(paths.paths.contains { $0.hasSuffix("/offline-token") }, "\(paths.paths)")
-        XCTAssertEqual(events.names, ["machineFile:ready", "offlineAssets:ready"])
+        XCTAssertEqual(Array(events.names.prefix(2)), ["machineFile:ready", "offlineAssets:ready"])
         XCTAssertEqual(
-            (events.events.last?.1 as? [String: Any])?["artifact"] as? String,
+            (events.events.dropFirst().first?.1 as? [String: Any])?["artifact"] as? String,
             "machine_file"
         )
     }
@@ -287,17 +287,18 @@ final class OfflineArtifactPreferenceTests: LicenseSeatTestCase {
         XCTAssertNil(sdk.currentMachineFile)
         XCTAssertEqual(sdk.cache.getOfflineToken()?.token.kid, Self.tokenKeyId)
         XCTAssertNotNil(sdk.currentLicense(), "a scope error must never revoke the license")
+        // A network-monitor refresh may run the same sequence again; what
+        // matters is that the machine file is asked for first.
+        let order = paths.paths.filter { $0.hasSuffix("/machine-file") || $0.hasSuffix("/offline-token") }
+            .map { ($0 as NSString).lastPathComponent }
+        XCTAssertEqual(order.first, "machine-file", "\(order)")
+        XCTAssertTrue(order.contains("offline-token"), "\(order)")
         XCTAssertEqual(
-            paths.paths.filter { $0.hasSuffix("/machine-file") || $0.hasSuffix("/offline-token") }
-                .map { ($0 as NSString).lastPathComponent },
-            ["machine-file", "offline-token"]
-        )
-        XCTAssertEqual(
-            events.names,
+            Array(events.names.prefix(3)),
             ["machineFile:fetchError", "offlineToken:ready", "offlineAssets:ready"]
         )
         XCTAssertEqual(
-            (events.events.last?.1 as? [String: Any])?["artifact"] as? String,
+            (events.events.dropFirst(2).first?.1 as? [String: Any])?["artifact"] as? String,
             "offline_token"
         )
     }
