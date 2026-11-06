@@ -1594,6 +1594,11 @@ final class LicenseSeatSDKTests: LicenseSeatTestCase {
             var signingKeyRequests = 0
 
             MockURLProtocol.requestHandler = { request in
+                // Background refresh (network monitor) may reach the mock too;
+                // only signing-key fetches are under test.
+                guard request.url?.path.contains("/signing_keys/") == true else {
+                    throw URLError(.notConnectedToInternet)
+                }
                 signingKeyRequests += 1
                 let payload: [String: Any] = [
                     "object": "signing_key",
