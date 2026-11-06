@@ -109,6 +109,16 @@ final class StorageReadFailureTests: LicenseSeatTestCase {
         }
     }
 
+    func testAnUnreadableDecisionStoreIsNeverReadAsNoDenial() async throws {
+        sdk.cache.simulatedReadFailures = [LicenseCache.Key.authoritativeDenial]
+        XCTAssertTrue(sdk.authoritativeDenialApplies())
+        if case .active = sdk.getStatus() {
+            XCTFail("an unreadable decision store must not grant")
+        }
+        sdk.cache.simulatedReadFailures = []
+        XCTAssertFalse(sdk.authoritativeDenialApplies())
+    }
+
     func testAnUnreadableWatermarkIsNeverLowered() async throws {
         let high = Date().timeIntervalSince1970
         XCTAssertTrue(sdk.cache.setLastSeenTimestamp(high))
