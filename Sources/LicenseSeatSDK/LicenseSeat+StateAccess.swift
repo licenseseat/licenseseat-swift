@@ -121,7 +121,8 @@ public extension LicenseSeat {
                 : [],
             trustedSource: currentRuntimeTrust,
             lastSeenTimestamp: lastSeenTimestamp(),
-            nextAutoValidationAt: nextAutoValidationAt
+            nextAutoValidationAt: nextAutoValidationAt,
+            licenseStorageUnavailable: license == nil && isLicenseStorageUnavailable
         )
     }
 
@@ -143,7 +144,7 @@ public extension LicenseSeat {
                 status: getStatus(),
                 license: nil,
                 validation: nil,
-                error: nil
+                error: isLicenseStorageUnavailable ? LicenseSeatError.cacheError : nil
             )
         }
 
@@ -179,5 +180,14 @@ public extension LicenseSeat {
             validation: validation,
             error: failure
         )
+    }
+}
+
+extension LicenseSeat {
+    /// The cached activation, or why there is none: an unreadable store is a
+    /// transient ``LicenseSeatError/cacheError``, never "not activated".
+    func requireCachedLicense() throws -> License {
+        if let license = cache.getLicense() { return license }
+        throw isLicenseStorageUnavailable ? LicenseSeatError.cacheError : LicenseSeatError.noActiveLicense
     }
 }

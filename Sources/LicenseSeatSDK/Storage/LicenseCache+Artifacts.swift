@@ -115,6 +115,10 @@ extension LicenseCache {
     func setLastSeenTimestamp(_ timestamp: TimeInterval) -> Bool {
         guard timestamp.isFinite, timestamp > 0 else { return false }
 
+        // Never ratchet over a watermark we could not read: that could lower it.
+        if case .failed = readProtectedOutcome(forKey: Key.lastSeenTimestamp) {
+            return false
+        }
         let protectedValue = readProtectedData(forKey: Key.lastSeenTimestamp)
             .flatMap { String(data: $0, encoding: .utf8) }
             .flatMap(TimeInterval.init)

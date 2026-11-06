@@ -841,7 +841,7 @@ the string API accepts. The full list with payloads is in the DocC
 
 | Area | Events |
 | ---- | ------ |
-| Cached state | `license:loaded`, `sdk:reset`, `sdk:error` |
+| Cached state | `license:loaded`, `license:storage-unavailable`, `sdk:reset`, `sdk:error` |
 | Activation | `activation:start`, `activation:success`, `activation:error` |
 | Validation | `validation:start`, `validation:success`, `validation:failed`, `validation:error` |
 | Offline validation | `validation:offline-success`, `validation:offline-failed` |

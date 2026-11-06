@@ -39,7 +39,7 @@ Handlers are delivered on the main queue.
 
 | Area | Events (`EventKind` case) |
 | --- | --- |
-| Cached state | `license:loaded` (`.licenseLoaded`), `sdk:reset` (`.sdkReset`), `sdk:error` (`.sdkError`) |
+| Cached state | `license:loaded` (`.licenseLoaded`), `license:storage-unavailable` (`.licenseStorageUnavailable`), `sdk:reset` (`.sdkReset`), `sdk:error` (`.sdkError`) |
 | Activation | `activation:start` (`.activationStart`), `activation:success` (`.activationSuccess`), `activation:error` (`.activationError`) |
 | Validation | `validation:start` (`.validationStart`), `validation:success` (`.validationSuccess`), `validation:failed` (`.validationFailed`), `validation:error` (`.validationError`) |
 | Offline validation | `validation:offline-success` (`.validationOfflineSuccess`), `validation:offline-failed` (`.validationOfflineFailed`) |

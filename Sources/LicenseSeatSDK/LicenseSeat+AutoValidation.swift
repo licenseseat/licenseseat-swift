@@ -254,7 +254,7 @@ extension LicenseSeat {
         // response from one activation must never overwrite or revoke its
         // replacement, even when the key and fingerprint are unchanged.
         guard let requestedLicense = cache.getLicense() else {
-            let error = LicenseSeatError.noActiveLicense
+            let error: LicenseSeatError = isLicenseStorageUnavailable ? .cacheError : .noActiveLicense
             eventBus.emit(.sdkError, ["message": error.localizedDescription])
             eventBus.emit(.offlineTokenFetchError, ["error": error])
             eventBus.emit(.offlineAssetsFetchError, ["error": error])

@@ -201,7 +201,7 @@ public enum LicenseSeatFailure: Error, Equatable, Sendable {
         case .deviceIdentity:
             return "This device's identity couldn't be read. Your keychain may be locked."
         case .storage:
-            return "The license couldn't be saved on this device."
+            return "The license couldn't be read or saved on this device."
         case .invalidResponse:
             return "The license server sent an unexpected response."
         case .cancelled:
@@ -237,7 +237,7 @@ public enum LicenseSeatFailure: Error, Equatable, Sendable {
         case .deviceIdentity:
             return "Unlock your login keychain (or log out and back in), then try again."
         case .storage:
-            return "Make sure the disk isn't full, then try again."
+            return "Unlock your keychain (or log out and back in), make sure the disk isn't full, then try again."
         case .cancelled, .unknown:
             return nil
         }
