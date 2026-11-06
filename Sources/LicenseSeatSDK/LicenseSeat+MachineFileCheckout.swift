@@ -98,6 +98,14 @@ extension LicenseSeat {
             guard cache.setMachineFile(machineFile) else {
                 throw LicenseSeatError.cacheError
             }
+            // The newer signed artifact supersedes any legacy token for this
+            // activation. Keeping the older token would let it override the
+            // machine file's verdict later (for example after the license end
+            // date was moved earlier), so it is discarded.
+            cache.clearOfflineToken()
+            guard cache.getOfflineToken() == nil else {
+                throw LicenseSeatError.cacheError
+            }
             if let issuedAt = verification.payload?.iat {
                 anchorSignedIssuance(issuedAt)
             }

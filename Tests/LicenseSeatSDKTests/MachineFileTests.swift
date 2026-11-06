@@ -251,6 +251,22 @@ final class MachineFileTests: LicenseSeatTestCase {
         XCTAssertEqual(result.code, try Self.expectedCode("expired"))
     }
 
+    func testServerFixturesWithNonActiveEmbeddedLicensesAreRejected() async throws {
+        for name in ["revoked_license", "suspended_license"] {
+            let result = try sdk.verifyMachineFile(try Self.machineFile(name))
+            XCTAssertFalse(result.valid, name)
+            XCTAssertNil(result.payload, name)
+            XCTAssertEqual(result.code, try Self.expectedCode(name), name)
+        }
+    }
+
+    func testServerFixtureFromAnotherActivationIsAMismatch() async throws {
+        let result = try sdk.verifyMachineFile(try Self.machineFile("foreign_activation_expired"))
+        XCTAssertFalse(result.valid)
+        XCTAssertEqual(result.code, "activation_mismatch")
+        XCTAssertEqual(result.code, try Self.expectedCode("foreign_activation_expired"))
+    }
+
     func testTamperedServerFixtureIsRejectedBeforeDecryption() async throws {
         // One flipped ciphertext character. The signature covers `enc`, so this
         // must fail on the signature and never reach AES at all.
@@ -840,6 +856,26 @@ final class MachineFileTests: LicenseSeatTestCase {
         )
         XCTAssertFalse(rolledBack.valid)
         XCTAssertEqual(rolledBack.code, "token_expired")
+    }
+
+    func testAForeignActivationsExpiredFileIsAMismatchNotAVerdict() async throws {
+        // Activation binding is established before time claims, so a restored
+        // expired file from another activation can't be read as "expired" for
+        // this one (which would block a valid legacy token).
+        let now = Int(Date().timeIntervalSince1970)
+        let artifact = try makeSyntheticMachineFile(
+            activationId: "some-other-activation",
+            iat: now - (10 * 86_400),
+            exp: now - 86_400
+        )
+
+        let result = try sdk.verifyMachineFile(
+            artifact.machineFile,
+            publicKeyB64: artifact.publicKeyB64
+        )
+
+        XCTAssertFalse(result.valid)
+        XCTAssertEqual(result.code, "activation_mismatch")
     }
 
     func testInnerAndOuterKeyIdMustAgree() async throws {

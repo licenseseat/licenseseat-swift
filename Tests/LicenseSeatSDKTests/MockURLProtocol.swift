@@ -23,9 +23,28 @@ final class MockURLProtocol: URLProtocol {
         }
     }
     
+    nonisolated(unsafe) private static var asyncStorage = false
+
+    /// Run handlers off URLSession's protocol queue (Darwin only), so a
+    /// handler that blocks does not hold back other requests of the same
+    /// session. Needed to interleave two in-flight requests in race tests.
+    static var deliversAsynchronously: Bool {
+        get {
+            handlerLock.lock()
+            defer { handlerLock.unlock() }
+            return asyncStorage
+        }
+        set {
+            handlerLock.lock()
+            asyncStorage = newValue
+            handlerLock.unlock()
+        }
+    }
+
     /// Helper to reset global state between tests
     static func reset() {
         requestHandler = nil
+        deliversAsynchronously = false
     }
 
     /// URLSession may present a request body to URLProtocol as a stream even
@@ -84,15 +103,58 @@ final class MockURLProtocol: URLProtocol {
             client?.urlProtocolDidFinishLoading(self)
             return
         }
-        do {
-            let (response, data) = try handler(request)
+        #if canImport(Darwin)
+        if Self.deliversAsynchronously {
+            // Call the handler elsewhere, but talk to the client on the thread
+            // URLSession started us on, as URLProtocol requires.
+            nonisolated(unsafe) let clientThread = Thread.current
+            nonisolated(unsafe) let protocolInstance = self
+            nonisolated(unsafe) let unsafeHandler = handler
+            let request = self.request
+            DispatchQueue.global().async {
+                let outcome = OutcomeBox(Result { try unsafeHandler(request) })
+                protocolInstance.perform(
+                    #selector(MockURLProtocol.deliver(_:)),
+                    on: clientThread,
+                    with: outcome,
+                    waitUntilDone: false
+                )
+            }
+            return
+        }
+        #endif
+        deliver(OutcomeBox(Result { try handler(request) }))
+    }
+
+    #if canImport(Darwin)
+    @objc private func deliver(_ box: OutcomeBox) {
+        deliverOutcome(box)
+    }
+    #else
+    private func deliver(_ box: OutcomeBox) {
+        deliverOutcome(box)
+    }
+    #endif
+
+    private func deliverOutcome(_ box: OutcomeBox) {
+        switch box.outcome {
+        case .success(let (response, data)):
             client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
             client?.urlProtocol(self, didLoad: data)
             client?.urlProtocolDidFinishLoading(self)
-        } catch {
+        case .failure(let error):
             client?.urlProtocol(self, didFailWithError: error)
         }
     }
     
     override func stopLoading() {}
+}
+
+/// Carries a handler outcome across `perform(_:on:with:waitUntilDone:)`.
+final class OutcomeBox: NSObject, @unchecked Sendable {
+    let outcome: Result<(HTTPURLResponse, Data), Error>
+
+    init(_ outcome: Result<(HTTPURLResponse, Data), Error>) {
+        self.outcome = outcome
+    }
 }

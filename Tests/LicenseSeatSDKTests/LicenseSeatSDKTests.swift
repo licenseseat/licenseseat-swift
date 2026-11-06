@@ -1594,6 +1594,11 @@ final class LicenseSeatSDKTests: LicenseSeatTestCase {
             var signingKeyRequests = 0
 
             MockURLProtocol.requestHandler = { request in
+                // Background refresh (network monitor) may reach the mock too;
+                // only signing-key fetches are under test.
+                guard request.url?.path.contains("/signing_keys/") == true else {
+                    throw URLError(.notConnectedToInternet)
+                }
                 signingKeyRequests += 1
                 let payload: [String: Any] = [
                     "object": "signing_key",
@@ -1636,6 +1641,14 @@ final class LicenseSeatSDKTests: LicenseSeatTestCase {
 
         MockURLProtocol.requestHandler = { request in
             guard let url = request.url else { throw URLError(.badURL) }
+            if url.path.hasSuffix("/machine-file") {
+                // A server without machine files: sync falls back to the
+                // legacy token, whose key-repair path is under test here.
+                return (
+                    HTTPURLResponse(url: url, statusCode: 404, httpVersion: nil, headerFields: nil)!,
+                    Data()
+                )
+            }
             if url.path.contains("/offline-token") {
                 offlineTokenRequests += 1
                 return (

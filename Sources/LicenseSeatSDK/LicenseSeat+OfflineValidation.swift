@@ -29,9 +29,14 @@ extension LicenseSeat {
     static let maxOfflineTokenLifetime = 100 * 366 * 86_400
     static let maxOfflineEntitlements = 500
 
-    /// Verify the cached offline token and return a validation result.
+    /// Verify the cached offline artifact and return a validation result.
     /// Use this to validate the license when the device is offline.
-    /// The offline token must have been previously downloaded via `syncOfflineAssets()`.
+    ///
+    /// The cached machine file is tried first. When it is absent or does not
+    /// verify, and ``LicenseSeatConfig/legacyOfflineTokensEnabled`` is `true`,
+    /// the cached legacy offline token is tried next. Artifacts are downloaded
+    /// by `syncOfflineAssets()`. With nothing cached the result is invalid
+    /// with code `no_offline_token`.
     public func verifyCachedOffline() async -> ValidationResponse {
         guard config.offlineFallbackEnabled else {
             return makeOfflineValidationResponse(
@@ -45,8 +50,22 @@ extension LicenseSeat {
                 code: "invalid_configuration"
             )
         }
-        guard let offlineToken = cache.getOfflineToken() else {
-            return makeOfflineValidationResponse(valid: false, code: "no_offline_token")
+        var machineFileFailure: ValidationResponse?
+        if let machineFile = cache.getMachineFile() {
+            let result = await verifyCachedMachineFileForAuthorization(
+                machineFile,
+                allowNetwork: true
+            )
+            if let result, result.valid { return result }
+            if let code = result?.code, Self.definitiveMachineFileVerdicts.contains(code) {
+                return result ?? makeOfflineValidationResponse(valid: false, code: code)
+            }
+            machineFileFailure = result
+        }
+        guard config.legacyOfflineTokensEnabled,
+              let offlineToken = cache.getOfflineToken() else {
+            return machineFileFailure
+                ?? makeOfflineValidationResponse(valid: false, code: "no_offline_token")
         }
 
         do {
@@ -67,13 +86,31 @@ extension LicenseSeat {
         }
     }
 
-    /// Quick local offline verification (no network calls)
+    /// Quick local offline verification (no network calls). Machine file
+    /// first, then the legacy token when enabled; `nil` when no artifact gave
+    /// a verdict that can be reached without the network. A machine file that
+    /// could not vouch either way (for example a rotated signing key) is
+    /// treated like an absent one at launch, so it never flashes an offline
+    /// denial before online validation runs.
     func quickVerifyCachedOfflineLocal() async -> ValidationResponse? {
         guard config.offlineAuthorityEnabled else { return nil }
-        guard let offlineToken = cache.getOfflineToken() else { return nil }
 
-        let kid = offlineToken.token.kid
-        guard let publicKey = cache.getPublicKey(kid) else { return nil }
+        if let machineFile = cache.getMachineFile(),
+           let result = await verifyCachedMachineFileForAuthorization(
+               machineFile,
+               allowNetwork: false
+           ) {
+            if result.valid { return result }
+            if let code = result.code, Self.definitiveMachineFileVerdicts.contains(code) {
+                return result
+            }
+        }
+
+        guard config.legacyOfflineTokensEnabled,
+              let offlineToken = cache.getOfflineToken(),
+              let publicKey = cache.getPublicKey(offlineToken.token.kid) else {
+            return nil
+        }
 
         return await verifyOfflineTokenAndClaims(offlineToken, publicKeyB64: publicKey)
     }
@@ -169,7 +206,7 @@ extension LicenseSeat {
     // MARK: - Helper Methods
 
     /// Build a ValidationResponse for offline validation
-    private func makeOfflineValidationResponse(
+    func makeOfflineValidationResponse(
         valid: Bool,
         code: String?,
         token: OfflineTokenResponse? = nil

@@ -307,6 +307,7 @@ public final class LicenseSeat {
     ) {
         guard cachedLicenseMatches(expectedIdentity) else { return }
 
+        currentOfflineSyncRequestID = nil
         cancelBackgroundLicenseOperations()
         cache.clear()
         stopAutoValidation()
@@ -322,6 +323,10 @@ public final class LicenseSeat {
         ])
     }
 
+    /// Cancels the tracked background tasks. A sync already inside
+    /// `syncOfflineAssets()` (or one started directly by the host) is not
+    /// stopped by this; it is fenced by `currentOfflineSyncRequestID` and the
+    /// activation-identity checks, which every authoritative decision resets.
     internal func cancelBackgroundLicenseOperations() {
         backgroundValidationTask?.cancel()
         backgroundValidationTask = nil

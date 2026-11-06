@@ -232,7 +232,12 @@ public extension LicenseSeat {
                     publicKeyB64: publicKey,
                     productSlug: productSlug,
                     now: instant.effective,
-                    wallNow: instant.wall
+                    wallNow: instant.wall,
+                    activationId: cachedLicense.flatMap { license in
+                        Self.constantTimeEqual(license.licenseKey, resolvedLicenseKey) &&
+                            Self.constantTimeEqual(license.deviceId, resolvedFingerprint)
+                            ? license.activationId : nil
+                    }
                 )
             )
             // A verified artifact must describe the activation this

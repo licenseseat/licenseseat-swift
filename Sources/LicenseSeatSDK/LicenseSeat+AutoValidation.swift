@@ -219,9 +219,21 @@ extension LicenseSeat {
         }
     }
 
-    /// Sync offline token and public key from the server.
-    /// Downloads the offline token and its corresponding public signing key, caching both locally.
-    /// Emits `offlineToken:ready` on success or `offlineToken:fetchError` on failure.
+    /// Refresh the cached offline artifact and its signing key.
+    ///
+    /// Machine files are preferred: the SDK first checks one out for the
+    /// cached activation (emitting the `machineFile:*` events). Only when that
+    /// fails for a reason other than an authoritative license decision, and
+    /// ``LicenseSeatConfig/legacyOfflineTokensEnabled`` is `true` (the
+    /// default), does it fall back to the legacy offline token (emitting the
+    /// `offlineToken:*` events). An authoritative decision (revoked, expired,
+    /// suspended, device not activated, …) from either endpoint invalidates
+    /// the cached license exactly as validation would, and is never papered
+    /// over by the fallback.
+    ///
+    /// Emits `offlineAssets:ready` (`artifact`: `"machine_file"` or
+    /// `"offline_token"`) when either artifact was refreshed, and
+    /// `offlineAssets:fetchError` when none was.
     public func syncOfflineAssets() async {
         guard config.offlineAuthorityEnabled else {
             stopOfflineRefresh()
@@ -245,9 +257,31 @@ extension LicenseSeat {
             let error = LicenseSeatError.noActiveLicense
             eventBus.emit("sdk:error", ["message": error.localizedDescription])
             eventBus.emit("offlineToken:fetchError", ["error": error])
+            eventBus.emit("offlineAssets:fetchError", ["error": error])
             return
         }
         let requestedIdentity = CachedLicenseIdentity(requestedLicense)
+
+        var machineFileError: Error?
+        switch await syncMachineFile(
+            for: requestedLicense,
+            identity: requestedIdentity,
+            requestID: requestID
+        ) {
+        case .refreshed, .stop:
+            return
+        case .failed(let failure):
+            machineFileError = failure
+            guard config.legacyOfflineTokensEnabled else {
+                eventBus.emit("offlineAssets:fetchError", [
+                    "licenseKey": requestedLicense.licenseKey,
+                    "error": failure,
+                    "machineFileError": failure
+                ])
+                return
+            }
+            log("Machine-file refresh failed; falling back to the legacy offline token")
+        }
 
         do {
             let offlineToken = try await getOfflineToken(for: requestedLicense)
@@ -258,6 +292,11 @@ extension LicenseSeat {
             try ensureCurrentOfflineSync(requestID, identity: requestedIdentity)
             try persistOfflineAssets(offlineToken, publicKey: verification.publicKey)
             eventBus.emit("offlineToken:ready", [
+                "kid": kid,
+                "exp": offlineToken.token.exp
+            ])
+            eventBus.emit("offlineAssets:ready", [
+                "artifact": "offline_token",
                 "kid": kid,
                 "exp": offlineToken.token.exp
             ])
@@ -273,6 +312,88 @@ extension LicenseSeat {
                 "licenseKey": requestedLicense.licenseKey,
                 "error": error
             ])
+            var payload: [String: Any] = [
+                "licenseKey": requestedLicense.licenseKey,
+                "error": error
+            ]
+            if let machineFileError {
+                payload["machineFileError"] = machineFileError
+            }
+            eventBus.emit("offlineAssets:fetchError", payload)
+        }
+    }
+
+    /// The machine-file endpoint reports every validator refusal, and
+    /// unexpected server errors, as a generic invalid-license code
+    /// (license_seat#34). Those are not specific enough to revoke a cached
+    /// license from a background refresh; the legacy token endpoint and
+    /// online validation decide instead.
+    private static let genericMachineFileRefusalCodes: Set<String> = [
+        "license_invalid", "license_invalid_general"
+    ]
+
+    private enum MachineFileSyncOutcome {
+        /// A verified machine file is now cached for the requested activation.
+        case refreshed
+        /// Superseded, cancelled, or an authoritative license decision was
+        /// applied: nothing else may run for this request.
+        case stop
+        /// A non-authoritative failure; the legacy token may be tried.
+        case failed(Error)
+    }
+
+    private func syncMachineFile(
+        for license: License,
+        identity: CachedLicenseIdentity,
+        requestID: UUID
+    ) async -> MachineFileSyncOutcome {
+        do {
+            // No explicit fingerprint: checkout resolves the cached
+            // activation's device id, which keeps pre-floor (short) legacy
+            // fingerprints usable, and commits only while that exact
+            // activation is still cached.
+            let machineFile = try await performMachineFileCheckout(
+                licenseKey: license.licenseKey,
+                options: MachineFileCheckoutOptions(),
+                requestID: requestID
+            )
+            try ensureCurrentOfflineSync(requestID, identity: identity)
+            let kid = machineFileKeyId(machineFile) ?? ""
+            eventBus.emit("machineFile:fetched", ["licenseKey": license.licenseKey])
+            eventBus.emit("machineFile:ready", [
+                "kid": kid,
+                "expiresAt": machineFile.expiresAt as Any
+            ])
+            eventBus.emit("offlineAssets:ready", [
+                "artifact": "machine_file",
+                "kid": kid,
+                "expiresAt": machineFile.expiresAt as Any
+            ])
+            return .refreshed
+        } catch {
+            guard currentOfflineSyncRequestID == requestID,
+                  !(error is CancellationError),
+                  !Task.isCancelled else {
+                return .stop
+            }
+            log("Machine-file refresh failed:", LogRedaction.describe(error))
+            eventBus.emit("machineFile:fetchError", [
+                "licenseKey": license.licenseKey,
+                "error": error
+            ])
+            if let apiError = error as? APIError,
+               apiError.invalidatesCachedLicense,
+               !Self.genericMachineFileRefusalCodes.contains(apiError.code?.lowercased() ?? "") {
+                if cachedLicenseMatches(identity) {
+                    handleAuthoritativeInvalidation(apiError, expectedIdentity: identity)
+                    eventBus.emit("offlineAssets:fetchError", [
+                        "licenseKey": license.licenseKey,
+                        "error": error
+                    ])
+                }
+                return .stop
+            }
+            return .failed(error)
         }
     }
 
@@ -304,6 +425,14 @@ extension LicenseSeat {
     ) throws {
         guard cache.setPublicKey(offlineToken.token.kid, publicKey),
               cache.setOfflineToken(offlineToken) else {
+            throw LicenseSeatError.cacheError
+        }
+        // The freshly verified token is the newest signed statement for this
+        // activation; an older cached machine file must not outrank it (for
+        // example after the license end date moved earlier, or when that
+        // machine file has expired). Newest artifact wins, in both directions.
+        cache.clearMachineFile()
+        guard cache.getMachineFile() == nil else {
             throw LicenseSeatError.cacheError
         }
         anchorSignedIssuance(offlineToken.token.iat)
