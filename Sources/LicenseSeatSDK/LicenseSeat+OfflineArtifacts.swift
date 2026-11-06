@@ -16,7 +16,11 @@ extension LicenseSeat {
     /// vouch either way, so the legacy token may still be consulted.
     static let definitiveMachineFileVerdicts: Set<String> = [
         "token_expired", "license_expired", "grace_period_expired",
-        "clock_tamper", "token_not_yet_valid", "included_license_mismatch"
+        "clock_tamper", "token_not_yet_valid", "included_license_mismatch",
+        // A correctly signed, activation-bound artifact whose authenticated
+        // claims are refused (for example an embedded license that is
+        // revoked or suspended) is a verdict, not an inability to vouch.
+        "invalid_machine_file_claims"
     ]
 
     /// Verify the cached machine file against this installation's activation
@@ -40,6 +44,7 @@ extension LicenseSeat {
         guard let cachedLicense = cache.getLicense() else {
             return makeOfflineValidationResponse(valid: false, code: "license_mismatch")
         }
+        let identity = CachedLicenseIdentity(cachedLicense)
         guard let keyId = machineFileKeyId(machineFile) else {
             return makeOfflineValidationResponse(valid: false, code: "invalid_machine_file")
         }
@@ -56,6 +61,11 @@ extension LicenseSeat {
                 return makeOfflineValidationResponse(valid: false, code: "no_public_key")
             }
             fetched = true
+            // Revocation, reset, or re-activation may have happened while the
+            // key request was suspended: never vouch for a stale activation.
+            guard cachedLicenseMatches(identity), cache.getMachineFile() == machineFile else {
+                return makeOfflineValidationResponse(valid: false, code: "license_mismatch")
+            }
         }
 
         var result = inspectCachedMachineFile(
@@ -69,6 +79,9 @@ extension LicenseSeat {
         if case .failure(let code) = result, code == "signature_invalid",
            !fetched, allowNetwork,
            let refreshed = try? await getSigningKey(keyId: keyId) {
+            guard cachedLicenseMatches(identity), cache.getMachineFile() == machineFile else {
+                return makeOfflineValidationResponse(valid: false, code: "license_mismatch")
+            }
             publicKey = refreshed
             fetched = true
             result = inspectCachedMachineFile(

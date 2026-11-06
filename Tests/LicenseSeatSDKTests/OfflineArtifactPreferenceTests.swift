@@ -388,6 +388,96 @@ final class OfflineArtifactPreferenceTests: LicenseSeatTestCase {
         XCTAssertEqual(events.names, ["license:revoked"])
     }
 
+    // MARK: - Ordering and races (Astra review of #14)
+
+    func testATokenRefreshSupersedesAnOlderMachineFile() async throws {
+        // Newest artifact wins in both directions: an expired (or longer-
+        // lived) cached machine file must not outrank a freshly verified token.
+        XCTAssertTrue(sdk.cache.setMachineFile(try Self.machineFile("expired")))
+        _ = try installServer { request in
+            try Self.response(request, status: 403, json: [
+                "error": ["code": "forbidden", "message": "Missing scope"]
+            ])
+        }
+
+        await sdk.syncOfflineAssets()
+
+        XCTAssertNil(sdk.currentMachineFile)
+        XCTAssertEqual(sdk.cache.getOfflineToken()?.token.kid, Self.tokenKeyId)
+        let result = await sdk.verifyCachedOffline()
+        XCTAssertTrue(result.valid, result.code ?? "")
+    }
+
+    func testASigningKeyFetchRacingRevocationNeverVouches() async throws {
+        XCTAssertTrue(sdk.cache.setMachineFile(try Self.machineFile("valid")))
+        sdk.cache.deleteProtectedData(forKey: LicenseCache.Key.publicKeys)
+        let started = expectation(description: "signing-key request started")
+        started.assertForOverFulfill = false
+        let release = DispatchSemaphore(value: 0)
+        let keyId = Self.fixture.keyId
+        let publicKey = Self.fixture.publicKey
+        MockURLProtocol.requestHandler = { request in
+            guard request.url?.path.contains("/signing_keys/") == true else {
+                throw URLError(.notConnectedToInternet)
+            }
+            started.fulfill()
+            _ = release.wait(timeout: .now() + 5)
+            return try Self.response(request, status: 200, json: [
+                "object": "signing_key", "key_id": keyId, "algorithm": "Ed25519",
+                "public_key": publicKey, "status": "active"
+            ])
+        }
+
+        let verification = Task { await self.sdk.verifyCachedOffline() }
+        await assertFulfillment(of: [started], timeout: 5)
+        sdk.cache.clear() // authoritative revocation lands meanwhile
+        release.signal()
+        let result = await verification.value
+
+        XCTAssertFalse(result.valid, "a stale activation must never be vouched for")
+    }
+
+    func testALateMachineFileCheckoutCannotRestoreAGrantAfterADenial() async throws {
+        let started = expectation(description: "machine-file request started")
+        started.assertForOverFulfill = false
+        let release = DispatchSemaphore(value: 0)
+        let machineFileData = try Self.responseData("valid")
+        let denial = try JSONSerialization.data(withJSONObject: [
+            "object": "validation_result", "valid": false, "code": "suspended",
+            "message": "Suspended", "warnings": NSNull(),
+            "license": [
+                "object": "license", "key": Self.fixture.licenseKey, "status": "suspended",
+                "starts_at": NSNull(), "expires_at": NSNull(), "mode": "hardware_locked",
+                "plan_key": "pro", "seat_limit": 5, "active_seats": 1,
+                "active_entitlements": [], "metadata": NSNull(),
+                "product": ["slug": Self.fixture.productSlug, "name": "Hustl"]
+            ],
+            "activation": NSNull()
+        ] as [String: Any])
+        MockURLProtocol.requestHandler = { request in
+            let path = request.url?.path ?? ""
+            let ok = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil,
+                                     headerFields: ["Content-Type": "application/json"])!
+            if path.hasSuffix("/machine-file") {
+                started.fulfill()
+                _ = release.wait(timeout: .now() + 5)
+                return (ok, machineFileData)
+            }
+            if path.hasSuffix("/validate") { return (ok, denial) }
+            throw URLError(.notConnectedToInternet)
+        }
+
+        let sync = Task { await self.sdk.syncOfflineAssets() }
+        await assertFulfillment(of: [started], timeout: 5)
+        let decision = try await sdk.validate(licenseKey: Self.fixture.licenseKey)
+        XCTAssertFalse(decision.valid)
+        release.signal()
+        await sync.value
+
+        XCTAssertNil(sdk.currentMachineFile, "the late checkout must not re-cache a grant")
+        XCTAssertNil(sdk.cache.getOfflineToken())
+    }
+
     // MARK: - Verification preference
 
     func testVerifyCachedOfflineUsesTheMachineFile() async throws {

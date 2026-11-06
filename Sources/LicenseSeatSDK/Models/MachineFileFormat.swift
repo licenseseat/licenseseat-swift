@@ -113,6 +113,11 @@ struct MachineFileVerificationContext {
     /// The wall-clock reading sampled together with `now`; the only value
     /// the rollback watermark may record.
     let wallNow: Date
+    /// The cached activation the artifact must belong to, when one is known.
+    /// Checked before any time or status claim, so a foreign activation's
+    /// file is reported as `activation_mismatch`, never as a verdict about
+    /// this activation.
+    let activationId: String?
 
     init(
         licenseKey: String,
@@ -120,7 +125,8 @@ struct MachineFileVerificationContext {
         publicKeyB64: String,
         productSlug: String,
         now: Date = Date(),
-        wallNow: Date? = nil
+        wallNow: Date? = nil,
+        activationId: String? = nil
     ) {
         self.licenseKey = licenseKey
         self.fingerprint = fingerprint
@@ -128,5 +134,6 @@ struct MachineFileVerificationContext {
         self.productSlug = productSlug
         self.now = now
         self.wallNow = min(wallNow ?? now, now)
+        self.activationId = activationId
     }
 }

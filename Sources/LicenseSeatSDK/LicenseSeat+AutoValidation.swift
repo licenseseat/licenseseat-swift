@@ -427,6 +427,11 @@ extension LicenseSeat {
               cache.setOfflineToken(offlineToken) else {
             throw LicenseSeatError.cacheError
         }
+        // The freshly verified token is the newest signed statement for this
+        // activation; an older cached machine file must not outrank it (for
+        // example after the license end date moved earlier, or when that
+        // machine file has expired). Newest artifact wins, in both directions.
+        cache.clearMachineFile()
         anchorSignedIssuance(offlineToken.token.iat)
     }
 

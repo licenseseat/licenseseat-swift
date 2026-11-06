@@ -36,6 +36,13 @@ extension LicenseSeat {
         envelopeKeyId: String,
         context: MachineFileVerificationContext
     ) throws {
+        if let expectedActivation = context.activationId,
+           !MachineFileFormat.constantTimeEqual(payload.machineId, expectedActivation) {
+            throw MachineFileVerificationFailure(
+                code: "activation_mismatch",
+                message: "Machine file was issued for a different activation"
+            )
+        }
         guard payload.schemaVersion == MachineFileFormat.schemaVersion,
               !payload.keyId.isEmpty,
               MachineFileFormat.constantTimeEqual(payload.keyId, envelopeKeyId),

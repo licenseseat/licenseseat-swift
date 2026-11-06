@@ -307,6 +307,7 @@ public final class LicenseSeat {
     ) {
         guard cachedLicenseMatches(expectedIdentity) else { return }
 
+        currentOfflineSyncRequestID = nil
         cancelBackgroundLicenseOperations()
         cache.clear()
         stopAutoValidation()

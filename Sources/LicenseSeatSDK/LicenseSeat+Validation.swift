@@ -163,6 +163,9 @@ private extension LicenseSeat {
             // grant before persisting that state so relaunch cannot resurrect
             // a revoked, suspended, or expired activation offline.
             if !result.valid {
+                // Invalidate any in-flight artifact refresh first, so a late
+                // checkout cannot re-cache a grant after this decision.
+                currentOfflineSyncRequestID = nil
                 cache.clearOfflineToken()
                 cache.clearMachineFile()
             }
