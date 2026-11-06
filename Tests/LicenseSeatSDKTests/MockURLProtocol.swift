@@ -126,7 +126,17 @@ final class MockURLProtocol: URLProtocol {
         deliver(OutcomeBox(Result { try handler(request) }))
     }
 
+    #if canImport(Darwin)
     @objc private func deliver(_ box: OutcomeBox) {
+        deliverOutcome(box)
+    }
+    #else
+    private func deliver(_ box: OutcomeBox) {
+        deliverOutcome(box)
+    }
+    #endif
+
+    private func deliverOutcome(_ box: OutcomeBox) {
         switch box.outcome {
         case .success(let (response, data)):
             client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)

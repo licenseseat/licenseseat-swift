@@ -438,9 +438,7 @@ final class OfflineArtifactPreferenceTests: LicenseSeatTestCase {
     }
 
     func testALateMachineFileCheckoutCannotRestoreAGrantAfterADenial() async throws {
-        #if !canImport(Darwin)
-        throw XCTSkip("needs MockURLProtocol.deliversAsynchronously (Darwin)")
-        #endif
+        #if canImport(Darwin)
         // The machine-file response is held while the denial is delivered and
         // committed; only then is the (now stale) checkout released.
         MockURLProtocol.deliversAsynchronously = true
@@ -485,6 +483,9 @@ final class OfflineArtifactPreferenceTests: LicenseSeatTestCase {
 
         XCTAssertNil(sdk.currentMachineFile, "the late checkout must not re-cache a grant")
         XCTAssertNil(sdk.cache.getOfflineToken())
+        #else
+        throw XCTSkip("needs MockURLProtocol.deliversAsynchronously (Darwin)")
+        #endif
     }
 
     // MARK: - Signed status / activation verdicts next to a valid token (F4/F5)
