@@ -230,11 +230,12 @@ final class MachineFileTests: LicenseSeatTestCase {
         let result = try sdk.verifyMachineFile(try Self.machineFile("valid"))
         XCTAssertTrue(result.valid)
 
-        // Drain one main-queue hop so the bus delivery lands. A synchronous
-        // wait(for:) would block the main actor this async test runs on and
-        // the queued fulfill could never execute.
-        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            DispatchQueue.main.async { continuation.resume() }
+        // Delivery hops through the bus queue and then the main queue, so a
+        // single main-queue hop can race it. Wait (bounded) without blocking
+        // the main actor.
+        let deadline = Date().addingTimeInterval(5)
+        while observed.isEmpty, Date() < deadline {
+            try await Task.sleep(nanoseconds: 10_000_000)
         }
         XCTAssertEqual(observed, ["verified"])
     }
@@ -815,6 +816,30 @@ final class MachineFileTests: LicenseSeatTestCase {
 
         XCTAssertFalse(result.valid)
         XCTAssertEqual(result.code, "clock_tamper")
+    }
+
+    func testMachineFileExpiryIsEvaluatedAtTheMonotonicFloor() async throws {
+        // #12: the machine-file path shares the authorization clock.
+        let source = ManualClockSource()
+        sdk.authorizationClock = source.makeTrustedClock()
+        let now = Int(source.wall)
+        let artifact = try makeSyntheticMachineFile(iat: now - 60, exp: now + 3_600)
+
+        let fresh = try sdk.verifyMachineFile(
+            artifact.machineFile,
+            publicKeyB64: artifact.publicKeyB64
+        )
+        XCTAssertTrue(fresh.valid, fresh.message ?? "")
+
+        source.elapse(7_200)
+        source.wall = Double(now + 1_800)
+
+        let rolledBack = try sdk.verifyMachineFile(
+            artifact.machineFile,
+            publicKeyB64: artifact.publicKeyB64
+        )
+        XCTAssertFalse(rolledBack.valid)
+        XCTAssertEqual(rolledBack.code, "token_expired")
     }
 
     func testInnerAndOuterKeyIdMustAgree() async throws {

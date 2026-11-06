@@ -25,7 +25,7 @@ extension LicenseSeat {
             context: context
         )
         try validateMachineLifetimeClaims(payload, context: context)
-        try validateMachineOfflinePolicy(payload, now: context.now)
+        try validateMachineOfflinePolicy(payload, context: context)
         try validateIncludedMachineLicense(payload, context: context)
     }
 
@@ -114,9 +114,9 @@ extension LicenseSeat {
     /// shared with the offline-token path.
     private func validateMachineOfflinePolicy(
         _ payload: MachineFilePayload,
-        now: Date
+        context: MachineFileVerificationContext
     ) throws {
-        let nowUnix = Int(now.timeIntervalSince1970)
+        let nowUnix = Int(context.now.timeIntervalSince1970)
         let skew = offlineClockSkewSeconds(nowUnix: nowUnix)
         do {
             try validateMaximumOfflineAge(
@@ -124,7 +124,10 @@ extension LicenseSeat {
                 nowUnix: nowUnix,
                 clockSkewSeconds: skew
             )
-            try persistOfflineClockState(now: now, clockSkewSeconds: skew)
+            try persistOfflineClockState(
+                AuthorizationInstant(wall: context.wallNow, effective: context.now),
+                clockSkewSeconds: skew
+            )
         } catch let failure as OfflineVerificationFailure {
             throw MachineFileVerificationFailure(
                 code: failure.code,

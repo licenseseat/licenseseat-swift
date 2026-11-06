@@ -122,6 +122,38 @@ let config = LicenseSeatConfig(
 )
 ```
 
+### Clock rollback
+
+Two mechanisms cooperate so that winding the system clock back cannot revive an
+expired grant, without ever locking out a customer whose clock behaves normally:
+
+- **Persisted watermark.** Every accepted offline verification ratchets a
+  protected watermark forward (`max`); a later verification whose clock is more
+  than `maxClockSkewMs` behind it fails with `clock_tamper`. Authoritative online
+  success (activation, validation, heartbeat) *anchors* it to the current time,
+  which may lower it, so a transiently wrong future clock heals on the next
+  online contact. `reset()` and `clear()` preserve it, like the installation ID.
+- **In-process monotonic floor (after a trusted time sample).** Once this
+  process has fetched and verified a fresh offline artifact (machine file or
+  legacy token), offline artifacts and entitlement expiry are evaluated at
+  `max(wall clock, signedIssuance + monotonic elapsed − maxClockSkewMs)` for
+  the rest of the process. The signed issuance time (`iat`) was produced by the
+  licensing server before the response arrived, so it is a lower bound on real
+  time with verifiable provenance; HTTP `Date` headers are never used (a proxy
+  can write them). The floor only rises. Samples more than 24 hours ahead of
+  the local clock are ignored.
+
+  Limits, by design: the local clock is never a trusted sample, so a cold
+  offline session relies on the persisted watermark alone, as before 0.6.
+  Rollback by less than `maxClockSkewMs` below the floor is accepted. The floor
+  is never persisted: only the wall-clock reading sampled together with each
+  accepted verification ratchets the watermark. It is shared by every SDK
+  instance with the same storage prefix (exact bytes) and lives for the
+  process.
+
+Time zones and daylight saving time never enter either check: both operate on
+UTC seconds since 1970.
+
 `maxOfflineDays == 0`, the default, applies no additional host-side age cap:
 token and underlying license expiry govern. Values in `1...36,600` expire a
 grant at most that many days after its signed `iat`. Negative and larger values

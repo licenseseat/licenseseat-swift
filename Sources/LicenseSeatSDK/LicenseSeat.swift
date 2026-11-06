@@ -121,6 +121,14 @@ public final class LicenseSeat {
     /// Event bus for SDK events
     internal let eventBus = EventBus()
 
+    /// Wall clock paired with a monotonic process clock. Every local
+    /// authorization decision (offline artifacts, entitlement expiry) is
+    /// evaluated at ``authorizationTime()``, so the system clock cannot be
+    /// wound back in-process to revive an expired grant. Shared per storage
+    /// prefix within the process; re-anchored only by authoritative online
+    /// success.
+    internal var authorizationClock: AuthorizationClock
+
     /// Network connectivity monitor
     #if canImport(Network)
     internal var networkMonitor: NWPathMonitor?
@@ -178,6 +186,7 @@ public final class LicenseSeat {
     /// - Parameter urlSession: URLSession for dependency injection
     public init(config: LicenseSeatConfig = .default, urlSession: URLSession? = nil) {
         self.config = config
+        self.authorizationClock = AuthorizationClock.shared(scope: config.storagePrefix)
         self.cache = LicenseCache(prefix: config.storagePrefix)
         self.apiClient = APIClient(config: config, session: urlSession)
 

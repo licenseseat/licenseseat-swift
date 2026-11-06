@@ -953,11 +953,16 @@ final class HeartbeatTimerTests: LicenseSeatTestCase {
         XCTAssertNotNil(sdk.heartbeatTask)
         XCTAssertNil(sdk.validationTask, "validationTask should be nil (autoValidateInterval=0)")
 
-        // Wait for at least 2 heartbeat cycles
-        try await Task.sleep(nanoseconds: 1_000_000_000) // 1 second
+        // Wait (bounded) for at least 2 heartbeat cycles. Each successful
+        // heartbeat writes the protected watermark, so on a slow Keychain two
+        // cycles can take longer than a fixed 1 s sleep (#24).
+        let deadline = Date().addingTimeInterval(10)
+        while (heartbeatCount < 2 || heartbeatSuccessCount < 2), Date() < deadline {
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
 
         XCTAssertGreaterThanOrEqual(heartbeatCount, 2,
-            "Standalone heartbeat should fire at least twice in 1s with 0.3s interval (fired \(heartbeatCount) times)")
+            "Standalone heartbeat should fire repeatedly with a 0.3s interval (fired \(heartbeatCount) times)")
         XCTAssertGreaterThanOrEqual(heartbeatSuccessCount, 2,
             "Heartbeat responses must decode and emit success, not merely reach the server")
 

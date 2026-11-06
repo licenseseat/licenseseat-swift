@@ -306,6 +306,7 @@ extension LicenseSeat {
               cache.setOfflineToken(offlineToken) else {
             throw LicenseSeatError.cacheError
         }
+        anchorSignedIssuance(offlineToken.token.iat)
     }
 
     /// Schedule periodic offline refresh

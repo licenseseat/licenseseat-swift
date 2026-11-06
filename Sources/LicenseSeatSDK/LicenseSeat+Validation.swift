@@ -178,7 +178,7 @@ private extension LicenseSeat {
             // Re-anchoring (possibly lowering) recovers a watermark poisoned
             // by a transiently future-set clock. See
             // `LicenseCache.anchorLastSeenTimestamp(_:)`.
-            guard cache.anchorLastSeenTimestamp(Date().timeIntervalSince1970) else {
+            guard anchorAuthoritativeTime(Date()) else {
                 throw LicenseSeatError.cacheError
             }
             eventBus.emit("validation:success", result)

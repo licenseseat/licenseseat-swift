@@ -98,6 +98,9 @@ extension LicenseSeat {
             guard cache.setMachineFile(machineFile) else {
                 throw LicenseSeatError.cacheError
             }
+            if let issuedAt = verification.payload?.iat {
+                anchorSignedIssuance(issuedAt)
+            }
         }
         return machineFile
     }

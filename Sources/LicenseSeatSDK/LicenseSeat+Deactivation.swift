@@ -134,7 +134,7 @@ public extension LicenseSeat {
             // Heartbeat acceptance is an authoritative online contact:
             // re-anchor (possibly lower) the clock watermark. See
             // `LicenseCache.anchorLastSeenTimestamp(_:)`.
-            guard cache.anchorLastSeenTimestamp(Date().timeIntervalSince1970) else {
+            guard anchorAuthoritativeTime(Date()) else {
                 throw LicenseSeatError.cacheError
             }
 

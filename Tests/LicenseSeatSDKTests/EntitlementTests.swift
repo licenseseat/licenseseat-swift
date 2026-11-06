@@ -71,6 +71,27 @@ final class EntitlementTests: LicenseSeatTestCase {
         )
     }
 
+    func testEntitlementExpiryIsEvaluatedAtTheMonotonicFloor() async throws {
+        // #12: winding the wall clock back in-process cannot revive an
+        // entitlement whose expiry has really passed.
+        let sdk = try XCTUnwrap(sdk)
+        let source = ManualClockSource()
+        sdk.authorizationClock = source.makeTrustedClock()
+        let entitlement = Entitlement(
+            key: "trial-access",
+            expiresAt: Date(timeIntervalSince1970: source.wall + 3_600)
+        )
+        sdk.cache.setLicense(makeLicense(validation: makeValidation(entitlements: [entitlement])))
+        XCTAssertTrue(sdk.checkEntitlement("trial-access").active)
+
+        source.elapse(7_200)
+        source.wall -= 7_200
+
+        let status = sdk.checkEntitlement("trial-access")
+        XCTAssertFalse(status.active)
+        XCTAssertEqual(status.reason, .expired)
+    }
+
     func testActiveEntitlement() async {
         // Given: A license with active entitlements
         let entitlement = Entitlement(

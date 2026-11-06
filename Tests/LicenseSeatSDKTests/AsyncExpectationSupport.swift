@@ -93,6 +93,7 @@ func asyncTest<T: LicenseSeatTestCase>(
 // makes that runner guarantee explicit until corelibs XCTest's nonsending fix
 // is available in the minimum supported toolchain.
 extension APIClientTests: @unchecked Sendable {}
+extension AuthorizationClockTests: @unchecked Sendable {}
 extension AutoValidationTests: @unchecked Sendable {}
 #if canImport(Combine)
 extension CombineDemandTests: @unchecked Sendable {}

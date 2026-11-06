@@ -179,12 +179,47 @@ extension LicenseSeat {
         }
     }
 
-    func persistOfflineClockState(now: Date, clockSkewSeconds: Int) throws {
+    /// Record an authoritative online acceptance: re-anchor the persisted
+    /// rollback watermark (which may lower it, per the cross-SDK contract).
+    /// The in-process floor is not touched here; only a freshly verified
+    /// signed issuance moves it (``anchorSignedIssuance(_:)``). Returns
+    /// `false` if the watermark could not be stored.
+    func anchorAuthoritativeTime(_ timestamp: Date) -> Bool {
+        cache.anchorLastSeenTimestamp(timestamp.timeIntervalSince1970)
+    }
+
+    /// A freshly fetched offline artifact has been verified and committed:
+    /// its signed issuance time is a trusted lower bound on real time.
+    func anchorSignedIssuance(_ issuedAtUnix: Int) {
+        authorizationClock.anchor(trustedTime: Date(timeIntervalSince1970: Double(issuedAtUnix)))
+    }
+
+    /// The instant local authorization decisions are evaluated at: the wall
+    /// clock, raised to the monotonic floor (less the configured clock-skew
+    /// tolerance) if the wall clock has been wound behind it.
+    func authorizationTime() -> Date {
+        authorizationSnapshot().effective
+    }
+
+    /// One consistent reading: the wall clock sampled once plus the
+    /// authorization instant derived from it.
+    func authorizationSnapshot() -> AuthorizationInstant {
+        let skewMs = config.maxClockSkewMs
+        let tolerance = skewMs.isFinite && skewMs > 0 ? min(skewMs, 86_400_000) / 1_000 : 0
+        return authorizationClock.snapshot(tolerance: tolerance)
+    }
+
+    /// Rollback check plus `max()` ratchet after a successful offline
+    /// verification. Claims were checked at `instant.effective`; only the wall
+    /// reading taken *in the same sample* is persisted — never the floor, and
+    /// never a later re-sample — so a relaunch with a correct clock is never
+    /// compared with a synthetic future.
+    func persistOfflineClockState(_ instant: AuthorizationInstant, clockSkewSeconds: Int) throws {
         if let lastSeen = cache.getLastSeenTimestamp(),
-           now.timeIntervalSince1970 + Double(clockSkewSeconds) < lastSeen {
+           instant.effective.timeIntervalSince1970 + Double(clockSkewSeconds) < lastSeen {
             throw OfflineVerificationFailure(code: "clock_tamper")
         }
-        guard cache.setLastSeenTimestamp(now.timeIntervalSince1970) else {
+        guard cache.setLastSeenTimestamp(instant.wall.timeIntervalSince1970) else {
             throw OfflineVerificationFailure(code: "cache_error")
         }
     }

@@ -160,7 +160,11 @@ final class AutoValidationTests: LicenseSeatTestCase {
         let requestCount = LockedRequestCount()
 
         MockURLProtocol.requestHandler = { request in
-            requestCount.increment()
+            // Only validation is under test. A network-monitor "online"
+            // transition may legitimately start an offline-artifact refresh.
+            if request.url?.path.hasSuffix("/validate") == true {
+                requestCount.increment()
+            }
             let url = try XCTUnwrap(request.url)
             let response = try XCTUnwrap(HTTPURLResponse(
                 url: url,

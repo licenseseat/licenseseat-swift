@@ -469,6 +469,260 @@ final class OfflineValidationTests: LicenseSeatTestCase {
         XCTAssertEqual(result.code, "clock_tamper")
     }
 
+    // MARK: - Monotonic floor (#12)
+
+    private func cacheSignedToken(iat: Int, exp: Int) throws {
+        let privateKey = Curve25519.Signing.PrivateKey()
+        let offlineToken = try makeOfflineToken(
+            iat: iat,
+            exp: exp,
+            nbf: iat,
+            privateKey: privateKey
+        )
+        sdk.cache.setOfflineToken(offlineToken)
+        sdk.cache.setPublicKey(
+            "test-key-id",
+            Base64URL.encode(privateKey.publicKey.rawRepresentation)
+        )
+        cacheTestLicense()
+    }
+
+    func testInProcessRollbackAboveTheWatermarkCannotReviveAnExpiredToken() async throws {
+        // Verified at T (watermark T); the token expires at T+1h. Two real
+        // hours later the clock is wound back to T+30m: above the persisted
+        // watermark, below the expiry. Only the monotonic floor knows.
+        let source = ManualClockSource()
+        sdk.authorizationClock = source.makeTrustedClock()
+        let start = Int(source.wall)
+        try cacheSignedToken(iat: start - 60, exp: start + 3_600)
+
+        let first = await sdk.verifyCachedOffline()
+        XCTAssertTrue(first.valid, first.code ?? "")
+
+        source.elapse(7_200)
+        source.wall = Double(start + 1_800)
+
+        let second = await sdk.verifyCachedOffline()
+        XCTAssertFalse(second.valid)
+        XCTAssertEqual(second.code, "token_expired")
+    }
+
+    func testRollbackInAColdSessionIsLeftToTheWatermark() async throws {
+        // Without a trusted sample the floor does not apply (R2-1); a
+        // rollback below the watermark is still clock_tamper, as in 0.5.x.
+        let source = ManualClockSource()
+        sdk.authorizationClock = source.makeClock()
+        let start = Int(source.wall)
+        try cacheSignedToken(iat: start - 60, exp: start + 30 * 86_400)
+        let first = await sdk.verifyCachedOffline()
+        XCTAssertTrue(first.valid, first.code ?? "")
+
+        source.elapse(60)
+        source.wall -= 3_600
+        let second = await sdk.verifyCachedOffline()
+        XCTAssertFalse(second.valid)
+        XCTAssertEqual(second.code, "clock_tamper")
+    }
+
+    func testAFastLaunchClockCorrectedByNTPNeverExpiresAGrantEarly() async throws {
+        // R2-1: launched six minutes fast (beyond the 5-minute tolerance),
+        // corrected before verification; the token expires at real T+30m.
+        // At real T+29m it must still be valid.
+        let trueStart = Date().timeIntervalSince1970
+        let source = ManualClockSource(wall: trueStart + 360)
+        sdk.authorizationClock = source.makeClock()
+        try cacheSignedToken(iat: Int(trueStart) - 60, exp: Int(trueStart) + 1_800)
+
+        source.elapse(60)
+        source.wall = trueStart + 60
+        source.elapse(28 * 60)
+
+        let result = await sdk.verifyCachedOffline()
+        XCTAssertTrue(result.valid, result.code ?? "")
+    }
+
+    func testCorrectedFastClockIsNotPersistedSoRelaunchIsNotLockedOut() async throws {
+        // Launched with a clock an hour fast, corrected before the first
+        // verification. Persisting the synthetic floor would leave a watermark
+        // an hour in the future and fail the next launch with clock_tamper.
+        let trueStart = Date().timeIntervalSince1970
+        let source = ManualClockSource(wall: trueStart + 3_600)
+        sdk.authorizationClock = source.makeClock()
+        try cacheSignedToken(iat: Int(trueStart) - 60, exp: Int(trueStart) + 30 * 86_400)
+
+        source.elapse(60)
+        source.wall = trueStart + 60
+        let first = await sdk.verifyCachedOffline()
+        XCTAssertTrue(first.valid, first.code ?? "")
+        XCTAssertEqual(
+            try XCTUnwrap(sdk.lastSeenTimestamp()).timeIntervalSince1970,
+            trueStart + 60,
+            accuracy: 1
+        )
+
+        // Relaunch: a fresh process anchors on its own (correct) clock.
+        let relaunched = ManualClockSource(wall: trueStart + 120, monotonic: 1)
+        sdk.authorizationClock = relaunched.makeClock()
+        let second = await sdk.verifyCachedOffline()
+        XCTAssertTrue(second.valid, second.code ?? "")
+    }
+
+    func testReplacementInstanceSharesTheFloor() async throws {
+        // Recreating the SDK (configure(force: true), installShared) must not
+        // be a way to discard the in-process floor.
+        let config = sdk.config
+        let replacement = LicenseSeat(config: config, urlSession: Self.makeMockedSession())
+        defer { replacement.shutdown() }
+        XCTAssertTrue(replacement.authorizationClock === sdk.authorizationClock)
+
+        let other = LicenseSeat(
+            config: LicenseSeatConfig(storagePrefix: "offline_validation_other_\(UUID().uuidString)_")
+        )
+        defer { other.shutdown() }
+        XCTAssertFalse(other.authorizationClock === sdk.authorizationClock)
+    }
+
+    func testAnHTTPDateNeverMovesAuthorizationTime() async throws {
+        // R3-1/R3-2: a proxy's Date six minutes fast (beyond tolerance) must
+        // not expire grants early; HTTP Date is never a trusted sample.
+        let source = ManualClockSource()
+        sdk.authorizationClock = source.makeClock()
+        cacheTestLicense()
+        let body = try JSONSerialization.data(withJSONObject: [
+            "object": "validation_result", "valid": true, "code": NSNull(), "message": NSNull(),
+            "warnings": NSNull(),
+            "license": [
+                "object": "license", "key": Self.testLicenseKey, "status": "active",
+                "starts_at": NSNull(), "expires_at": NSNull(), "mode": "hardware_locked",
+                "plan_key": "pro", "seat_limit": 5, "active_seats": 1,
+                "active_entitlements": [], "metadata": NSNull(),
+                "product": ["slug": Self.testProductSlug, "name": "Test App"]
+            ],
+            "activation": NSNull()
+        ] as [String: Any])
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(identifier: "GMT")
+        formatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss 'GMT'"
+        let fastDate = formatter.string(from: Date(timeIntervalSince1970: source.wall + 360))
+        MockURLProtocol.requestHandler = { request in
+            (
+                HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil,
+                                headerFields: ["Content-Type": "application/json", "Date": fastDate])!,
+                body
+            )
+        }
+
+        _ = try await sdk.validate(licenseKey: Self.testLicenseKey)
+
+        XCTAssertFalse(sdk.authorizationClock.hasTrustedBaseline)
+        XCTAssertEqual(sdk.authorizationTime().timeIntervalSince1970, source.wall, accuracy: 0.001)
+    }
+
+    func testAFreshlyFetchedTokenAnchorsTheFloorOnItsSignedIssuance() async throws {
+        // The trusted sample is the verified signed iat of an artifact this
+        // process just fetched, not anything a proxy can write.
+        let source = ManualClockSource()
+        sdk.authorizationClock = source.makeClock()
+        cacheTestLicense()
+        let privateKey = Curve25519.Signing.PrivateKey()
+        let issuedAt = Int(source.wall) - 120
+        let token = try makeOfflineToken(
+            iat: issuedAt, exp: issuedAt + 30 * 86_400, nbf: issuedAt, privateKey: privateKey
+        )
+        sdk.cache.setPublicKey("test-key-id", Base64URL.encode(privateKey.publicKey.rawRepresentation))
+        let tokenData = try JSONEncoder().encode(token)
+        MockURLProtocol.requestHandler = { request in
+            guard request.url?.path.hasSuffix("/offline-token") == true else {
+                throw URLError(.notConnectedToInternet)
+            }
+            return (
+                HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil,
+                                headerFields: ["Content-Type": "application/json"])!,
+                tokenData
+            )
+        }
+
+        await sdk.syncOfflineAssets()
+
+        XCTAssertNotNil(sdk.cache.getOfflineToken())
+        XCTAssertTrue(sdk.authorizationClock.hasTrustedBaseline)
+        source.elapse(60)
+        source.wall -= 3_600 // rolled back an hour
+        XCTAssertEqual(
+            sdk.authorizationTime().timeIntervalSince1970,
+            Double(issuedAt + 60 - 300),
+            accuracy: 0.001
+        )
+    }
+
+    func testAnImplausibleServerDateNeverAdvancesAuthorizationTime() async throws {
+        // R2-1: an otherwise valid response whose Date says 2099.
+        let source = ManualClockSource()
+        sdk.authorizationClock = source.makeClock()
+        cacheTestLicense()
+        let body = try JSONSerialization.data(withJSONObject: [
+            "object": "validation_result", "valid": true, "code": NSNull(), "message": NSNull(),
+            "warnings": NSNull(),
+            "license": [
+                "object": "license", "key": Self.testLicenseKey, "status": "active",
+                "starts_at": NSNull(), "expires_at": NSNull(), "mode": "hardware_locked",
+                "plan_key": "pro", "seat_limit": 5, "active_seats": 1,
+                "active_entitlements": [], "metadata": NSNull(),
+                "product": ["slug": Self.testProductSlug, "name": "Test App"]
+            ],
+            "activation": NSNull()
+        ] as [String: Any])
+        MockURLProtocol.requestHandler = { request in
+            (
+                HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil,
+                                headerFields: ["Content-Type": "application/json",
+                                               "Date": "Thu, 01 Jan 2099 00:00:00 GMT"])!,
+                body
+            )
+        }
+
+        _ = try await sdk.validate(licenseKey: Self.testLicenseKey)
+
+        XCTAssertFalse(sdk.authorizationClock.hasTrustedBaseline)
+        XCTAssertEqual(sdk.authorizationTime().timeIntervalSince1970, source.wall, accuracy: 0.001)
+    }
+
+    func testForwardThenBackwardTamperingIsStillCaughtByTheWatermark() async throws {
+        let source = ManualClockSource()
+        sdk.authorizationClock = source.makeClock()
+        let start = Int(source.wall)
+        try cacheSignedToken(iat: start - 60, exp: start + 30 * 86_400)
+
+        source.elapse(30)
+        source.wall += 2 * 86_400 // jumped forward and verified there
+        let forward = await sdk.verifyCachedOffline()
+        XCTAssertTrue(forward.valid, forward.code ?? "")
+
+        source.elapse(30)
+        source.wall = Double(start + 60) // and back again
+
+        let back = await sdk.verifyCachedOffline()
+        XCTAssertFalse(back.valid)
+        XCTAssertEqual(back.code, "clock_tamper")
+    }
+
+    func testRelaunchWithAnHonestClockIsUnaffectedByAPreviousProcessFloor() async throws {
+        // The floor is process-local: a fresh instance (relaunch, reboot)
+        // anchors on its own wall clock and trusts it like before.
+        let source = ManualClockSource()
+        sdk.authorizationClock = source.makeClock()
+        let start = Int(source.wall)
+        try cacheSignedToken(iat: start - 60, exp: start + 30 * 86_400)
+        let first = await sdk.verifyCachedOffline()
+        XCTAssertTrue(first.valid, first.code ?? "")
+
+        let relaunched = ManualClockSource(wall: source.wall + 120, monotonic: 1)
+        sdk.authorizationClock = relaunched.makeClock()
+        let second = await sdk.verifyCachedOffline()
+        XCTAssertTrue(second.valid, second.code ?? "")
+    }
+
     func testLicenseKeyMismatch() async throws {
         // Given: Offline token with different key than cached license
         let privateKey = Curve25519.Signing.PrivateKey()
