@@ -109,6 +109,39 @@ final class StorageReadFailureTests: LicenseSeatTestCase {
         }
     }
 
+    func testActivationOverAnUnreadableStoreSendsNothingAndKeepsTheActivation() async throws {
+        var requests: [String] = []
+        MockURLProtocol.requestHandler = { request in
+            requests.append(request.url?.path ?? "")
+            throw URLError(.notConnectedToInternet)
+        }
+        let before = try XCTUnwrap(sdk.cache.getLicense())
+        var activationErrors = 0
+        let subscription = sdk.on(.activationError) { _ in activationErrors += 1 }
+        defer { subscription.cancel() }
+        sdk.cache.simulatedReadFailures = [LicenseCache.Key.license]
+
+        do {
+            _ = try await sdk.activate(licenseKey: "STORAGE-KEY-0002")
+            XCTFail("expected a storage error")
+        } catch let error as LicenseSeatError {
+            XCTAssertEqual(error, .cacheError)
+        }
+
+        let deadline = Date().addingTimeInterval(5)
+        while activationErrors == 0, Date() < deadline {
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        XCTAssertEqual(activationErrors, 1)
+        XCTAssertEqual(requests.filter { $0.hasSuffix("/activate") }, [], "no activation request")
+        XCTAssertTrue(requests.isEmpty, "no request at all: \(requests)")
+        sdk.cache.simulatedReadFailures = []
+        let after = try XCTUnwrap(sdk.cache.getLicense())
+        XCTAssertEqual(after.licenseKey, before.licenseKey)
+        XCTAssertEqual(after.activationId, before.activationId)
+        XCTAssertEqual(after.deviceId, before.deviceId)
+    }
+
     func testAnUnreadableDecisionStoreIsNeverReadAsNoDenial() async throws {
         sdk.cache.simulatedReadFailures = [LicenseCache.Key.authoritativeDenial]
         XCTAssertTrue(sdk.authoritativeDenialApplies())

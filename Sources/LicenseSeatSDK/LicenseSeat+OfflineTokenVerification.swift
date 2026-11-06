@@ -215,7 +215,17 @@ extension LicenseSeat {
     /// never a later re-sample — so a relaunch with a correct clock is never
     /// compared with a synthetic future.
     func persistOfflineClockState(_ instant: AuthorizationInstant, clockSkewSeconds: Int) throws {
-        if let lastSeen = cache.getLastSeenTimestamp(),
+        // An unreadable watermark is unknown, not absent: the rollback check
+        // must never be skipped (the Keychain could unlock before the ratchet
+        // below and let a rolled-back clock through).
+        guard !cache.lastSeenTimestampIsUnreadable() else {
+            throw OfflineVerificationFailure(code: "cache_error")
+        }
+        let lastSeen = cache.getLastSeenTimestamp()
+        guard !cache.lastSeenTimestampReadFailed else {
+            throw OfflineVerificationFailure(code: "cache_error")
+        }
+        if let lastSeen,
            instant.effective.timeIntervalSince1970 + Double(clockSkewSeconds) < lastSeen {
             throw OfflineVerificationFailure(code: "clock_tamper")
         }

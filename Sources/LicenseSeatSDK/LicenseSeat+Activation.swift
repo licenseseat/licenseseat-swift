@@ -35,6 +35,16 @@ public extension LicenseSeat {
             productSlug: productSlug,
             licenseKey: licenseKey
         )
+        // An unreadable activation store is unknown, not empty: activating
+        // over it could replace (or, on a failed commit, clear) an existing
+        // activation. Refuse before choosing a fingerprint or sending anything.
+        if cache.licenseIsUnreadable() {
+            eventBus.emit(.activationError, [
+                "licenseKey": licenseKey,
+                "error": LicenseSeatError.cacheError
+            ])
+            throw LicenseSeatError.cacheError
+        }
 
         let deviceId: String
         do {

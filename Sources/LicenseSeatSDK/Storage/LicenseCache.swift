@@ -59,6 +59,10 @@ final class LicenseCache {
     /// would. Always empty in production.
     var simulatedReadFailures: Set<String> = []
 
+    /// Keys whose next N protected reads fail, then succeed (a Keychain that
+    /// unlocks mid-operation). Always empty in production.
+    var simulatedReadFailureCounts: [String: Int] = [:]
+
     /// Keys whose most recent protected read failed for a reason other than
     /// "not found" (for example `errSecInteractionNotAllowed` while the
     /// Keychain is locked, or `errSecAuthFailed`). A `nil` read of such a key
@@ -76,6 +80,9 @@ final class LicenseCache {
         let outcome: ProtectedReadOutcome
         if simulatedReadFailures.contains(key) {
             outcome = .failed
+        } else if let remaining = simulatedReadFailureCounts[key], remaining > 0 {
+            simulatedReadFailureCounts[key] = remaining - 1
+            outcome = .failed
         } else {
             outcome = platformReadProtectedOutcome(forKey: key)
         }
@@ -85,6 +92,25 @@ final class LicenseCache {
             failedReadKeys.remove(key)
         }
         return outcome
+    }
+
+    /// Whether the cached activation exists but cannot be read right now
+    /// (fresh read; absence is not a failure).
+    func licenseIsUnreadable() -> Bool {
+        if case .failed = readProtectedOutcome(forKey: Key.license) { return true }
+        return false
+    }
+
+    /// Whether the rollback watermark exists but cannot be read right now
+    /// (fresh read; absence is not a failure).
+    func lastSeenTimestampIsUnreadable() -> Bool {
+        if case .failed = readProtectedOutcome(forKey: Key.lastSeenTimestamp) { return true }
+        return false
+    }
+
+    /// Whether the most recent read of the rollback watermark failed.
+    var lastSeenTimestampReadFailed: Bool {
+        failedReadKeys.contains(Key.lastSeenTimestamp)
     }
 
     /// Read a protected item; `nil` for absent *or* unreadable (see
