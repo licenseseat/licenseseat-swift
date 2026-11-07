@@ -37,7 +37,7 @@ extension LicenseSeat {
     ///   verification passes `false`.
     /// - Returns: `nil` only when `allowNetwork` is `false` and the signing key
     ///   is not cached, i.e. when the artifact cannot be examined locally.
-    func verifyCachedMachineFileForAuthorization(
+    func verifyCachedMachineFileForAuthorization( // swiftlint:disable:this cyclomatic_complexity
         _ machineFile: MachineFile,
         allowNetwork: Bool
     ) async -> ValidationResponse? {

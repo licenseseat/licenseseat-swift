@@ -21,12 +21,14 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Xcode 15.4 - Swift 5.10 (macOS 14)
-          - xcode: "15.4"
-            runner: macos-14
-          # Xcode 16.2 - Swift 6.0 (macOS 15)
+          # Xcode 16.2 - Swift 6.0 (macOS 15): oldest Xcode on a supported
+          # hosted image. The Swift 5.10 compiler floor moved to the
+          # test-linux-floor job when macos-14 was retired (2026-11-02).
           - xcode: "16.2"
             runner: macos-15
+          # Xcode 26.3 - Swift 6.2 (macOS 26)
+          - xcode: "26.3"
+            runner: macos-26
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
@@ -77,12 +79,22 @@ jobs:
       # compiler-floor lane can load it. Exercise the current exact dependency
       # surface here as well; downstream package consumers resolve according to
       # their own root lockfiles.
+      # SwiftASN1 is a transitive dependency of SwiftCrypto, not a security
+      # pin: the check only proves the floor lock was discarded and a fresh
+      # resolution reached the current (tools-version 6.1+) generation. It
+      # used to assert exactly 1.7.1, which broke as soon as upstream shipped
+      # 1.7.4. Asserting a minimum keeps the intent without going stale.
       - name: Resolve current SwiftASN1
         run: |
           rm Package.resolved
           swift package resolve
-          swift package show-dependencies --format text \
-            | grep -Fq 'swift-asn1<https://github.com/apple/swift-asn1.git@1.7.1>'
+          resolved="$(swift package show-dependencies --format text \
+            | sed -n 's|.*swift-asn1<https://github.com/apple/swift-asn1.git@\([0-9][0-9.]*\)>.*|\1|p' \
+            | head -n 1)"
+          minimum=1.7.1
+          echo "Fresh resolution selected SwiftASN1 ${resolved:-<none>}"
+          test -n "$resolved"
+          test "$(printf '%s\n%s\n' "$minimum" "$resolved" | sort -V | head -n 1)" = "$minimum"
 
       - name: Strict production build
         run: >-
@@ -92,6 +104,29 @@ jobs:
 
       - name: Strict test suite
         run: Scripts/test-linux.sh
+
+  test-linux-floor:
+    name: Test on Linux (Swift 5.10 compiler floor)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Package.swift declares swift-tools-version 5.10 and the committed
+    # Package.resolved pins SwiftASN1 1.4.0 for this lane. Hosted macOS images
+    # no longer ship Xcode 15.4, so the floor is exercised on Linux.
+    container: swift:5.10.1-jammy@sha256:ffc42e399ad0cad324f68d58f65e4d5f2c22eb9df73c4dfa249e898d497254b3
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Swift version
+        run: swift --version
+
+      - name: Build with the committed lockfile
+        run: swift build --force-resolved-versions
+
+      # Strict concurrency + warnings-as-errors is enforced by the Swift 6.2
+      # lane; Swift 5.10's Sendable diagnostics differ, so the floor lane
+      # proves the package compiles and its tests pass on that toolchain.
+      - name: Test suite
+        run: swift test --force-resolved-versions
 
   integration-harnesses:
     name: Build examples and live integration harness

@@ -6,6 +6,10 @@
 //  Copyright © 2025 LicenseSeat. All rights reserved.
 //
 
+// These files hold the security-critical state machine and stay whole for
+// review; splitting them would widen private members to fileprivate/internal.
+// swiftlint:disable file_length
+
 import Foundation
 #if canImport(CryptoKit)
 import CryptoKit

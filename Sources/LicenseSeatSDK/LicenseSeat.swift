@@ -6,6 +6,10 @@
 //  Copyright © 2025 LicenseSeat. All rights reserved.
 //
 
+// These files hold the security-critical state machine and stay whole for
+// review; splitting them would widen private members to fileprivate/internal.
+// swiftlint:disable file_length
+
 #if canImport(FoundationNetworking)
 import FoundationNetworking
 #endif
@@ -175,7 +179,7 @@ public final class LicenseSeat {
     /// activation it was made for. Anything persisted by a previous process
     /// is untrusted until an online response or verified offline artifact
     /// re-establishes it. See ``isLicenseStateTrusted``.
-    internal var runtimeTrust: (
+    internal var runtimeTrust: ( // swiftlint:disable:this large_tuple
         identity: CachedLicenseIdentity,
         source: TrustedLicenseSource,
         validation: ValidationResponse?
@@ -231,7 +235,7 @@ public final class LicenseSeat {
     }
 
     /// Initialize SDK components
-    private func initialize() async {
+    private func initialize() async { // swiftlint:disable:this cyclomatic_complexity
         guard !Task.isCancelled else { return }
         // Configuration contains authentication and installation-adjacent
         // values. Never interpolate it into automatic logs.
