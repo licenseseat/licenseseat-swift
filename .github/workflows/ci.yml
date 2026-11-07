@@ -21,12 +21,17 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Xcode 15.4 - Swift 5.10 (macOS 14)
-          - xcode: "15.4"
-            runner: macos-14
-          # Xcode 16.2 - Swift 6.0 (macOS 15)
+          # Xcode 16.2 - Swift 6.0 (macOS 15): oldest Xcode on a supported
+          # hosted image, and still needs the committed SwiftASN1 1.4.0 lock
+          # (1.7.x manifests are tools-version 6.1). Xcode 15.4 / Swift 5.10
+          # left with macos-14 (retired 2026-11-02) and has no hosted
+          # replacement; Linux 5.10 cannot stand in, since the SDK relies on
+          # Foundation APIs that 5.10's corelibs-foundation lacks.
           - xcode: "16.2"
             runner: macos-15
+          # Xcode 26.3 - Swift 6.2 (macOS 26)
+          - xcode: "26.3"
+            runner: macos-26
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
@@ -73,16 +78,26 @@ jobs:
       - name: Swift version
         run: swift --version
 
-      # The repository lockfile stays on SwiftASN1 1.4.x so the Swift 5.10
-      # compiler-floor lane can load it. Exercise the current exact dependency
+      # The repository lockfile stays on SwiftASN1 1.4.x so the Swift 6.0
+      # (Xcode 16.2) lane can load it. Exercise the current exact dependency
       # surface here as well; downstream package consumers resolve according to
       # their own root lockfiles.
+      # SwiftASN1 is a transitive dependency of SwiftCrypto, not a security
+      # pin: the check only proves the floor lock was discarded and a fresh
+      # resolution reached the current (tools-version 6.1+) generation. It
+      # used to assert exactly 1.7.1, which broke as soon as upstream shipped
+      # 1.7.4. Asserting a minimum keeps the intent without going stale.
       - name: Resolve current SwiftASN1
         run: |
           rm Package.resolved
           swift package resolve
-          swift package show-dependencies --format text \
-            | grep -Fq 'swift-asn1<https://github.com/apple/swift-asn1.git@1.7.1>'
+          resolved="$(swift package show-dependencies --format text \
+            | sed -n 's|.*swift-asn1<https://github.com/apple/swift-asn1.git@\([0-9][0-9.]*\)>.*|\1|p' \
+            | head -n 1)"
+          minimum=1.7.1
+          echo "Fresh resolution selected SwiftASN1 ${resolved:-<none>}"
+          test -n "$resolved"
+          test "$(printf '%s\n%s\n' "$minimum" "$resolved" | sort -V | head -n 1)" = "$minimum"
 
       - name: Strict production build
         run: >-

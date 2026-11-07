@@ -134,7 +134,11 @@ final class StorageReadFailureTests: LicenseSeatTestCase {
         }
         XCTAssertEqual(activationErrors, 1)
         XCTAssertEqual(requests.filter { $0.hasSuffix("/activate") }, [], "no activation request")
-        XCTAssertTrue(requests.isEmpty, "no request at all: \(requests)")
+        // GET /health is the parameterless connectivity probe. MockURLProtocol's
+        // handler is process-global, so a probe from another test's still-
+        // polling SDK instance can land here; it carries no license data.
+        let licenseRequests = requests.filter { !$0.hasSuffix("/health") }
+        XCTAssertTrue(licenseRequests.isEmpty, "no license request at all: \(requests)")
         sdk.cache.simulatedReadFailures = []
         let after = try XCTUnwrap(sdk.cache.getLicense())
         XCTAssertEqual(after.licenseKey, before.licenseKey)

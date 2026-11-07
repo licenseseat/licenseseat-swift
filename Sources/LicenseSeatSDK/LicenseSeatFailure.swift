@@ -308,7 +308,7 @@ public enum LicenseSeatFailure: Error, Equatable, Sendable {
         "seat_limit_exceeded", "device_limit_reached"
     ]
 
-    private static func category(of error: APIError) -> Category {
+    private static func category(of error: APIError) -> Category { // swiftlint:disable:this cyclomatic_complexity
         let code = error.code?.lowercased()
         if let code {
             if configurationCodes.contains(code) { return .configuration }

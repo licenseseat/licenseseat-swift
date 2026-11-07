@@ -6,6 +6,10 @@
 //  Copyright © 2025 LicenseSeat. All rights reserved.
 //
 
+// These files hold the security-critical state machine and stay whole for
+// review; splitting them would widen private members to fileprivate/internal.
+// swiftlint:disable file_length
+
 import Foundation
 
 extension LicenseSeat {
@@ -234,7 +238,7 @@ extension LicenseSeat {
     /// Emits `offlineAssets:ready` (`artifact`: `"machine_file"` or
     /// `"offline_token"`) when either artifact was refreshed, and
     /// `offlineAssets:fetchError` when none was.
-    public func syncOfflineAssets() async {
+    public func syncOfflineAssets() async { // swiftlint:disable:this cyclomatic_complexity
         guard config.offlineAuthorityEnabled else {
             stopOfflineRefresh()
             return

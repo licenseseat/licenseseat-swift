@@ -264,7 +264,9 @@ extension LicenseSeat {
         if trimmed.hasPrefix("v") { trimmed.removeFirst() }
         let numeric = "(0|[1-9][0-9]*)"
         let identifier = "(0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*)"
-        let semver = "^\(numeric)\\.\(numeric)\\.\(numeric)(-\(identifier)(\\.\(identifier))*)?(\\+[0-9a-zA-Z-]+(\\.[0-9a-zA-Z-]+)*)?$"
+        let prerelease = "(-\(identifier)(\\.\(identifier))*)?"
+        let build = "(\\+[0-9a-zA-Z-]+(\\.[0-9a-zA-Z-]+)*)?"
+        let semver = "^\(numeric)\\.\(numeric)\\.\(numeric)\(prerelease)\(build)$"
         let core: Substring
         if trimmed.range(of: semver, options: .regularExpression) != nil {
             core = trimmed.split(whereSeparator: { $0 == "-" || $0 == "+" }).first ?? ""
